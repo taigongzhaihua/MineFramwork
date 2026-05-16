@@ -1,0 +1,8 @@
+rule("mine.mml")
+    set_extensions(".mml")
+    before_buildcmd_file(function (_, _, sourcefile)
+        raise("mine.mml 规则尚未接入 tool.mmlc，当前文件无法编译：%s", sourcefile)
+    end)
+rule_end()rule("mine.mml.compile")
+    set_extensions(".mml")
+rule_end()

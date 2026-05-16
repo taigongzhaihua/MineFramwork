@@ -1,0 +1,20 @@
+{
+    "name": "mineframework-vscode",
+    "displayName": "MineFramework",
+    "description": "MineFramework MML 语言支持外壳扩展",
+    "version": "0.1.0",
+    "private": true,
+    "engines": {
+        "vscode": "^1.100.0"
+    },
+    "categories": [
+        "Programming Languages"
+    ],
+    "activationEvents": [],
+    "main": "./dist/extension.js",
+    "contributes": {},
+    "scripts": {
+        "build": "echo 扩展构建将在后续阶段补齐",
+        "watch": "echo 扩展监听将在后续阶段补齐"
+    }
+}

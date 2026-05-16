@@ -1,0 +1,15 @@
+target("mineui")
+    set_kind("phony")
+    set_default(false)
+    set_group("meta")
+    add_deps(
+        "mine.core",
+        "mine.containers",
+        "mine.diag",
+        "mine.async",
+        "mine.io",
+        "mine.math",
+        "mine.text",
+        "mine.reflect"
+    )
+target_end()

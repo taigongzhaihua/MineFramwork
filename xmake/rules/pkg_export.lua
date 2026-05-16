@@ -1,0 +1,5 @@
+rule("mine.pkg_export")
+    on_load(function (_) 
+    end)
+rule_end()rule("mine.pkg.export")
+rule_end()
