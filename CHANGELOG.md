@@ -20,7 +20,8 @@
   - `Variant.h`：无 RTTI 类型擦除值容器，16 字节 SBO，支持 `has<T>`/`get<T>`/`emplace<T>`/`any_cast`
   - `Core.h`：伞形头文件，一次 include 引入全部 core 子头
   - `DefaultAllocator.cpp`：`MallocAllocator`（Windows/Linux 对齐分配）、`assertion_failed` 实现
-  - `CoreTest.cpp`：61 个测试用例，142 个断言，全部通过- **containers**：实现 `mine.containers` 高性能容器模块（无 RTTI、无 STL 容器头、使用 IAllocator）：
+  - `CoreTest.cpp`：61 个测试用例，142 个断言，全部通过
+- **containers**：实现 `mine.containers` 高性能容器模块（无 RTTI、无 STL 容器头、使用 IAllocator）：
   - `Hash.h`：`Hash<T>`/`Equal<T>` 模板，含整数/指针/float/double/StringView 特化，FNV-1a 哈希
   - `Vector.h`：`Vector<T>` 动态数组，2 倍增长策略，平凡类型 memcpy/memmove 优化
   - `SmallVector.h`：`SmallVector<T,N>` 内联缓冲区优化数组，超出 N 自动切换堆分配
@@ -29,3 +30,12 @@
   - `IntrusiveList.h`：`IntrusiveList<T>`/`IntrusiveListNode<T>` 侵入式双向链表
   - `Containers.h`：伞形头文件，含 `Hash<InlineString>` 特化
   - `ContainersTest.cpp`：86 个测试用例，418 断言，全部通过（doctest）
+- **math**：实现 `mine.math` 数学基础模块，覆盖二维/三维向量、矩阵、几何、颜色与二维变换：
+  - `Common.h`：浮点容差、`clamp`/`clamp01`/`lerp`、角度弧度转换
+  - `Vec2.h` / `Vec3.h` / `Vec4.h`：浮点向量，支持算术、点积、叉积、归一化
+  - `Mat3.h` / `Mat4.h`：行主序矩阵，支持平移/缩放/旋转、矩阵乘法与点/向量变换
+  - `Point.h` / `Size.h` / `Rect.h` / `RoundedRect.h`：二维几何基础类型与包含/相交/并集等操作
+  - `Color.h`：线性空间 RGBA 颜色，支持 8 位打包转换、预乘与 Alpha 混合
+  - `Transform2D.h`：二维仿射变换封装，支持组合、逆变换与矩形包围盒映射
+  - `Math.h`：伞形头文件
+  - `MathTest.cpp`：25 个测试用例，68 个断言，全部通过（doctest）
