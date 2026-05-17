@@ -32,6 +32,8 @@
 | 17 | [17-repo-layout.md](17-repo-layout.md) | 仓库目录布局 |
 | 18 | [18-coding-conventions.md](18-coding-conventions.md) | 编码规范、命名、错误处理 |
 | 19 | [19-roadmap.md](19-roadmap.md) | 路线图与里程碑 |
+| 20 | [20-style-template.md](20-style-template.md) | 样式、模板与主题系统设计 |
+| 21 | [21-core-api.md](21-core-api.md) | mine.core 模块 API 文档 |
 
 ## 一句话定位
 

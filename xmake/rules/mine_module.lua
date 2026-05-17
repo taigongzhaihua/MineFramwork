@@ -18,6 +18,7 @@ local function apply_platform_defines(public_visibility)
         add_defines("UNICODE", "_UNICODE", "NOMINMAX", "WIN32_LEAN_AND_MEAN", {
             public = public_visibility
         })
+        add_cxflags("/utf-8", {tools = {"cl", "clang_cl"}})
     end
 end
 
