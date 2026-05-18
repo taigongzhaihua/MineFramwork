@@ -29,7 +29,7 @@ int main(int /*argc*/, char* /*argv*/[])
     desc.size          = {800.0f, 600.0f};
     desc.auto_position = true;
     desc.resizable     = true;
-    desc.kind          = mine::platform::WindowKind::Popup; // 试试不同的窗口类型（Normal / Tool / Dialog / Splash / Popup）
+    desc.kind          = mine::platform::WindowKind::Splash; // 试试不同的窗口类型（Normal / Tool / Dialog / Splash / Popup）
 
     // 创建窗口
     auto window = host->create_window(desc);

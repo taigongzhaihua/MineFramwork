@@ -80,18 +80,13 @@ Win32Window::Win32Window(const WindowDesc& desc, WindowDestroyCallback on_destro
         ex_style |= WS_EX_LAYERED;
     }
 
+    // 保存窗口类型，供后续 show() 等行为判断
+    kind_ = desc.kind;
+
     // 先用临时 DPI=96 估算初始物理尺寸，创建后再根据实际 DPI 调整
     constexpr float kDefaultDpi = 96.0f;
     const int phys_w = static_cast<int>(desc.size.width  * kDefaultDpi / 96.0f);
     const int phys_h = static_cast<int>(desc.size.height * kDefaultDpi / 96.0f);
-
-    // 计算窗口初始位置
-    int x = CW_USEDEFAULT;
-    int y = CW_USEDEFAULT;
-    if (!desc.auto_position) {
-        x = static_cast<int>(desc.position.x * kDefaultDpi / 96.0f);
-        y = static_cast<int>(desc.position.y * kDefaultDpi / 96.0f);
-    }
 
     // 父窗口句柄
     HWND parent_hwnd = nullptr;
@@ -100,10 +95,32 @@ Win32Window::Win32Window(const WindowDesc& desc, WindowDestroyCallback on_destro
     }
 
     // 将客户区尺寸换算为窗口尺寸（包含标题栏、边框）
+    // 注意：必须先算窗口尺寸，WS_POPUP 居中时需要用到
     RECT window_rect{0, 0, phys_w, phys_h};
     AdjustWindowRectEx(&window_rect, style, FALSE, ex_style);
     const int window_w = window_rect.right  - window_rect.left;
     const int window_h = window_rect.bottom - window_rect.top;
+
+    // 计算窗口初始位置
+    // CW_USEDEFAULT 只对 WS_OVERLAPPEDWINDOW 有效；WS_POPUP 窗口须手动居中，
+    // 否则部分 Windows 版本会将窗口定位到屏幕外导致不可见。
+    int x = CW_USEDEFAULT;
+    int y = CW_USEDEFAULT;
+    if (desc.auto_position) {
+        if (style & WS_POPUP) {
+            // 在主显示器上居中
+            const int screen_w = GetSystemMetrics(SM_CXSCREEN);
+            const int screen_h = GetSystemMetrics(SM_CYSCREEN);
+            x = (screen_w - window_w) / 2;
+            y = (screen_h - window_h) / 2;
+            if (x < 0) { x = 0; }
+            if (y < 0) { y = 0; }
+        }
+        // else: WS_OVERLAPPEDWINDOW 使用系统默认级联位置（CW_USEDEFAULT）
+    } else {
+        x = static_cast<int>(desc.position.x * kDefaultDpi / 96.0f);
+        y = static_cast<int>(desc.position.y * kDefaultDpi / 96.0f);
+    }
 
     // 将 UTF-8 标题转为 UTF-16
     const std::wstring title_w = utf8_to_utf16(desc.title);
@@ -151,10 +168,15 @@ Win32Window::~Win32Window() {
 // ── IWindow 接口实现 ──────────────────────────────────────────────────────────
 
 void Win32Window::show() {
-    if (hwnd_) {
-        ShowWindow(hwnd_, SW_SHOWNORMAL);
-        UpdateWindow(hwnd_);
+    if (!hwnd_) {
+        return;
     }
+    // Popup/Splash 不应抢占键盘焦点；其余类型激活并显示
+    const int cmd = (kind_ == WindowKind::Popup || kind_ == WindowKind::Splash)
+                        ? SW_SHOWNOACTIVATE
+                        : SW_SHOWNORMAL;
+    ShowWindow(hwnd_, cmd);
+    UpdateWindow(hwnd_);
 }
 
 void Win32Window::hide() {

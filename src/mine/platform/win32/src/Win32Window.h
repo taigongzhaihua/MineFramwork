@@ -96,6 +96,7 @@ private:
 private:
     HWND                     hwnd_{nullptr};
     float                    dpi_{96.0f};
+    WindowKind               kind_{WindowKind::Normal}; ///< 窗口类型（决定 show() 行为等）
     Win32WindowEventSource   event_source_;
     WindowDestroyCallback    on_destroy_;
 };
