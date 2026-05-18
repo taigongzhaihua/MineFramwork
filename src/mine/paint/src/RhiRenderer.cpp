@@ -165,14 +165,55 @@ float complex_rounded_box_sdf(float2 p, float2 b, float4 r) {
     return length(max(q, 0.0f)) + min(max(q.x, q.y), 0.0f) - r.x;
 }
 
-// 椭圆 SDF（IQ 近似，适用于中等扁率椭圆）
-// 原式 d = (k1-1)*k1/k2，数学上等价于 (k1-1)/k2_unit（k2_unit = k2/k1 为有限常数）。
-// 但在中心点 k1=k2=0 时，浮点先算 (k1-1)*k1 = -1*0 = 0，导致 d=0（应为 -min(a,b)）。
-// 修复：将分子中第二个 k1 clamp 至 1e-4f，中心点得到 d ≈ -100（深度内部），消除缺色。
+// 椭圆精确 SDF（IQ 解析公式，通过三次方程求最近点，任意椭圆率均精确）
+// 来源：https://iquilezles.org/articles/ellipsedist/
+// 算法：将椭圆最近点问题转化为一元三次方程，分两个分支求解（d<0 用 acos，d>=0 用立方根）。
+// 约定：外正内负（返回值正=外部，负=内部），与其余 SDF 保持一致。
 float ellipse_sdf(float2 p, float2 ab) {
-    float k1 = length(p / ab);
-    float k2 = length(p / (ab * ab));
-    return (k1 - 1.0f) * max(k1, 1e-4f) / max(k2, 1e-6f);
+    // 将问题折叠到第一象限；确保 ab.y >= ab.x（长轴在 y 方向）
+    // 若 a > b（x 轴为长轴），交换两轴，将问题等价变换为 b' > a' 的情况
+    p = abs(p);
+    if (ab.x > ab.y) { p = p.yx; ab = ab.yx; }
+    // 圆形特殊处理（l = 0 → m/n 分母为零）
+    float l = ab.y*ab.y - ab.x*ab.x;
+    if (l < 1e-4f) return length(p) - ab.x;
+    float m  = ab.x*p.x / l;   float m2 = m*m;
+    float n  = ab.y*p.y / l;   float n2 = n*n;
+    float c  = (m2 + n2 - 1.0f) / 3.0f;
+    float c3 = c*c*c;
+    float q  = c3 + m2*n2*2.0f;
+    float d  = c3 + m2*n2;
+    float g  = m + m*n2;
+
+    float co;
+    if (d < 0.0f) {
+        // 三个实根分支：用 acos 公式
+        // d<0 分支中 c<0（故 c3<0），直接除（无零值风险），再 clamp 至 [-1,1] 保证 acos 稳定
+        float h  = acos(clamp(q / c3, -1.0f, 1.0f)) / 3.0f;
+        float s  = cos(h);
+        float t  = sin(h) * 1.7320508f;  // sqrt(3)
+        float rx = sqrt(max(-c*(s + t + 2.0f) + m2, 0.0f));
+        float ry = sqrt(max(-c*(s - t + 2.0f) + m2, 0.0f));
+        co = (ry + sign(l)*rx + abs(g) / max(rx*ry, 1e-7f) - m) / 2.0f;
+    } else {
+        // 一个实根分支：用立方根公式
+        float h  = 2.0f*m*n*sqrt(d);
+        float s  = sign(q + h) * pow(abs(q + h), 1.0f/3.0f);
+        float u  = sign(q - h) * pow(abs(q - h), 1.0f/3.0f);
+        float rx = -s - u - c*4.0f + 2.0f*m2;
+        float ry = (s - u) * 1.7320508f;
+        float rm = sqrt(rx*rx + ry*ry);
+        // ry/sqrt(rm-rx) = sign(ry)*sqrt(rm+rx)（代数等价，避免 rm≈rx 时的下溢）
+        co = (sign(ry)*sqrt(max(rm + rx, 0.0f)) + 2.0f*g / max(rm, 1e-7f) - m) / 2.0f;
+    }
+
+    // co 为最近椭圆点的 x 归一化坐标，clamp 防止数值漂移超出 [0,1]
+    co = clamp(co, 0.0f, 1.0f);
+    float2 r = ab * float2(co, sqrt(max(1.0f - co*co, 0.0f)));
+    // 用椭圆方程判断内外：(p/ab)² - 1 < 0 = 内部（负）；> 0 = 外部（正）
+    // 比 sign(p.y-r.y) 更稳健，避免 p 在 x 轴时两者均为 0 导致 sign=0 的歧义
+    float inside = dot(p / ab, p / ab) - 1.0f;
+    return length(r - p) * sign(inside);
 }
 
 // ── 像素着色器主函数 ─────────────────────────────────────────────────────────
