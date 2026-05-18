@@ -322,6 +322,16 @@ LRESULT Win32Window::handle_message(
     HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) noexcept {
 
     switch (msg) {
+    // 擦除背景：填充系统窗口颜色，防止客户区像素未定义（尤其对无边框的 Popup/Splash）。
+    // 图形引擎（GFX 层）接管后，应用层可拦截此消息并返回 1 以跳过填充。
+    case WM_ERASEBKGND: {
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        FillRect(reinterpret_cast<HDC>(wparam), &client,
+                 reinterpret_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
+        return 1; // 非零表示背景已擦除，阻止系统再次擦除
+    }
+
     // 窗口尺寸改变
     case WM_SIZE: {
         if (wparam == SIZE_MINIMIZED) {
