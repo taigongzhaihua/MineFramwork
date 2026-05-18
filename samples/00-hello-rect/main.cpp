@@ -19,7 +19,7 @@
  *   行7 右：StrokeArc (Round cap)          — 半圆弧，圆形端点
  *   行8 左：StrokeQuadBezier (Flat cap)    — 二次贝塞尔抛物线，平端截断
  *   行8 右：StrokeQuadBezier (Round cap)   — 二次贝塞尔 S 形曲线，圆形端点
- *   行9 左：StrokeCubicBezier (Flat cap)   — 三次贝塞尔 S 形曲线，平端截断
+ *   行9 左：StrokeCubicBezier (Flat cap)   — 水平 S/反 S 对照曲线（蓝色4px + 橙色2px，同起同终）
  *   行9 右：StrokeCubicBezier (Round cap)  — 三次贝塞尔大 S 形，圆形端点
  */
 
@@ -343,7 +343,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         }
 
         // ── 行9 左：StrokeCubicBezier（Flat cap，S 形曲线）──────────────────
-        // 四个控制点组成标准 S 形，Flat cap 截断两端，体现三次贝塞尔的双曲率特性
+        // 两条水平 S/反 S 对照曲线（同起同终，弯曲方向相反），展示三次贝塞尔双曲率特性
         {
             const float bx = col0 + ip;
             const float by = row8 + ip;
@@ -353,24 +353,25 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
             pen_cub_flat.start_cap = mine::paint::LineCap::Flat;
             pen_cub_flat.end_cap   = mine::paint::LineCap::Flat;
 
-            // 主 S 形（Flat cap，蓝色）：P0 左上 → P1 右上（控制向右拱） → P2 左下（控制向左拱） → P3 右下
+            // 主 S 形（Flat cap，蓝色）：P0 左中 → P1 中下（下拉） → P2 中上（上拉） → P3 右中
+            // 从左中出发，先向下弯后向上弯，形成水平 S 形
             canvas.stroke_cubic_bezier(
-                mine::math::Vec2{bx,            by + sh * 0.1f},  // P0 左上
-                mine::math::Vec2{bx + sw,       by + sh * 0.1f},  // P1（向右拉）
-                mine::math::Vec2{bx,            by + sh * 0.9f},  // P2（向左拉）
-                mine::math::Vec2{bx + sw,       by + sh * 0.9f},  // P3 右下
+                mine::math::Vec2{bx,             by + sh * 0.5f},  // P0 左中
+                mine::math::Vec2{bx + sw * 0.5f, by + sh},          // P1 中下（向下拉）
+                mine::math::Vec2{bx + sw * 0.5f, by},               // P2 中上（向上拉）
+                mine::math::Vec2{bx + sw,        by + sh * 0.5f},  // P3 右中
                 mine::paint::Brush::solid(col_blue), pen_cub_flat);
 
-            // 细线对照：反向 S 形（Flat cap，橙色）
+            // 反 S 形（Flat cap，橙色）：与蓝色 S 形对称，先向上弯后向下弯
             mine::paint::Pen pen_cub_flat2;
             pen_cub_flat2.width     = 2.0f;
             pen_cub_flat2.start_cap = mine::paint::LineCap::Flat;
             pen_cub_flat2.end_cap   = mine::paint::LineCap::Flat;
             canvas.stroke_cubic_bezier(
-                mine::math::Vec2{bx + sw * 0.5f, by},                  // P0 顶中
-                mine::math::Vec2{bx,             by + sh * 0.33f},      // P1（向左）
-                mine::math::Vec2{bx + sw,        by + sh * 0.67f},      // P2（向右）
-                mine::math::Vec2{bx + sw * 0.5f, by + sh},              // P3 底中
+                mine::math::Vec2{bx,             by + sh * 0.5f},  // P0 左中
+                mine::math::Vec2{bx + sw * 0.5f, by},               // P1 中上（向上拉）
+                mine::math::Vec2{bx + sw * 0.5f, by + sh},          // P2 中下（向下拉）
+                mine::math::Vec2{bx + sw,        by + sh * 0.5f},  // P3 右中
                 mine::paint::Brush::solid(col_orange), pen_cub_flat2);
         }
 

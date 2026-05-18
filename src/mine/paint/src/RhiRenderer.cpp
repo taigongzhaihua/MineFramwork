@@ -578,7 +578,7 @@ R"hlsl(
         float4 cs8 = i.color;
         return float4(cs8.rgb * cs8.a * al8, cs8.a * al8);
     } else if (kind == 9) {
-        // ── 三次贝塞尔曲线描边 SDF（三区间候选 + Newton 精化）──
+        // ── 三次贝塞尔曲线描边 SDF（四区间候选 + Newton 精化）──
         //
         // 参数映射：
         //   half_w, half_h = P3 本地坐标；p2, p3 = P2 本地坐标
@@ -586,9 +586,10 @@ R"hlsl(
         //   extra.xy=P0, extra.zw=P1
         //
         // 三次贝塞尔点到曲线的距离函数最多有 3 个局部极小值。
-        // 将参数区间 [0,1] 分成 [0,1/3]、[1/3,2/3]、[2/3,1] 三段，
-        // 每段各用 12 步采样找最优候选，再各做 6 步 Newton 精化，
-        // 最终取三者中距离最小者，彻底消除局部极值遗漏导致的孤立亮斑。
+        // 三段方案的中段 [1/3,2/3] 对于 S 形曲线可能包含两个极小值（拐点
+        // 附近像素），两者都在中段内时候选 tb 只能覆盖其一，导致孤立亮斑。
+        // 改为四段方案 [0,1/4]、[1/4,1/2]、[1/2,3/4]、[3/4,1]，将中间区域
+        // 分成两段，保证两个极小值各自被不同候选覆盖。
         float2 Cb_A = i.extra.xy;               // P0（起点）
         float2 Cb_B = i.extra.zw;               // P1（第一控制点）
         float2 Cb_C = float2(p2, p3);           // P2（第二控制点）← 借用 p2/p3 槽
@@ -601,24 +602,26 @@ R"hlsl(
         float2 cb1 = -3.0f * Cb_A + 3.0f * Cb_B;
         float2 cb0 =  Cb_A;
 
-        // ── 阶段 1：三区间各 12 步采样，找三个独立候选 t ────────────────────
-        float ta = 0.0f,  tb = 0.5f,  tc = 1.0f;
-        float da_sq = 1e20f, db_sq = 1e20f, dc_sq = 1e20f;
+        // ── 阶段 1：四区间各 12 步采样，找四个独立候选 t ────────────────────
+        float ta = 0.0f, tb = 0.375f, tc = 0.625f, td = 1.0f;
+        float da_sq = 1e20f, db_sq = 1e20f, dc_sq = 1e20f, dd_sq = 1e20f;
         [unroll]
-        for (int si = 0; si <= 36; si++) {
-            float t = float(si) / 36.0f;
+        for (int si = 0; si <= 48; si++) {
+            float t = float(si) / 48.0f;
             float2 q = ((cb3 * t + cb2) * t + cb1) * t + cb0;
             float  dd = dot(p - q, p - q);
-            if (t <= 1.0f / 3.0f) {
+            if (t <= 0.25f) {
                 if (dd < da_sq) { ta = t; da_sq = dd; }
-            } else if (t <= 2.0f / 3.0f) {
+            } else if (t <= 0.5f) {
                 if (dd < db_sq) { tb = t; db_sq = dd; }
-            } else {
+            } else if (t <= 0.75f) {
                 if (dd < dc_sq) { tc = t; dc_sq = dd; }
+            } else {
+                if (dd < dd_sq) { td = t; dd_sq = dd; }
             }
         }
 
-        // ── 阶段 2：三个候选各做 6 步 Newton-Raphson 精化 ──────────────────
+        // ── 阶段 2：四个候选各做 6 步 Newton-Raphson 精化 ──────────────────
         // f(t) = dot(Q(t)-p, Q'(t)) = 0，牛顿步：t -= f / f'
         [unroll]
         for (int ni = 0; ni < 6; ni++) {
@@ -649,13 +652,24 @@ R"hlsl(
             float  fpc  = dot(dqc, dqc) + dot(dfc, d2qc);
             if (abs(fpc) > 1e-10f) tc -= fc / fpc;
             tc = clamp(tc, 0.0f, 1.0f);
+            // 候选 d
+            float2 qd   = ((cb3 * td + cb2) * td + cb1) * td + cb0;
+            float2 dqd  = (3.0f * cb3 * td + 2.0f * cb2) * td + cb1;
+            float2 d2qd = 6.0f * cb3 * td + 2.0f * cb2;
+            float2 dfd  = qd - p;
+            float  fd   = dot(dfd, dqd);
+            float  fpd  = dot(dqd, dqd) + dot(dfd, d2qd);
+            if (abs(fpd) > 1e-10f) td -= fd / fpd;
+            td = clamp(td, 0.0f, 1.0f);
         }
 
-        // ── 阶段 3：取三候选精化结果中距离最小者 ─────────────────────────
+        // ── 阶段 3：取四候选精化结果中距离最小者 ─────────────────────────
         float2 cla = ((cb3 * ta + cb2) * ta + cb1) * ta + cb0;
         float2 clb = ((cb3 * tb + cb2) * tb + cb1) * tb + cb0;
         float2 clc = ((cb3 * tc + cb2) * tc + cb1) * tc + cb0;
-        float d9 = min(min(length(p - cla), length(p - clb)), length(p - clc)) - half_sw9;
+        float2 cld = ((cb3 * td + cb2) * td + cb1) * td + cb0;
+        float d9 = min(min(length(p - cla), length(p - clb)),
+                       min(length(p - clc), length(p - cld))) - half_sw9;
 
         // Flat cap 截断（CSG max：端点切线半平面截断）
         int scap9 = (int)(p0 + 0.5f);
