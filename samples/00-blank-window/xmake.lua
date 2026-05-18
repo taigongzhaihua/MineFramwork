@@ -17,13 +17,12 @@ target("sample.00-blank-window")
 
     add_files("main.cpp")
 
-    -- Win32 GUI 子系统（不显示控制台窗口）
+    -- Win32 平台基础编译选项
     if is_plat("windows") then
         add_defines("UNICODE", "_UNICODE", "NOMINMAX", "WIN32_LEAN_AND_MEAN")
         add_cxflags("/utf-8", {tools = {"cl", "clang_cl"}})
-        -- /SUBSYSTEM:WINDOWS 隐藏控制台窗口；
-        -- /ENTRY:mainCRTStartup 让链接器接受标准 main() 而非 WinMain()
-        add_ldflags("/SUBSYSTEM:WINDOWS", "/ENTRY:mainCRTStartup",
-                    {tools = {"link", "lld-link"}, force = true})
+        -- 开发阶段使用默认 CONSOLE 子系统，xmake run 可直接启动。
+        -- 发布时若需隐藏控制台窗口，可改回：
+        --   add_ldflags("/SUBSYSTEM:WINDOWS", "/ENTRY:mainCRTStartup", ...)
     end
 target_end()
