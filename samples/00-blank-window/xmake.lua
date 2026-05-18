@@ -12,8 +12,8 @@ target("sample.00-blank-window")
     set_languages("cxx20")
     set_warnings("allextra")
 
-    -- 链接平台后端（自动传递依赖：mine.platform.abi / mine.core / mine.math）
-    add_deps("mine.platform.win32")
+    -- 链接平台后端与 D3D11 图形后端（自动传递依赖：mine.gfx.rhi / mine.core / mine.math）
+    add_deps("mine.platform.win32", "mine.gfx.d3d11")
 
     add_files("main.cpp")
 

@@ -71,3 +71,28 @@
   - `Win32ApplicationHostImpl`：IApplicationHost 实现，GetMessage 消息循环，最后一个窗口关闭时自动 PostQuitMessage(0)
   - 工厂函数：`mine::platform::win32::create_application_host()` 返回 `OwnedPtr<IApplicationHost>`
 - **samples/00-blank-window**：新增最小化 Win32 GUI 示例，演示创建窗口 → 显示 → 消息循环 → 退出全流程，编译并运行通过
+- **gfx.rhi**：新增 `mine.gfx.rhi` 图形渲染接口抽象层（纯头文件，无实现，依赖 mine.core + mine.math）：
+  - `GfxTypes.h`：核心枚举与值类型（Backend / QueueType / PixelFormat / Vsync / TextureBindFlags / BufferBindFlags / Color4f / Viewport / ScissorRect / TextureDesc / BufferDesc / SwapchainDesc）
+  - `ITexture.h` / `IBuffer.h`：GPU 资源接口（desc 查询 + 宽/高/格式/大小内联访问器）
+  - `ICommandList.h`：命令录制接口（begin/end / set_render_target / clear / set_viewport / set_scissor / draw / draw_indexed 等）
+  - `IQueue.h`：命令提交接口（submit / wait_idle / type）
+  - `ISwapchain.h`：交换链接口（resize / present / current_render_target / width/height/format/image_count/vsync）
+  - `IPipeline.h`：管线状态对象接口（M0 占位，type 查询）
+  - `IFence.h`：栅栏/同步接口（signal / wait / completed_value）
+  - `IDevice.h`：设备接口（create_queue / create_swapchain / create_buffer / create_texture / create_command_list / create_fence / backend / adapter_name）
+  - `GfxHost.h`：工厂函数声明 `mine::gfx::create_device(Backend)`（实现由链接的后端库提供）
+  - `Gfx.h`：伞形头文件，一次 include 引入全部 RHI 接口
+- **gfx.d3d11**：新增 `mine.gfx.d3d11` Direct3D 11 图形后端实现（仅 Windows，依赖 mine.gfx.rhi）：
+  - `D3D11Helpers.h`：内部辅助头（HRESULT 检查宏、RHI↔DXGI 格式转换、交换链 TYPELESS/RTV 格式工具）
+  - `D3D11Texture`：ITexture 实现，支持交换链后缓冲专用构造（传入已有 ID3D11Texture2D+RTV）与通用构造（按 bind_flags 自动创建 SRV/RTV/DSV）
+  - `D3D11Buffer`：IBuffer 实现，按 bind_flags 创建 D3D11 缓冲（VB/IB/CB/SRV/UAV），常量缓冲自动 16 字节对齐
+  - `D3D11CommandList`：ICommandList 实现，基于 D3D11 延迟上下文（每实例独占），begin→ClearState，end→FinishCommandList，M0 绘制方法已接线 Draw*/DrawIndexed*
+  - `D3D11Queue`：IQueue 实现，封装立即上下文，submit→ExecuteCommandList，wait_idle→Flush
+  - `D3D11Swapchain`：ISwapchain 实现，DXGI FLIP_DISCARD 模型，TYPELESS 基础格式+sRGB RTV，支持 DXGI_FEATURE_PRESENT_ALLOW_TEARING，resize 正确释放后缓冲再重建
+  - `D3D11Fence`：IFence 实现，基于 D3D11_QUERY_EVENT 轮询等待，支持超时
+  - `D3D11DeviceImpl`：IDevice 实现，D3D11CreateDevice（Feature Level 11.0/11.1，硬件不可用时回退 WARP），查询 IDXGIFactory2 用于交换链创建，适配器名称 UTF-8 输出
+  - `D3D11Backend.cpp`：实现 `mine::gfx::create_device()` 工厂函数（链接时替换模式）
+- **samples/00-blank-window（更新）**：集成 D3D11 RHI，演示"蓝色清屏"验收场景：
+  - 创建 D3D11 设备 + 交换链 + Graphics 队列 + 命令列表
+  - 首帧清屏为纯蓝色（R=0, G=0.4, B=1, A=1）并呈现
+  - 订阅 Resized 事件自动 resize 交换链并重新渲染，窗口大小变化后蓝色持续保持
