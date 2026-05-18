@@ -3,16 +3,16 @@
  * @brief 00-hello-rect 示例：mine.paint Canvas SDF 填充 + 描边命令综合演示。
  *
  * 演示内容（2×5 网格布局，左列填充/右列描边）：
- *   行1 左：FillRect                  — 纯色填充矩形（绿色）
- *   行1 右：StrokeRect                — 矩形描边（绿色，线宽 4px）
- *   行2 左：FillRoundedRect           — 均匀圆角矩形填充（蓝色，radius=20px）
- *   行2 右：StrokeRoundedRect         — 均匀圆角矩形描边（蓝色，线宽 4px）
- *   行3 左：FillComplexRoundedRect    — 四角独立圆角矩形填充（橙色）
- *   行3 右：StrokeComplexRoundedRect  — 四角独立圆角矩形描边（橙色，线宽 4px）
- *   行4 左：FillEllipse               — 椭圆填充（紫色）
- *   行4 右：StrokeEllipse             — 椭圆描边（紫色，线宽 4px）
- *   行5 左：StrokeBorderedRect        — 四边不等宽内侧描边（红色，上4/右2/下16/左8）
- *   行5 右：StrokeBorderedRect        — 仅上下边框（青色，上下各12px）
+ *   行1 左：FillRect                      — 纯色填充矩形（绿色）
+ *   行1 右：StrokeRect                    — 矩形描边（绿色，线宽 4px）
+ *   行2 左：FillRoundedRect               — 均匀圆角矩形填充（蓝色，radius=20px）
+ *   行2 右：StrokeRoundedRect             — 均匀圆角矩形描边（蓝色，线宽 4px）
+ *   行3 左：FillComplexRoundedRect        — 四角独立圆角矩形填充（橙色）
+ *   行3 右：StrokeComplexRoundedRect      — 四角独立圆角矩形描边（橙色，线宽 4px）
+ *   行4 左：FillEllipse                   — 椭圆填充（紫色）
+ *   行4 右：StrokeEllipse                 — 椭圆描边（紫色，线宽 4px）
+ *   行5 左：StrokeBorderedRoundedRect     — 四边不等宽 + 四角独立圆角内侧描边（红色）
+ *   行5 右：StrokeBorderedRoundedRect     — 均匀圆角 + 仅上下边框（青色，上下各12px）
  */
 
 #include <mine/platform/PlatformAbi.h>
@@ -147,17 +147,24 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
             mine::math::Vec2{sw * 0.5f, sh * 0.5f},
             mine::paint::Brush::solid(col_purple), pen);
 
-        // ── 行5 左：StrokeBorderedRect（四边不等宽，上4/右2/下16/左8）──
-        canvas.stroke_bordered_rect(
+        // ── 行5 左：StrokeBorderedRoundedRect（四边不等宽 + 四角独立圆角）──
+        canvas.stroke_bordered_rounded_rect(
             mine::math::Rect{col0 + ip, row4 + ip, sw, sh},
             mine::paint::Brush::solid(col_red),
-            mine::paint::BorderWidths{4.0f, 2.0f, 16.0f, 8.0f});
+            mine::paint::BorderWidths{4.0f, 2.0f, 16.0f, 8.0f},
+            mine::math::CornerRadii{
+                {30.0f, 30.0f},  // 左上角
+                {10.0f, 10.0f},  // 右上角
+                {20.0f, 20.0f},  // 右下角
+                {0.0f,  0.0f}    // 左下角（直角）
+            });
 
-        // ── 行5 右：StrokeBorderedRect（仅上下边框各12px，左右不描边）──
-        canvas.stroke_bordered_rect(
+        // ── 行5 右：StrokeBorderedRoundedRect（均匀圆角 + 仅上下边框各12px）──
+        canvas.stroke_bordered_rounded_rect(
             mine::math::Rect{col1 + ip, row4 + ip, sw, sh},
             mine::paint::Brush::solid(col_cyan),
-            mine::paint::BorderWidths{.top = 12.0f, .bottom = 12.0f});
+            mine::paint::BorderWidths{.top = 12.0f, .bottom = 12.0f},
+            mine::math::CornerRadii::uniform(16.0f));
 
         mine::paint::DisplayList dl = canvas.end();
 

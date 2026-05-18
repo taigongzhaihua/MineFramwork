@@ -19,10 +19,18 @@
   - `BorderWidths` 结构体：top/right/bottom/left 四个 float（内侧描边宽度，逻辑像素），含 `all(w)` 和 `axes(v, h)` 工厂方法
   - `DrawCmdKind::StrokeBorderedRect`：新绘制命令，使用 `DrawCmd::border_widths` 字段
   - `Canvas::stroke_bordered_rect(rect, brush, widths)`：录制对应命令
-  - SDF 着色器 kind=4：外矩形 SDF 内部 且 动态内矩形 SDF 外部 的区域构成描边带；动态内矩形半尺寸按像素所在象限（右/左/下/上）分别减去对应边宽度，`fwidth()` 独立 AA
-- **samples/00-hello-rect（2×5 网格演示）**：在原 2×4 网格基础上新增第 5 行，展示两种 StrokeBorderedRect 效果：
-  - 行5 左（红色）：上4/右2/下16/左8 不等宽四边内侧描边
-  - 行5 右（青色）：仅上下各12px 边框（左右宽度为 0）
+  - SDF 着色器 kind=4：四边各自独立计算到边缘的距离遮罩（smoothstep AA），取联集（max），乘以外矩形轮廓 alpha，零宽边遮罩恒为 0 避免伪线
+- **paint（StrokeBorderedRoundedRect）**：新增四边独立宽度 + 四角独立圆角的矩形内侧描边命令（SDF kind=5）：
+  - `DrawCmdKind::StrokeBorderedRoundedRect`：新绘制命令
+  - `DrawCmd::border_radii`（`math::CornerRadii`）：四角独立圆角半径字段
+  - `Canvas::stroke_bordered_rounded_rect(rect, brush, widths, radii)`：录制对应命令
+  - `SdfVertex` 扩展至 80 字节：新增 TEXCOORD3（e0-e3，存放四角圆角半径）
+  - SDF 管线 `create_sdf_pipeline()` 扩展至 6 个顶点元素（element_count=6，stride=80）
+  - SDF 着色器 kind=5：外轮廓用 `complex_rounded_box_sdf`，各边独立遮罩（同 kind=4），联集后与外轮廓 alpha 相乘实现圆角自然裁剪
+  - `push_sdf_quad_vertices` 添加 e0-e3 参数（默认 0），已有调用无需修改
+- **samples/00-hello-rect（2×5 网格演示）**：第5行更新为 StrokeBorderedRoundedRect 效果演示：
+  - 行5 左（红色）：四边不等宽（上4/右2/下16/左8）+ 四角独立圆角（左上30/右上10/右下20/左下直角）
+  - 行5 右（青色）：均匀圆角（16px）+ 仅上下各12px 边框（左右宽度为 0）
 
 
 ### Fixed

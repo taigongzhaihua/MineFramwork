@@ -31,6 +31,7 @@
 #include <mine/paint/BorderWidths.h>
 #include <mine/math/Transform2D.h>
 #include <mine/math/ComplexRoundedRect.h>
+#include <mine/math/CornerRadii.h>
 
 namespace mine::paint {
 
@@ -139,6 +140,19 @@ public:
      * @param widths  四边宽度（调用 BorderWidths::all(w) 得到四边等宽）
      */
     void stroke_bordered_rect(math::Rect rect, const Brush& brush, BorderWidths widths);
+
+    /**
+     * @brief 四边各自独立宽度 + 四角各自独立圆角的矩形内侧描边。
+     *
+     * 结合 CSS border-width 和 border-radius 语义：外轮廓随圆角圆滑，
+     * 各边描边带独立计算，角部直角相交并被外轮廓圆角自然剪裁。
+     * @param rect   矩形几何
+     * @param brush  画刷（当前仅支持 SolidColor）
+     * @param widths 四边描边宽度（内侧方向）
+     * @param radii  四角圆角半径（外轮廓）
+     */
+    void stroke_bordered_rounded_rect(math::Rect rect, const Brush& brush,
+                                      BorderWidths widths, math::CornerRadii radii);
 
     /**
      * @brief 描边椭圆。

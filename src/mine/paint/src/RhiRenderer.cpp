@@ -11,14 +11,15 @@
  *   - FillComplexRoundedRect / StrokeComplexRoundedRect：四角独立圆角矩形 SDF
  *   - FillEllipse / StrokeEllipse：椭圆 SDF（IQ 近似公式）
  *   - StrokeBorderedRect：四边各自独立宽度的矩形内侧描边 SDF（kind=4）
+ *   - StrokeBorderedRoundedRect：四边独立宽度 + 四角独立圆角的内侧描边 SDF（kind=5）
  *   - StrokeLine：折线展开描边（Miter join 方案）
  *
  * 渲染架构：
  *   - SDF 形状（矩形/圆角/椭圆）：每命令一次 DrawCall，SDF 参数编入顶点
  *   - 折线描边（StrokeLine）：顶点展开为三角带，solid pipeline
  *
- * SDF 顶点格式（SdfVertex，64 字节）：
- *   pos(2) + color(4) + local(2) + params0(4) + params1(4) float
+ * SDF 顶点格式（SdfVertex，80 字节）：
+ *   pos(2) + color(4) + local(2) + params0(4) + params1(4) + extra(4) float
  * 折线顶点格式（PaintVertex，24 字节）：pos(2) + color(4) float
  * 视口变换：顶点着色器将屏幕像素坐标映射到 NDC（Y 轴翻转）
  */
@@ -101,6 +102,7 @@ struct SdfVSIn {
     float2 local   : TEXCOORD0;  // 本地坐标（以形状中心为原点，像素单位）
     float4 params0 : TEXCOORD1;  // (kind, half_w, half_h, p0)
     float4 params1 : TEXCOORD2;  // (p1, p2, p3, stroke_w)
+    float4 extra   : TEXCOORD3;  // 扩展参数（StrokeBorderedRoundedRect 的四角圆角半径）
 };
 
 struct SdfVSOut {
@@ -109,6 +111,7 @@ struct SdfVSOut {
     float2 local   : TEXCOORD0;
     float4 params0 : TEXCOORD1;
     float4 params1 : TEXCOORD2;
+    float4 extra   : TEXCOORD3;
 };
 
 SdfVSOut main(SdfVSIn i) {
@@ -122,6 +125,7 @@ SdfVSOut main(SdfVSIn i) {
     o.local   = i.local;
     o.params0 = i.params0;
     o.params1 = i.params1;
+    o.extra   = i.extra;
     return o;
 }
 )hlsl";
@@ -166,6 +170,7 @@ struct SdfPSIn {
     float2 local   : TEXCOORD0;
     float4 params0 : TEXCOORD1;  // (kind, half_w, half_h, p0)
     float4 params1 : TEXCOORD2;  // (p1, p2, p3, stroke_w)
+    float4 extra   : TEXCOORD3;  // 扩展参数（圆角四边独立描边：x=r_tl, y=r_tr, z=r_br, w=r_bl）
 };
 
 float4 main(SdfPSIn i) : SV_Target {
@@ -219,6 +224,34 @@ float4 main(SdfPSIn i) : SV_Target {
         float al = a_outer * a_stroke;
         float4 c2 = i.color;
         return float4(c2.rgb * c2.a * al, c2.a * al);
+    } else if (kind == 5) {
+        // 四边不等宽 + 四角独立圆角的内侧描边
+        //   p0=top_w, p1=right_w, p2=bottom_w, p3=left_w
+        //   extra.x=r_tl（左上）, extra.y=r_tr（右上）, extra.z=r_br（右下）, extra.w=r_bl（左下）
+        //
+        // 算法：
+        //   1. 用 complex_rounded_box_sdf 计算外轮廓（含圆角），得到 a_outer
+        //   2. 各边独立遮罩（同 kind=4），得到 a_stroke
+        //   3. al = a_outer * a_stroke（圆角自然裁剪角部描边）
+        float r_tl = i.extra.x;
+        float r_tr = i.extra.y;
+        float r_br = i.extra.z;
+        float r_bl = i.extra.w;
+        // complex_rounded_box_sdf 参数顺序：(右下, 右上, 左下, 左上)
+        float d_outer = complex_rounded_box_sdf(p, b, float4(r_br, r_tr, r_bl, r_tl));
+        float fw_o = max(fwidth(d_outer), 0.5f);
+        float a_outer = 1.0f - smoothstep(-fw_o, fw_o, d_outer);
+
+        float fy = max(fwidth(p.y), 0.5f);
+        float fx = max(fwidth(p.x), 0.5f);
+        float a_top    = p0 > 0.0f ? 1.0f - smoothstep(p0 - fy, p0 + fy, p.y + b.y) : 0.0f;
+        float a_bottom = p2 > 0.0f ? 1.0f - smoothstep(p2 - fy, p2 + fy, b.y - p.y) : 0.0f;
+        float a_left   = p3 > 0.0f ? 1.0f - smoothstep(p3 - fx, p3 + fx, p.x + b.x) : 0.0f;
+        float a_right  = p1 > 0.0f ? 1.0f - smoothstep(p1 - fx, p1 + fx, b.x - p.x) : 0.0f;
+        float a_stroke = max(max(a_top, a_bottom), max(a_left, a_right));
+        float al = a_outer * a_stroke;
+        float4 c3 = i.color;
+        return float4(c3.rgb * c3.a * al, c3.a * al);
     } else {
         // 椭圆（half_w = X 半径, half_h = Y 半径）
         d = ellipse_sdf(p, b);
@@ -284,6 +317,7 @@ struct SdfVertex {
     float p0;             ///< 圆角半径参数 0（均匀圆角 / 右下角，offset 44）
     float p1, p2, p3;     ///< 圆角半径参数 1-3（右上/左下/左上，offset 48）
     float stroke_w;       ///< 描边总宽度（0=填充，offset 60）
+    float e0, e1, e2, e3; ///< 扩展参数（offset 64）—— TEXCOORD3，供 kind=5 存放四角圆角半径
 };
 
 /// 视口常量缓冲布局（必须为 16 字节倍数，D3D11 硬性要求）
@@ -459,6 +493,7 @@ private:
      * @param kind            形状类型（0=矩形，1=均匀圆角，2=复杂圆角，3=椭圆）
      * @param p0,p1,p2,p3     圆角半径参数（右下/右上/左下/左上）
      * @param stroke_w        描边总宽度（0 = 填充模式）
+     * @param e0,e1,e2,e3     扩展参数（TEXCOORD3，供 kind=5 传入四角圆角半径，默认 0）
      */
     static void push_sdf_quad_vertices(
         containers::Vector<SdfVertex>& vertices,
@@ -467,7 +502,8 @@ private:
         float r, float g, float b, float a,
         float kind,
         float p0, float p1, float p2, float p3,
-        float stroke_w);
+        float stroke_w,
+        float e0 = 0.0f, float e1 = 0.0f, float e2 = 0.0f, float e3 = 0.0f);
 
     bool valid_{false};
 
@@ -592,8 +628,15 @@ bool RhiRenderer::create_sdf_pipeline() {
     desc.vertex_elements[4].slot           = 0;
     desc.vertex_elements[4].offset         = 48;
 
-    desc.vertex_element_count = 5;
-    desc.vertex_stride        = sizeof(SdfVertex); // 64 字节
+    // TEXCOORD3 (float4) — offset 64，扩展参数（四角圆角半径：e0=r_tl, e1=r_tr, e2=r_br, e3=r_bl）
+    desc.vertex_elements[5].semantic       = gfx::VertexSemantic::TexCoord;
+    desc.vertex_elements[5].semantic_index = 3;
+    desc.vertex_elements[5].format         = gfx::VertexElementFormat::Float4;
+    desc.vertex_elements[5].slot           = 0;
+    desc.vertex_elements[5].offset         = 64;
+
+    desc.vertex_element_count = 6;
+    desc.vertex_stride        = sizeof(SdfVertex); // 80 字节
     desc.enable_blend         = true;              // 预乘 Alpha 混合
     desc.enable_depth         = false;
 
@@ -628,7 +671,8 @@ void RhiRenderer::push_sdf_quad_vertices(
     float r, float g, float b, float a,
     float kind,
     float p0, float p1, float p2, float p3,
-    float stroke_w)
+    float stroke_w,
+    float e0, float e1, float e2, float e3)
 {
     // 包围盒左上角和右下角（含 padding 扩展）
     const float x1 = cx - half_w - padding;
@@ -639,7 +683,8 @@ void RhiRenderer::push_sdf_quad_vertices(
     // 生成单个顶点（本地坐标 = 屏幕坐标 - 形状中心）
     auto make = [&](float sx, float sy) -> SdfVertex {
         return { sx, sy, r, g, b, a, sx - cx, sy - cy,
-                 kind, half_w, half_h, p0, p1, p2, p3, stroke_w };
+                 kind, half_w, half_h, p0, p1, p2, p3, stroke_w,
+                 e0, e1, e2, e3 };
     };
 
     // 三角形 1：左上 - 右上 - 左下
@@ -870,6 +915,45 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             cmd_list_->set_pipeline(sdf_pipeline_.get());
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
             cmd_list_->set_vertex_buffer(0, buf.get(), 0);
+            cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
+        }
+        else if (cmd.kind == DrawCmdKind::StrokeBorderedRoundedRect) {
+            // 四边各自独立宽度 + 四角独立圆角的内侧描边（SDF kind=5）
+            // p0=top_w, p1=right_w, p2=bottom_w, p3=left_w
+            // e0=r_tl, e1=r_tr, e2=r_br, e3=r_bl
+            if (cmd.brush.kind() != BrushKind::SolidColor) continue;
+            const auto& bw = cmd.border_widths;
+            if (bw.top <= 0.0f && bw.right <= 0.0f && bw.bottom <= 0.0f && bw.left <= 0.0f) continue;
+            const math::Color c = cmd.brush.color();
+            const float cx = cmd.rect.x + cmd.rect.width  * 0.5f;
+            const float cy = cmd.rect.y + cmd.rect.height * 0.5f;
+            const float hw = cmd.rect.width  * 0.5f;
+            const float hh = cmd.rect.height * 0.5f;
+            const auto& rd = cmd.border_radii;
+            // 各角各向同性化（取 rx/ry 最小值），再钳制到不超过半尺寸
+            const float r_tl = std::min(std::min(rd.top_left.x,     rd.top_left.y),     std::min(hw, hh));
+            const float r_tr = std::min(std::min(rd.top_right.x,    rd.top_right.y),    std::min(hw, hh));
+            const float r_br = std::min(std::min(rd.bottom_right.x, rd.bottom_right.y), std::min(hw, hh));
+            const float r_bl = std::min(std::min(rd.bottom_left.x,  rd.bottom_left.y),  std::min(hw, hh));
+            const float pad = 1.0f;
+
+            containers::Vector<SdfVertex> verts;
+            // kind=5，stroke_w=0（未使用），e0-e3 存四角圆角半径
+            push_sdf_quad_vertices(verts, cx, cy, hw, hh, pad,
+                c.r, c.g, c.b, c.a, 5.0f,
+                bw.top, bw.right, bw.bottom, bw.left, 0.0f,
+                r_tl, r_tr, r_br, r_bl);
+
+            gfx::BufferDesc vb{};
+            vb.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
+            vb.stride     = sizeof(SdfVertex);
+            vb.bind_flags = gfx::BufferBindFlags::Vertex;
+            auto buf2 = device_->create_buffer(vb, verts.data());
+            if (!buf2) continue;
+
+            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_constant_buffer(0, viewport_cb.get());
+            cmd_list_->set_vertex_buffer(0, buf2.get(), 0);
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
         }
         else if (cmd.kind == DrawCmdKind::StrokeRoundedRect) {
