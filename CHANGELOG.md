@@ -14,7 +14,15 @@
   - `render()` 完全重写：改为逐命令 DrawCall 架构，每个 `DrawCmd` 独立创建顶点缓冲并提交；视口常量缓冲全帧共享
   - 支持命令：`FillRect` / `StrokeRect` / `FillRoundedRect` / `StrokeRoundedRect` / `FillComplexRoundedRect` / `StrokeComplexRoundedRect` / `FillEllipse` / `StrokeEllipse`（均 SDF）；`StrokeLine` 保留折线展开方案（`solid_pipeline_`）
   - 移除：旧 PathBuilder 依赖（`flatten_cubic_bezier` / `flatten_path_to_polygon` / `push_convex_polygon_vertices` / `push_rect_vertices`）
-- **samples/00-hello-rect（SDF 综合演示）**：重构为 2×4 网格（左列填充 / 右列描边），展示所有 SDF 形状效果：FillRect + StrokeRect（绿色）/ FillRoundedRect + StrokeRoundedRect（蓝色）/ FillComplexRoundedRect + StrokeComplexRoundedRect（橙色）/ FillEllipse + StrokeEllipse（紫色）
+  - 支持命令：`FillRect` / `StrokeRect` / `FillRoundedRect` / `StrokeRoundedRect` / `FillComplexRoundedRect` / `StrokeComplexRoundedRect` / `FillEllipse` / `StrokeEllipse`（均 SDF）
+- **paint（StrokeBorderedRect）**：新增四边各自独立宽度的矩形内侧描边命令（CSS border 语义，SDF kind=4）：
+  - `BorderWidths` 结构体：top/right/bottom/left 四个 float（内侧描边宽度，逻辑像素），含 `all(w)` 和 `axes(v, h)` 工厂方法
+  - `DrawCmdKind::StrokeBorderedRect`：新绘制命令，使用 `DrawCmd::border_widths` 字段
+  - `Canvas::stroke_bordered_rect(rect, brush, widths)`：录制对应命令
+  - SDF 着色器 kind=4：外矩形 SDF 内部 且 动态内矩形 SDF 外部 的区域构成描边带；动态内矩形半尺寸按像素所在象限（右/左/下/上）分别减去对应边宽度，`fwidth()` 独立 AA
+- **samples/00-hello-rect（2×5 网格演示）**：在原 2×4 网格基础上新增第 5 行，展示两种 StrokeBorderedRect 效果：
+  - 行5 左（红色）：上4/右2/下16/左8 不等宽四边内侧描边
+  - 行5 右（青色）：仅上下各12px 边框（左右宽度为 0）
 
 
 ### Fixed
