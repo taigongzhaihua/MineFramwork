@@ -15,15 +15,6 @@
 #include <mine/platform/PlatformAbi.h>
 #include <mine/gfx/Gfx.h>
 
-// MessageBoxA — GUI 子系统无控制台，用弹窗报错
-#ifndef WIN32_LEAN_AND_MEAN
-#  define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#  define NOMINMAX
-#endif
-#include <windows.h>
-
 #include <cstdio>
 #include <cmath>     // std::max
 
@@ -109,7 +100,7 @@ int main(int /*argc*/, char* /*argv*/[])
     // 2. 创建 D3D11 图形设备（实现由链接的 mine.gfx.d3d11 库注入）
     auto device = mine::gfx::create_device(mine::gfx::Backend::Auto);
     if (!device) {
-        MessageBoxA(NULL, "图形设备创建失败（当前系统不支持 D3D11）", "MineFramework 错误", MB_ICONERROR);
+        std::fprintf(stderr, "错误：图形设备创建失败（当前系统不支持 D3D11）\n");
         return 1;
     }
 
@@ -124,7 +115,7 @@ int main(int /*argc*/, char* /*argv*/[])
     // 4. 创建窗口
     auto window = host->create_window(win_desc);
     if (!window) {
-        MessageBoxA(NULL, "窗口创建失败", "MineFramework 错误", MB_ICONERROR);
+        std::fprintf(stderr, "错误：窗口创建失败\n");
         return 1;
     }
 
@@ -136,7 +127,7 @@ int main(int /*argc*/, char* /*argv*/[])
     renderer.queue    = renderer.device->create_queue(mine::gfx::QueueType::Graphics);
     renderer.cmd_list = renderer.device->create_command_list(mine::gfx::QueueType::Graphics);
     if (!renderer.queue || !renderer.cmd_list) {
-        MessageBoxA(NULL, "命令队列或命令列表创建失败", "MineFramework 错误", MB_ICONERROR);
+        std::fprintf(stderr, "错误：命令队列或命令列表创建失败\n");
         return 1;
     }
 
@@ -151,7 +142,7 @@ int main(int /*argc*/, char* /*argv*/[])
 
     renderer.swapchain = renderer.device->create_swapchain(sc_desc);
     if (!renderer.swapchain) {
-        MessageBoxA(NULL, "交换链创建失败（DXGI/D3D11 错误）", "MineFramework 错误", MB_ICONERROR);
+        std::fprintf(stderr, "错误：交换链创建失败（DXGI/D3D11 错误）\n");
         return 1;
     }
 
