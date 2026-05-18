@@ -1,12 +1,16 @@
 /**
  * @file main.cpp
- * @brief 00-hello-rect 示例：mine.paint Canvas 所有已实现填充命令的综合演示。
+ * @brief 00-hello-rect 示例：mine.paint Canvas SDF 填充 + 描边命令综合演示。
  *
- * 演示内容（2×2 网格布局）：
- *   左上：FillRect             — 纯色填充矩形（绿色）
- *   右上：FillRoundedRect      — 均匀圆角矩形（蓝色，radius=24px）
- *   左下：FillComplexRoundedRect — 四角独立椭圆半径（橙色，对角线不对称）
- *   右下：FillEllipse           — 椭圆填充（紫色）
+ * 演示内容（2×4 网格布局，左列填充/右列描边）：
+ *   行1 左：FillRect                  — 纯色填充矩形（绿色）
+ *   行1 右：StrokeRect                — 矩形描边（绿色，线宽 4px）
+ *   行2 左：FillRoundedRect           — 均匀圆角矩形填充（蓝色，radius=24px）
+ *   行2 右：StrokeRoundedRect         — 均匀圆角矩形描边（蓝色，线宽 4px）
+ *   行3 左：FillComplexRoundedRect    — 四角独立圆角矩形填充（橙色）
+ *   行3 右：StrokeComplexRoundedRect  — 四角独立圆角矩形描边（橙色，线宽 4px）
+ *   行4 左：FillEllipse               — 椭圆填充（紫色）
+ *   行4 右：StrokeEllipse             — 椭圆描边（紫色，线宽 4px）
  */
 
 #include <mine/platform/PlatformAbi.h>
@@ -44,7 +48,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
     }
 
     /**
-     * @brief 渲染一帧：清屏 + 2×2 网格展示所有填充命令 + 呈现。
+     * @brief 渲染一帧：清屏 + 2×4 网格展示 SDF 填充和描边命令 + 呈现。
      */
     void render() {
         if (!device || !swapchain || !paint_renderer) return;
@@ -52,8 +56,8 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         mine::gfx::ITexture* back_buf = swapchain->current_render_target();
         if (!back_buf) return;
 
-        const float w = static_cast<float>(swapchain->width());
-        const float h = static_cast<float>(swapchain->height());
+        const float W = static_cast<float>(swapchain->width());
+        const float H = static_cast<float>(swapchain->height());
 
         // ── 1. 构建绘制命令列表 ────────────────────────────────────────────
 
@@ -61,58 +65,110 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
 
         // 背景：深灰色覆盖整个视口
         canvas.fill_rect(
-            mine::math::Rect{0.0f, 0.0f, w, h},
+            mine::math::Rect{0.0f, 0.0f, W, H},
             mine::paint::Brush::solid(mine::math::Color{0.12f, 0.12f, 0.12f, 1.0f}));
 
-        // 每个格子的尺寸（2×2 分割，留出 padding）
-        const float pad   = 24.0f;   // 格子间距和边距
-        const float cw    = (w - pad * 3.0f) * 0.5f;  // 格子宽度
-        const float ch    = (h - pad * 3.0f) * 0.5f;  // 格子高度
+        // 2×4 网格参数（2列 × 4行，填充列 / 描边列）
+        const float outer_pad = 20.0f;  // 外边距
+        const float gap       = 12.0f;  // 格子间距
+        const float cw        = (W - outer_pad * 2.0f - gap) * 0.5f;  // 格子宽度
+        const float ch        = (H - outer_pad * 2.0f - gap * 3.0f) * 0.25f;  // 格子高度
 
-        // 各格子左上角坐标
-        const float x0 = pad;
-        const float x1 = pad * 2.0f + cw;
-        const float y0 = pad;
-        const float y1 = pad * 2.0f + ch;
+        // 列起始 X
+        const float col0 = outer_pad;
+        const float col1 = outer_pad + cw + gap;
 
-        // 形状尺寸（在格子内留出内边距）
-        const float inner_pad = 24.0f;
-        const float sw = cw - inner_pad * 2.0f;  // 形状宽度
-        const float sh = ch - inner_pad * 2.0f;  // 形状高度
+        // 各行起始 Y
+        const float row0 = outer_pad;
+        const float row1 = outer_pad + ch + gap;
+        const float row2 = outer_pad + (ch + gap) * 2.0f;
+        const float row3 = outer_pad + (ch + gap) * 3.0f;
 
-        // ── 左上：FillRect（纯色矩形，绿色）─────────────────────────────
+        // 形状在格子内的内边距
+        const float ip  = 16.0f;
+        const float sw  = cw - ip * 2.0f;  // 形状宽度
+        const float sh  = ch - ip * 2.0f;  // 形状高度
+
+        // 描边线宽
+        const float line_w = 4.0f;
+
+        // 颜色定义
+        const mine::math::Color col_green  {0.20f, 0.75f, 0.35f, 1.0f};  // 绿色（矩形）
+        const mine::math::Color col_blue   {0.20f, 0.45f, 0.90f, 1.0f};  // 蓝色（圆角矩形）
+        const mine::math::Color col_orange {0.95f, 0.55f, 0.10f, 1.0f};  // 橙色（复杂圆角）
+        const mine::math::Color col_purple {0.65f, 0.25f, 0.90f, 1.0f};  // 紫色（椭圆）
+
+        const mine::paint::Pen pen{.width = line_w, .miter_limit = 4.0f};  // 线宽 4px，斜接限制 4
+
+        // ── 行1 左：FillRect ────────────────────────────────────────────
         canvas.fill_rect(
-            mine::math::Rect{x0 + inner_pad, y0 + inner_pad, sw, sh},
-            mine::paint::Brush::solid(mine::math::Color{0.20f, 0.75f, 0.35f, 1.0f}));
+            mine::math::Rect{col0 + ip, row0 + ip, sw, sh},
+            mine::paint::Brush::solid(col_green));
 
-        // ── 右上：FillRoundedRect（均匀圆角矩形，蓝色）───────────────────
+        // ── 行1 右：StrokeRect ──────────────────────────────────────────
+        canvas.stroke_rect(
+            mine::math::Rect{col1 + ip, row0 + ip, sw, sh},
+            mine::paint::Brush::solid(col_green),
+            pen);
+
+        // ── 行2 左：FillRoundedRect ─────────────────────────────────────
         canvas.fill_rounded_rect(
             mine::math::RoundedRect{
-                mine::math::Rect{x1 + inner_pad, y0 + inner_pad, sw, sh},
-                24.0f   // 四角统一 24px 圆角半径
+                mine::math::Rect{col0 + ip, row1 + ip, sw, sh},
+                20.0f
             },
-            mine::paint::Brush::solid(mine::math::Color{0.20f, 0.45f, 0.90f, 1.0f}));
+            mine::paint::Brush::solid(col_blue));
 
-        // ── 左下：FillComplexRoundedRect（四角独立椭圆半径，橙色）────────
+        // ── 行2 右：StrokeRoundedRect ───────────────────────────────────
+        canvas.stroke_rounded_rect(
+            mine::math::RoundedRect{
+                mine::math::Rect{col1 + ip, row1 + ip, sw, sh},
+                20.0f
+            },
+            mine::paint::Brush::solid(col_blue),
+            pen);
+
+        // ── 行3 左：FillComplexRoundedRect ─────────────────────────────
+        const mine::math::CornerRadii radii{
+            {36.0f, 36.0f},  // 左上角
+            {8.0f,  8.0f},   // 右上角
+            {36.0f, 36.0f},  // 右下角
+            {8.0f,  8.0f}    // 左下角
+        };
         canvas.fill_complex_rounded_rect(
             mine::math::ComplexRoundedRect{
-                mine::math::Rect{x0 + inner_pad, y1 + inner_pad, sw, sh},
-                mine::math::CornerRadii{
-                    {40.0f, 40.0f},  // 左上角：大圆角
-                    {8.0f,  8.0f},   // 右上角：小圆角
-                    {40.0f, 40.0f},  // 右下角：大圆角
-                    {8.0f,  8.0f}    // 左下角：小圆角
-                }
+                mine::math::Rect{col0 + ip, row2 + ip, sw, sh},
+                radii
             },
-            mine::paint::Brush::solid(mine::math::Color{0.95f, 0.55f, 0.10f, 1.0f}));
+            mine::paint::Brush::solid(col_orange));
 
-        // ── 右下：FillEllipse（椭圆，紫色）───────────────────────────────
-        const float ecx = x1 + inner_pad + sw * 0.5f;  // 椭圆中心 X
-        const float ecy = y1 + inner_pad + sh * 0.5f;  // 椭圆中心 Y
+        // ── 行3 右：StrokeComplexRoundedRect ───────────────────────────
+        canvas.stroke_complex_rounded_rect(
+            mine::math::ComplexRoundedRect{
+                mine::math::Rect{col1 + ip, row2 + ip, sw, sh},
+                radii
+            },
+            mine::paint::Brush::solid(col_orange),
+            pen);
+
+        // ── 行4 左：FillEllipse ─────────────────────────────────────────
+        const float ecx0 = col0 + ip + sw * 0.5f;
+        const float ecx1 = col1 + ip + sw * 0.5f;
+        const float ecy3 = row3 + ip + sh * 0.5f;
+        const float erx  = sw * 0.5f;
+        const float ery  = sh * 0.5f;
+
         canvas.fill_ellipse(
-            mine::math::Vec2{ecx, ecy},
-            mine::math::Vec2{sw * 0.5f, sh * 0.5f},
-            mine::paint::Brush::solid(mine::math::Color{0.65f, 0.25f, 0.90f, 1.0f}));
+            mine::math::Vec2{ecx0, ecy3},
+            mine::math::Vec2{erx, ery},
+            mine::paint::Brush::solid(col_purple));
+
+        // ── 行4 右：StrokeEllipse ───────────────────────────────────────
+        canvas.stroke_ellipse(
+            mine::math::Vec2{ecx1, ecy3},
+            mine::math::Vec2{erx, ery},
+            mine::paint::Brush::solid(col_purple),
+            pen);
 
         // Canvas::end() 返回不可变的绘制命令列表
         mine::paint::DisplayList dl = canvas.end();
@@ -151,7 +207,7 @@ int main(int /*argc*/, char* /*argv*/[])
 
     // 4. 创建窗口
     mine::platform::WindowDesc win_desc{};
-    win_desc.title         = "MineFramework - Canvas 填充命令演示（FillRect / FillRoundedRect / FillComplexRoundedRect / FillEllipse）";
+    win_desc.title         = "MineFramework - Canvas SDF 渲染演示（Fill / Stroke × Rect / RoundedRect / ComplexRoundedRect / Ellipse）";
     win_desc.size          = {800.0f, 600.0f};
     win_desc.auto_position = true;
     win_desc.resizable     = true;

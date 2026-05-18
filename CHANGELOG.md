@@ -5,18 +5,17 @@
 ## [Unreleased]
 
 ### Added
-- **paint（FillEllipse）**：实现椭圆填充渲染支持，复用 `PathBuilder::add_ellipse()` + 展平 + 扇形三角化
-- **paint（FillComplexRoundedRect）**：新增四角各自独立椭圆半径的圆角矩形渲染支持：
-  - `DrawCmd`：新增 `FillComplexRoundedRect`、`StrokeComplexRoundedRect` 枚举值及 `complex_rrect` 字段
-  - `PathBuilder::add_complex_rounded_rect()`：每角使用独立 (rx, ry) 生成三次贝塞尔路径，复用 CSS 钳制保证凸性
-  - `Canvas::fill_complex_rounded_rect()` / `Canvas::stroke_complex_rounded_rect()`：录制对应绘制命令
-  - `RhiRenderer`：新增 `FillComplexRoundedRect` 渲染分支，复用现有展平+三角化辅助函数
-- **paint（RhiRenderer 扩展）**：新增 `FillRoundedRect` 渲染支持：
-  - `flatten_cubic_bezier()`：使用 de Casteljau 公式将三次贝塞尔段均匀细分为折线点（8 段 / 圆角弧，视觉误差 < 0.04%）
-  - `flatten_path_to_polygon()`：将 PathBuilder 生成的路径展平为屏幕像素多边形（支持 MoveTo/LineTo/CubicTo/QuadTo/Close）；QuadTo 通过提升为三次后细分处理
-  - `push_convex_polygon_vertices()`：以 polygon[0] 为扇点的凸多边形扇形三角化（圆角矩形始终满足凸性约束）
-  - `radius ≤ 0` 退化路径：自动回退到普通矩形顶点生成，避免不必要的路径展平开销
-- **samples/00-hello-rect（综合演示）**：重构为 2×2 网格，展示所有已实现的填充命令效果：FillRect（绿色）/ FillRoundedRect（蓝色）/ FillComplexRoundedRect（橙色，对角线不对称）/ FillEllipse（紫色）
+- **paint（SDF 渲染管线）**：将所有矩形 / 圆角矩形 / 椭圆形状渲染切换为 SDF（有向距离场）方案：
+  - `k_sdf_vertex_shader_hlsl`：SDF 顶点着色器，将屏幕坐标变换到 NDC 并透传形状参数
+  - `k_sdf_pixel_shader_hlsl`：SDF 像素着色器，包含 `box_sdf`（矩形）/ `rounded_box_sdf`（均匀圆角矩形）/ `complex_rounded_box_sdf`（四角独立圆角矩形，基于 IQ sdRoundedBox）/ `ellipse_sdf`（IQ 近似椭圆 SDF）四种 SDF 函数，使用 `fwidth()` 实现亚像素级抗锯齿；填充和描边（中心对齐）统一在一个着色器中处理
+  - `SdfVertex`（64 字节）：新顶点格式，包含屏幕坐标、颜色、本地坐标、形状参数（kind / half_w / half_h / p0-p3 圆角半径 / stroke_w）
+  - `create_sdf_pipeline()`：新 SDF 管线（5 个顶点元素），与保留的 `solid_pipeline_`（折线描边）并行存在
+  - `push_sdf_quad_vertices()`：为形状包围盒（含 padding）生成 6 个 SdfVertex（两个三角形），本地坐标以形状中心为原点
+  - `render()` 完全重写：改为逐命令 DrawCall 架构，每个 `DrawCmd` 独立创建顶点缓冲并提交；视口常量缓冲全帧共享
+  - 支持命令：`FillRect` / `StrokeRect` / `FillRoundedRect` / `StrokeRoundedRect` / `FillComplexRoundedRect` / `StrokeComplexRoundedRect` / `FillEllipse` / `StrokeEllipse`（均 SDF）；`StrokeLine` 保留折线展开方案（`solid_pipeline_`）
+  - 移除：旧 PathBuilder 依赖（`flatten_cubic_bezier` / `flatten_path_to_polygon` / `push_convex_polygon_vertices` / `push_rect_vertices`）
+- **samples/00-hello-rect（SDF 综合演示）**：重构为 2×4 网格（左列填充 / 右列描边），展示所有 SDF 形状效果：FillRect + StrokeRect（绿色）/ FillRoundedRect + StrokeRoundedRect（蓝色）/ FillComplexRoundedRect + StrokeComplexRoundedRect（橙色）/ FillEllipse + StrokeEllipse（紫色）
+
 
 ### Fixed
 - **gfx.d3d11**：修复 D3D11 交换链格式错误导致程序启动即崩溃（退出码 1）的问题：
