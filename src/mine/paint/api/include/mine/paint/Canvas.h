@@ -28,6 +28,7 @@
 
 #include <mine/paint/DisplayList.h>
 #include <mine/paint/PathBuilder.h>
+#include <mine/paint/BorderWidths.h>
 #include <mine/math/Transform2D.h>
 #include <mine/math/ComplexRoundedRect.h>
 
@@ -127,6 +128,17 @@ public:
 
     /// 描边四角各自独立椭圆半径的圆角矩形。
     void stroke_complex_rounded_rect(math::ComplexRoundedRect rrect, const Brush& brush, const Pen& pen = {});
+
+    /**
+     * @brief 四边各自独立宽度的矩形内侧描边（类 CSS border）。
+     *
+     * 描边方向为内侧：每条边的描边宽度从矩形边界向内延伸，
+     * 不超出矩形的外轮布。
+     * @param rect    矩形几何
+     * @param brush   填充画刷
+     * @param widths  四边宽度（调用 BorderWidths::all(w) 得到四边等宽）
+     */
+    void stroke_bordered_rect(math::Rect rect, const Brush& brush, BorderWidths widths);
 
     /**
      * @brief 描边椭圆。

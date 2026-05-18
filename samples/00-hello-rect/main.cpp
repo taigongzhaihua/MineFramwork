@@ -2,15 +2,17 @@
  * @file main.cpp
  * @brief 00-hello-rect 示例：mine.paint Canvas SDF 填充 + 描边命令综合演示。
  *
- * 演示内容（2×4 网格布局，左列填充/右列描边）：
+ * 演示内容（2×5 网格布局，左列填充/右列描边）：
  *   行1 左：FillRect                  — 纯色填充矩形（绿色）
  *   行1 右：StrokeRect                — 矩形描边（绿色，线宽 4px）
- *   行2 左：FillRoundedRect           — 均匀圆角矩形填充（蓝色，radius=24px）
+ *   行2 左：FillRoundedRect           — 均匀圆角矩形填充（蓝色，radius=20px）
  *   行2 右：StrokeRoundedRect         — 均匀圆角矩形描边（蓝色，线宽 4px）
  *   行3 左：FillComplexRoundedRect    — 四角独立圆角矩形填充（橙色）
  *   行3 右：StrokeComplexRoundedRect  — 四角独立圆角矩形描边（橙色，线宽 4px）
  *   行4 左：FillEllipse               — 椭圆填充（紫色）
  *   行4 右：StrokeEllipse             — 椭圆描边（紫色，线宽 4px）
+ *   行5 左：StrokeBorderedRect        — 四边不等宽内侧描边（红色，上4/右2/下16/左8）
+ *   行5 右：StrokeBorderedRect        — 仅上下边框（青色，上下各12px）
  */
 
 #include <mine/platform/PlatformAbi.h>
@@ -48,7 +50,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
     }
 
     /**
-     * @brief 渲染一帧：清屏 + 2×4 网格展示 SDF 填充和描边命令 + 呈现。
+     * @brief 渲染一帧：清屏 + 2×5 网格展示填充、描边和四边不等宽描边命令 + 呈现。
      */
     void render() {
         if (!device || !swapchain || !paint_renderer) return;
@@ -68,37 +70,34 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
             mine::math::Rect{0.0f, 0.0f, W, H},
             mine::paint::Brush::solid(mine::math::Color{0.12f, 0.12f, 0.12f, 1.0f}));
 
-        // 2×4 网格参数（2列 × 4行，填充列 / 描边列）
-        const float outer_pad = 20.0f;  // 外边距
-        const float gap       = 12.0f;  // 格子间距
-        const float cw        = (W - outer_pad * 2.0f - gap) * 0.5f;  // 格子宽度
-        const float ch        = (H - outer_pad * 2.0f - gap * 3.0f) * 0.25f;  // 格子高度
+        // 2×5 网格参数（2列 × 5行）
+        const float outer_pad = 20.0f;
+        const float gap       = 10.0f;
+        const float cw        = (W - outer_pad * 2.0f - gap) * 0.5f;
+        const float ch        = (H - outer_pad * 2.0f - gap * 4.0f) / 5.0f;
 
-        // 列起始 X
         const float col0 = outer_pad;
         const float col1 = outer_pad + cw + gap;
 
-        // 各行起始 Y
         const float row0 = outer_pad;
         const float row1 = outer_pad + ch + gap;
         const float row2 = outer_pad + (ch + gap) * 2.0f;
         const float row3 = outer_pad + (ch + gap) * 3.0f;
+        const float row4 = outer_pad + (ch + gap) * 4.0f;
 
-        // 形状在格子内的内边距
-        const float ip  = 16.0f;
-        const float sw  = cw - ip * 2.0f;  // 形状宽度
-        const float sh  = ch - ip * 2.0f;  // 形状高度
-
-        // 描边线宽
-        const float line_w = 4.0f;
+        const float ip = 14.0f;
+        const float sw = cw - ip * 2.0f;
+        const float sh = ch - ip * 2.0f;
 
         // 颜色定义
-        const mine::math::Color col_green  {0.20f, 0.75f, 0.35f, 1.0f};  // 绿色（矩形）
-        const mine::math::Color col_blue   {0.20f, 0.45f, 0.90f, 1.0f};  // 蓝色（圆角矩形）
-        const mine::math::Color col_orange {0.95f, 0.55f, 0.10f, 1.0f};  // 橙色（复杂圆角）
-        const mine::math::Color col_purple {0.65f, 0.25f, 0.90f, 1.0f};  // 紫色（椭圆）
+        const mine::math::Color col_green  {0.20f, 0.75f, 0.35f, 1.0f};
+        const mine::math::Color col_blue   {0.20f, 0.45f, 0.90f, 1.0f};
+        const mine::math::Color col_orange {0.95f, 0.55f, 0.10f, 1.0f};
+        const mine::math::Color col_purple {0.65f, 0.25f, 0.90f, 1.0f};
+        const mine::math::Color col_red    {0.90f, 0.20f, 0.20f, 1.0f};
+        const mine::math::Color col_cyan   {0.15f, 0.80f, 0.85f, 1.0f};
 
-        const mine::paint::Pen pen{.width = line_w, .miter_limit = 4.0f};  // 线宽 4px，斜接限制 4
+        const mine::paint::Pen pen{.width = 4.0f, .miter_limit = 4.0f};
 
         // ── 行1 左：FillRect ────────────────────────────────────────────
         canvas.fill_rect(
@@ -108,25 +107,17 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // ── 行1 右：StrokeRect ──────────────────────────────────────────
         canvas.stroke_rect(
             mine::math::Rect{col1 + ip, row0 + ip, sw, sh},
-            mine::paint::Brush::solid(col_green),
-            pen);
+            mine::paint::Brush::solid(col_green), pen);
 
         // ── 行2 左：FillRoundedRect ─────────────────────────────────────
         canvas.fill_rounded_rect(
-            mine::math::RoundedRect{
-                mine::math::Rect{col0 + ip, row1 + ip, sw, sh},
-                20.0f
-            },
+            mine::math::RoundedRect{mine::math::Rect{col0 + ip, row1 + ip, sw, sh}, 20.0f},
             mine::paint::Brush::solid(col_blue));
 
         // ── 行2 右：StrokeRoundedRect ───────────────────────────────────
         canvas.stroke_rounded_rect(
-            mine::math::RoundedRect{
-                mine::math::Rect{col1 + ip, row1 + ip, sw, sh},
-                20.0f
-            },
-            mine::paint::Brush::solid(col_blue),
-            pen);
+            mine::math::RoundedRect{mine::math::Rect{col1 + ip, row1 + ip, sw, sh}, 20.0f},
+            mine::paint::Brush::solid(col_blue), pen);
 
         // ── 行3 左：FillComplexRoundedRect ─────────────────────────────
         const mine::math::CornerRadii radii{
@@ -136,41 +127,38 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
             {8.0f,  8.0f}    // 左下角
         };
         canvas.fill_complex_rounded_rect(
-            mine::math::ComplexRoundedRect{
-                mine::math::Rect{col0 + ip, row2 + ip, sw, sh},
-                radii
-            },
+            mine::math::ComplexRoundedRect{mine::math::Rect{col0 + ip, row2 + ip, sw, sh}, radii},
             mine::paint::Brush::solid(col_orange));
 
         // ── 行3 右：StrokeComplexRoundedRect ───────────────────────────
         canvas.stroke_complex_rounded_rect(
-            mine::math::ComplexRoundedRect{
-                mine::math::Rect{col1 + ip, row2 + ip, sw, sh},
-                radii
-            },
-            mine::paint::Brush::solid(col_orange),
-            pen);
+            mine::math::ComplexRoundedRect{mine::math::Rect{col1 + ip, row2 + ip, sw, sh}, radii},
+            mine::paint::Brush::solid(col_orange), pen);
 
         // ── 行4 左：FillEllipse ─────────────────────────────────────────
-        const float ecx0 = col0 + ip + sw * 0.5f;
-        const float ecx1 = col1 + ip + sw * 0.5f;
-        const float ecy3 = row3 + ip + sh * 0.5f;
-        const float erx  = sw * 0.5f;
-        const float ery  = sh * 0.5f;
-
         canvas.fill_ellipse(
-            mine::math::Vec2{ecx0, ecy3},
-            mine::math::Vec2{erx, ery},
+            mine::math::Vec2{col0 + ip + sw * 0.5f, row3 + ip + sh * 0.5f},
+            mine::math::Vec2{sw * 0.5f, sh * 0.5f},
             mine::paint::Brush::solid(col_purple));
 
         // ── 行4 右：StrokeEllipse ───────────────────────────────────────
         canvas.stroke_ellipse(
-            mine::math::Vec2{ecx1, ecy3},
-            mine::math::Vec2{erx, ery},
-            mine::paint::Brush::solid(col_purple),
-            pen);
+            mine::math::Vec2{col1 + ip + sw * 0.5f, row3 + ip + sh * 0.5f},
+            mine::math::Vec2{sw * 0.5f, sh * 0.5f},
+            mine::paint::Brush::solid(col_purple), pen);
 
-        // Canvas::end() 返回不可变的绘制命令列表
+        // ── 行5 左：StrokeBorderedRect（四边不等宽，上4/右2/下16/左8）──
+        canvas.stroke_bordered_rect(
+            mine::math::Rect{col0 + ip, row4 + ip, sw, sh},
+            mine::paint::Brush::solid(col_red),
+            mine::paint::BorderWidths{4.0f, 2.0f, 16.0f, 8.0f});
+
+        // ── 行5 右：StrokeBorderedRect（仅上下边框各12px，左右不描边）──
+        canvas.stroke_bordered_rect(
+            mine::math::Rect{col1 + ip, row4 + ip, sw, sh},
+            mine::paint::Brush::solid(col_cyan),
+            mine::paint::BorderWidths{.top = 12.0f, .bottom = 12.0f});
+
         mine::paint::DisplayList dl = canvas.end();
 
         // ── 2. 提交渲染 ────────────────────────────────────────────────────

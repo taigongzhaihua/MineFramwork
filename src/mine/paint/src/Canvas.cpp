@@ -126,6 +126,16 @@ void Canvas::stroke_complex_rounded_rect(math::ComplexRoundedRect rrect, const B
     push(cmd);
 }
 
+void Canvas::stroke_bordered_rect(math::Rect rect, const Brush& brush, BorderWidths widths) {
+    DrawCmd cmd;
+    cmd.kind          = DrawCmdKind::StrokeBorderedRect;
+    cmd.rect          = rect;
+    cmd.brush         = brush;
+    // 复用 border_widths 字段存储四边宽度
+    cmd.border_widths = widths;
+    push(cmd);
+}
+
 void Canvas::stroke_ellipse(math::Vec2 center, math::Vec2 radii, const Brush& brush, const Pen& pen) {
     DrawCmd cmd;
     cmd.kind  = DrawCmdKind::StrokeEllipse;

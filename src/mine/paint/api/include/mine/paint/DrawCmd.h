@@ -19,6 +19,7 @@
 
 #include <mine/paint/Brush.h>
 #include <mine/paint/Pen.h>
+#include <mine/paint/BorderWidths.h>
 #include <mine/math/Rect.h>
 #include <mine/math/RoundedRect.h>
 #include <mine/math/ComplexRoundedRect.h>
@@ -39,10 +40,11 @@ enum class DrawCmdKind : uint8_t {
     FillPath,                ///< 填充任意路径（通过 path_index 引用）
 
     // ── 描边命令 ────────────────────────────────────────────────────────
-    StrokeRect,              ///< 描边矩形
+    StrokeRect,              ///< 描边矩形（均匀描边，Pen.width 决定线宽）
     StrokeRoundedRect,       ///< 描边圆角矩形
     StrokeComplexRoundedRect,///< 描边四角各自独立的椭圆圆角矩形
-    StrokeEllipse,     ///< 描边椭圆
+    StrokeEllipse,           ///< 描边椭圆
+    StrokeBorderedRect,      ///< 四边各自独立宽度的矩形内侧描边（类 CSS border）
     StrokeLine,        ///< 描边线段（from → to）
     StrokePath,        ///< 描边任意路径（通过 path_index 引用）
 
@@ -72,6 +74,8 @@ enum class DrawCmdKind : uint8_t {
  *  StrokeRoundedRect  | rrect         | ✓     | ✓   |
  *  StrokeEllipse      | pt_a(中心)    | ✓     | ✓   |
  *                     | pt_b(半径)    |       |     |
+ *  StrokeBorderedRect | rect          | ✓     |     |  pt_a={top,right}
+ *                     | border_widths |       |     |  pt_b={bottom,left}
  *  StrokeLine         | pt_a(起点)    | ✓     | ✓   |
  *                     | pt_b(终点)    |       |     |
  *  StrokePath         |               | ✓     | ✓   | ✓
@@ -93,8 +97,9 @@ struct DrawCmd {
     math::Transform2D transform{};     ///< 变换矩阵（TransformPush）
 
     // ── 绘制属性 ────────────────────────────────────────────────────────
-    Brush brush{};   ///< 填充/描边画刷
-    Pen   pen{};     ///< 描边样式（描边命令使用）
+    Brush        brush{};          ///< 填充/描边画刷
+    Pen          pen{};            ///< 描边样式（描边命令使用）
+    BorderWidths border_widths{};  ///< 四边独立描边宽度（StrokeBorderedRect 使用）
 };
 
 } // namespace mine::paint

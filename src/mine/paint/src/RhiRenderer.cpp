@@ -10,6 +10,7 @@
  *   - FillRoundedRect / StrokeRoundedRect：均匀圆角矩形 SDF
  *   - FillComplexRoundedRect / StrokeComplexRoundedRect：四角独立圆角矩形 SDF
  *   - FillEllipse / StrokeEllipse：椭圆 SDF（IQ 近似公式）
+ *   - StrokeBorderedRect：四边各自独立宽度的矩形内侧描边 SDF（kind=4）
  *   - StrokeLine：折线展开描边（Miter join 方案）
  *
  * 渲染架构：
@@ -192,6 +193,28 @@ float4 main(SdfPSIn i) : SV_Target {
     } else if (kind == 2) {
         // 四角独立圆角矩形（p0=右下, p1=右上, p2=左下, p3=左上）
         d = complex_rounded_box_sdf(p, b, float4(p0, p1, p2, p3));
+    } else if (kind == 4) {
+        // 四边不等宽矩形内侧描边（p0=top_w, p1=right_w, p2=bottom_w, p3=left_w）
+        //
+        // 原理：以原矩形为外框，向内收缩各边指定宽度后得到内框。
+        // 内框的半尺寸根据像素所在象限动态确定：
+        //   - X 方向：像素在右半（lx>0）收缩 right_w，左半收缩 left_w
+        //   - Y 方向：像素在下半（ly>0）收缩 bottom_w，上半收缩 top_w
+        // 角落像素由对应象限的边宽决定，产生斜切效果（与 CSS border 行为一致）。
+        float d_outer = box_sdf(p, b);
+        float ihw = b.x - (p.x > 0.0f ? p1 : p3);  // 右半减去 right_w，左半减去 left_w
+        float ihh = b.y - (p.y > 0.0f ? p2 : p0);  // 下半减去 bottom_w，上半减去 top_w
+        ihw = max(ihw, 0.001f);  // 防止内框半尺寸退化为零导致 box_sdf 精度问题
+        ihh = max(ihh, 0.001f);
+        float d_inner = box_sdf(p, float2(ihw, ihh));
+        // 边框区域 alpha：外矩形内（d_outer < 0）且内矩形外（d_inner > 0）
+        float fw_o = max(fwidth(d_outer), 0.5f);
+        float fw_i = max(fwidth(d_inner), 0.5f);
+        float a_outer = 1.0f - smoothstep(-fw_o, fw_o, d_outer);
+        float a_inner = smoothstep(-fw_i, fw_i, d_inner);
+        float al = a_outer * a_inner;
+        float4 c2 = i.color;
+        return float4(c2.rgb * c2.a * al, c2.a * al);
     } else {
         // 椭圆（half_w = X 半径, half_h = Y 半径）
         d = ellipse_sdf(p, b);
@@ -799,6 +822,39 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             // 矩形描边（kind=0，stroke_w=线宽）
             push_sdf_quad_vertices(verts, cx, cy, hw, hh, pad,
                 c.r, c.g, c.b, c.a, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, sw);
+
+            gfx::BufferDesc vb{};
+            vb.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
+            vb.stride     = sizeof(SdfVertex);
+            vb.bind_flags = gfx::BufferBindFlags::Vertex;
+            auto buf = device_->create_buffer(vb, verts.data());
+            if (!buf) continue;
+
+            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_constant_buffer(0, viewport_cb.get());
+            cmd_list_->set_vertex_buffer(0, buf.get(), 0);
+            cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
+        }
+        else if (cmd.kind == DrawCmdKind::StrokeBorderedRect) {
+            // 四边各自独立宽度的矩形内侧描边（SDF kind=4）
+            // p0=top_w, p1=right_w, p2=bottom_w, p3=left_w
+            if (cmd.brush.kind() != BrushKind::SolidColor) continue;
+            const auto& bw = cmd.border_widths;
+            // 若四边宽度全为零则跳过
+            if (bw.top <= 0.0f && bw.right <= 0.0f && bw.bottom <= 0.0f && bw.left <= 0.0f) continue;
+            const math::Color c = cmd.brush.color();
+            const float cx = cmd.rect.x + cmd.rect.width  * 0.5f;
+            const float cy = cmd.rect.y + cmd.rect.height * 0.5f;
+            const float hw = cmd.rect.width  * 0.5f;
+            const float hh = cmd.rect.height * 0.5f;
+            // 内侧描边不超出矩形外边界，只需要 1px AA 余量
+            const float pad = 1.0f;
+
+            containers::Vector<SdfVertex> verts;
+            // kind=4，p0=top_w, p1=right_w, p2=bottom_w, p3=left_w，stroke_w=0（未使用）
+            push_sdf_quad_vertices(verts, cx, cy, hw, hh, pad,
+                c.r, c.g, c.b, c.a, 4.0f,
+                bw.top, bw.right, bw.bottom, bw.left, 0.0f);
 
             gfx::BufferDesc vb{};
             vb.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
