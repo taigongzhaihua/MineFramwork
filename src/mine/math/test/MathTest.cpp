@@ -227,6 +227,144 @@ TEST_CASE("Math_Transform2D_ApplyRect") {
     CHECK(result == Rect{7.0f, 4.0f, 8.0f, 15.0f});
 }
 
+TEST_CASE("Math_Thickness_Properties") {
+    Thickness t{2.0f, 4.0f, 6.0f, 8.0f};
+    CHECK(t.horizontal() == doctest::Approx(8.0f));   // left + right
+    CHECK(t.vertical()   == doctest::Approx(12.0f));  // top + bottom
+    CHECK_FALSE(t.is_uniform());
+    CHECK_FALSE(t.is_zero());
+
+    Thickness u = Thickness::uniform(3.0f);
+    CHECK(u.is_uniform());
+    CHECK(u.horizontal() == doctest::Approx(6.0f));
+
+    Thickness s = Thickness::symmetric(5.0f, 2.0f);
+    CHECK(s.left  == doctest::Approx(5.0f));
+    CHECK(s.top   == doctest::Approx(2.0f));
+    CHECK(s.right == doctest::Approx(5.0f));
+    CHECK(s.bottom == doctest::Approx(2.0f));
+}
+
+TEST_CASE("Math_Rect_Deflate_Inflate_Thickness") {
+    Rect r{10.0f, 10.0f, 100.0f, 80.0f};
+    Thickness t{5.0f, 3.0f, 7.0f, 4.0f}; // left, top, right, bottom
+
+    Rect deflated = r.deflated(t);
+    CHECK(deflated == Rect{15.0f, 13.0f, 88.0f, 73.0f});
+
+    Rect inflated = r.inflated(t);
+    CHECK(inflated == Rect{5.0f, 7.0f, 112.0f, 87.0f});
+}
+
+TEST_CASE("Math_ComplexRoundedRect_InnerRect") {
+    // 外圆角矩形 40x30，四角半径各不同（from_corners → rx==ry）
+    ComplexRoundedRect outer{
+        Rect{0.0f, 0.0f, 40.0f, 30.0f},
+        CornerRadii::from_corners(10.0f, 8.0f, 6.0f, 4.0f)
+    };
+    Thickness border{2.0f, 3.0f, 2.0f, 3.0f}; // left=2, top=3, right=2, bottom=3
+
+    ComplexRoundedRect inner = outer.inner_rect(border);
+
+    // 内侧矩形
+    CHECK(inner.rect == Rect{2.0f, 3.0f, 36.0f, 24.0f});
+    // 内侧圆角：外侧减去对应边厚度
+    CHECK(inner.radii.top_left.x    == doctest::Approx(8.0f));  // 10 - left=2
+    CHECK(inner.radii.top_left.y    == doctest::Approx(7.0f));  // 10 - top=3
+    CHECK(inner.radii.top_right.x   == doctest::Approx(6.0f));  // 8  - right=2
+    CHECK(inner.radii.top_right.y   == doctest::Approx(5.0f));  // 8  - top=3
+    CHECK(inner.radii.bottom_right.x == doctest::Approx(4.0f)); // 6  - right=2
+    CHECK(inner.radii.bottom_right.y == doctest::Approx(3.0f)); // 6  - bottom=3
+    CHECK(inner.radii.bottom_left.x  == doctest::Approx(2.0f)); // 4  - left=2
+    CHECK(inner.radii.bottom_left.y  == doctest::Approx(1.0f)); // 4  - bottom=3
+}
+
+TEST_CASE("Math_ComplexRoundedRect_InnerRect_RadiusClampedToZero") {
+    // 边框厚度超过圆角半径时，内侧圆角归零（而非负数）
+    ComplexRoundedRect outer{
+        Rect{0.0f, 0.0f, 20.0f, 20.0f},
+        CornerRadii::uniform(3.0f)
+    };
+    ComplexRoundedRect inner = outer.inner_rect(Thickness::uniform(5.0f)); // 5 > 3
+
+    CHECK(inner.radii.top_left.x    == doctest::Approx(0.0f));
+    CHECK(inner.radii.top_right.y   == doctest::Approx(0.0f));
+    CHECK(inner.radii.bottom_right.x == doctest::Approx(0.0f));
+}
+
+TEST_CASE("Math_CornerRadii_Uniform_And_Predicates") {
+    // uniform(r) 四角相同
+    CornerRadii all_same = CornerRadii::uniform(5.0f);
+    CHECK(all_same.is_uniform());
+    CHECK_FALSE(all_same.is_zero());
+    CHECK(all_same.top_left  == Vec2{5.0f, 5.0f});
+    CHECK(all_same.top_right == Vec2{5.0f, 5.0f});
+
+    // is_zero
+    CornerRadii all_zero{};
+    CHECK(all_zero.is_zero());
+
+    // from_corners 四角不同
+    CornerRadii mixed = CornerRadii::from_corners(4.0f, 8.0f, 0.0f, 2.0f);
+    CHECK_FALSE(mixed.is_uniform());
+    CHECK(mixed.top_left    == Vec2{4.0f, 4.0f});
+    CHECK(mixed.top_right   == Vec2{8.0f, 8.0f});
+    CHECK(mixed.bottom_right == Vec2{0.0f, 0.0f});
+    CHECK(mixed.bottom_left == Vec2{2.0f, 2.0f});
+}
+
+TEST_CASE("Math_ComplexRoundedRect_ClampRadii") {
+    // top_left.x + top_right.x = 8 + 8 = 16 > 10 → 缩放因子 = 10/16 = 0.625
+    ComplexRoundedRect crr{
+        Rect{0.0f, 0.0f, 10.0f, 10.0f},
+        CornerRadii::from_corners(8.0f, 8.0f, 0.0f, 0.0f)
+    };
+    // 预期所有角均缩放为 8*0.625 = 5
+    CHECK(crr.radii.top_left.x   == doctest::Approx(5.0f));
+    CHECK(crr.radii.top_right.x  == doctest::Approx(5.0f));
+    // 未超限的角（0）保持不变
+    CHECK(crr.radii.bottom_right.x == doctest::Approx(0.0f));
+}
+
+TEST_CASE("Math_ComplexRoundedRect_Contains_DifferentCorners") {
+    // 左上 5x5 圆角，右上直角，右下 10x10 圆角，左下直角
+    ComplexRoundedRect crr{
+        Rect{0.0f, 0.0f, 20.0f, 20.0f},
+        CornerRadii{
+            {5.0f,  5.0f},   // top_left：圆角
+            {0.0f,  0.0f},   // top_right：直角
+            {10.0f, 10.0f},  // bottom_right：圆角
+            {0.0f,  0.0f}    // bottom_left：直角
+        }
+    };
+
+    // 中心点在内
+    CHECK(crr.contains(Point{10.0f, 10.0f}));
+    // 右上角 — 直角，点 (19.5, 0.5) 在内
+    CHECK(crr.contains(Point{19.5f, 0.5f}));
+    // 左下角 — 直角，点 (0.5, 19.5) 在内
+    CHECK(crr.contains(Point{0.5f, 19.5f}));
+    // 左上角圆角区域内侧（椭圆内）
+    CHECK(crr.contains(Point{1.5f, 1.5f}));
+    // 左上角圆角区域外侧（椭圆外）— (0,0) 极角处
+    CHECK_FALSE(crr.contains(Point{0.0f, 0.0f}));
+    // 右下角圆角区域内侧
+    CHECK(crr.contains(Point{15.0f, 15.0f}));
+    // 右下角圆角区域外侧（接近 (20,20) 极角处）
+    CHECK_FALSE(crr.contains(Point{19.5f, 19.5f}));
+}
+
+TEST_CASE("Math_ComplexRoundedRect_Translated") {
+    ComplexRoundedRect crr{
+        Rect{0.0f, 0.0f, 10.0f, 10.0f},
+        CornerRadii::from_corners(2.0f, 3.0f, 4.0f, 1.0f)
+    };
+    ComplexRoundedRect moved = crr.translated(Vec2{5.0f, -3.0f});
+    CHECK(moved.rect == Rect{5.0f, -3.0f, 10.0f, 10.0f});
+    // 圆角半径不变
+    CHECK(moved.radii == crr.radii);
+}
+
 TEST_CASE("Math_Common_DegreesRadians") {
     const float clamped_low = clamp01(-1.0f);
     const float clamped_high = clamp01(2.0f);

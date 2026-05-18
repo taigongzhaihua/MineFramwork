@@ -7,6 +7,7 @@
 
 #include <mine/math/Point.h>
 #include <mine/math/Size.h>
+#include <mine/math/Thickness.h>
 
 namespace mine::math {
 
@@ -86,6 +87,20 @@ struct Rect {
 
     [[nodiscard]] constexpr Rect deflated(float horizontal, float vertical) const noexcept {
         return inflated(-horizontal, -vertical);
+    }
+
+    /// 按四边各自的厚度向内收缩
+    [[nodiscard]] constexpr Rect deflated(const Thickness& t) const noexcept {
+        return {x + t.left, y + t.top,
+                width  - t.left - t.right,
+                height - t.top  - t.bottom};
+    }
+
+    /// 按四边各自的厚度向外扩展
+    [[nodiscard]] constexpr Rect inflated(const Thickness& t) const noexcept {
+        return {x - t.left, y - t.top,
+                width  + t.left + t.right,
+                height + t.top  + t.bottom};
     }
 
     [[nodiscard]] constexpr Rect intersection(Rect other) const noexcept {
