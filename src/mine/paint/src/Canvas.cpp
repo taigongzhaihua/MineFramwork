@@ -193,6 +193,20 @@ void Canvas::stroke_quad_bezier(math::Vec2 p0, math::Vec2 p1, math::Vec2 p2,
     push(cmd);
 }
 
+void Canvas::stroke_cubic_bezier(math::Vec2 p0, math::Vec2 p1, math::Vec2 p2, math::Vec2 p3,
+                                 const Brush& brush, const Pen& pen) {
+    // pt_a = P0（起点），pt_b = P1（第一控制点），pt_c = P2（第二控制点），pt_d = P3（终点）
+    DrawCmd cmd;
+    cmd.kind  = DrawCmdKind::StrokeCubicBezier;
+    cmd.pt_a  = p0;
+    cmd.pt_b  = p1;
+    cmd.pt_c  = p2;
+    cmd.pt_d  = p3;
+    cmd.brush = brush;
+    cmd.pen   = pen;
+    push(cmd);
+}
+
 void Canvas::stroke_path(const Path& path, const Brush& brush, const Pen& pen) {
     DrawCmd cmd;
     cmd.kind       = DrawCmdKind::StrokePath;

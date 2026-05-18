@@ -202,6 +202,19 @@ public:
     void stroke_quad_bezier(math::Vec2 p0, math::Vec2 p1, math::Vec2 p2,
                             const Brush& brush, const Pen& pen = {});
 
+    /**
+     * @brief 描边三次贝塞尔曲线（P0 → P1 → P2 → P3，Flat/Round cap）。
+     *
+     * @param p0    起点（t=0）
+     * @param p1    第一控制点
+     * @param p2    第二控制点
+     * @param p3    终点（t=1）
+     * @param brush 画刷（当前仅支持 SolidColor）
+     * @param pen   描边样式（width、start_cap、end_cap）
+     */
+    void stroke_cubic_bezier(math::Vec2 p0, math::Vec2 p1, math::Vec2 p2, math::Vec2 p3,
+                             const Brush& brush, const Pen& pen = {});
+
     /// 描边任意路径。
     void stroke_path(const Path& path, const Brush& brush, const Pen& pen = {});
 

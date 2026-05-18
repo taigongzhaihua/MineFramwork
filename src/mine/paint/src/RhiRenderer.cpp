@@ -15,6 +15,7 @@
  *   - StrokeLine：线段 SDF 描边，天然抗锯齿，支持 Flat/Round/Square 端点样式（kind=6）
  *   - StrokeArc：圆弧 SDF 描边（IQ 旋转坐标系法），支持 Flat/Round cap（kind=7）
  *   - StrokeQuadBezier：二次贝塞尔曲线 SDF 描边（IQ 解析解），支持 Flat/Round cap（kind=8）
+ *   - StrokeCubicBezier：三次贝塞尔曲线 SDF 描边（数値迭代：17步采样+Newton精化），支持 Flat/Round cap（kind=9）
  *
  * 渲染架构：
  *   - 所有形状（含线段）均走 SDF 管线，SDF 参数编入顶点，逐像素精确 AA
@@ -30,6 +31,7 @@
  *   6=线段描边（Flat/Round/Square 端点样式）
  *   7=圆弧描边（Flat/Round cap，IQ 旋转坐标系）
  *   8=二次贝塞尔曲线描边（Flat/Round cap，IQ 解析解）
+ *   9=三次贝塞尔曲线描边（Flat/Round cap，17步采样+Newton数値迭代）
  */
 
 #include <mine/paint/IRenderer.h>
@@ -531,6 +533,87 @@ R"hlsl(
         float al8 = 1.0f - smoothstep(-fw8, fw8, d8);
         float4 cs8 = i.color;
         return float4(cs8.rgb * cs8.a * al8, cs8.a * al8);
+    } else if (kind == 9) {
+        // ── 三次贝塞尔曲线描边 SDF（数值迭代：17 步采样 + 4 步 Newton 精化）──
+        //
+        // 参数映射：
+        //   half_w, half_h = P3 本地坐标（终点）← 借用"半尺寸"槽
+        //   p0        = start_cap（0=Flat 截断, 1=Round 圆形）
+        //   p1        = end_cap（同上）
+        //   p2, p3    = P2 本地坐标（第二控制点）← 借用 p2/p3 槽
+        //   stroke_w  = 线宽（总宽度）
+        //   extra.xy  = P0 本地坐标（起点，t=0）
+        //   extra.zw  = P1 本地坐标（第一控制点）
+        //
+        // 算法（数值法，三次贝塞尔无解析极值公式）：
+        //   1. 沿曲线均匀采样 17 个点（t = 0/16 … 16/16），找到初始最近点参数 best_t
+        //   2. 对 best_t 做 4 步 Newton-Raphson 精化（最小化 f(t)=dot(Q(t)-p, Q'(t))=0）
+        //   3. clamp(t, 0, 1) 天然实现 Round cap 端点延伸
+        //   4. Flat cap：端点切线半平面截断（CSG max 操作，类比 kind=8）
+        float2 Cb_A = i.extra.xy;               // P0（起点）
+        float2 Cb_B = i.extra.zw;               // P1（第一控制点）
+        float2 Cb_C = float2(p2, p3);           // P2（第二控制点）← 借用 p2/p3 槽
+        float2 Cb_D = float2(half_w, half_h);   // P3（终点）← 借用 half_w/half_h 槽
+        float half_sw9 = stroke_w * 0.5f;
+
+        // 三次贝塞尔多项式系数（Horner 展开，Q(t) = cb3 t³ + cb2 t² + cb1 t + cb0）
+        //   Q(t) = (1-t)³ A + 3(1-t)²t B + 3(1-t)t² C + t³ D
+        float2 cb3 = -Cb_A + 3.0f * Cb_B - 3.0f * Cb_C + Cb_D;  // 三次项
+        float2 cb2 =  3.0f * Cb_A - 6.0f * Cb_B + 3.0f * Cb_C;  // 二次项
+        float2 cb1 = -3.0f * Cb_A + 3.0f * Cb_B;                 // 一次项
+        float2 cb0 =  Cb_A;                                        // 常数项
+
+        // 采样 17 个点，找到最小距离平方及其参数 best_t（粗定位）
+        float best_t  = 0.0f;
+        float best_d2 = 1e30f;
+        [unroll]
+        for (int si = 0; si <= 16; si++) {
+            float t = float(si) / 16.0f;
+            float2 q = ((cb3 * t + cb2) * t + cb1) * t + cb0;
+            float  dd = dot(p - q, p - q);
+            if (dd < best_d2) { best_d2 = dd; best_t = t; }
+        }
+
+        // Newton-Raphson 精化（4 步）：最小化 f(t) = dot(Q(t)-p, Q'(t)) = 0
+        //   f'(t) = dot(Q'(t), Q'(t)) + dot(Q(t)-p, Q''(t))
+        float t9 = best_t;
+        [unroll]
+        for (int ni = 0; ni < 4; ni++) {
+            float2 q   = ((cb3 * t9 + cb2) * t9 + cb1) * t9 + cb0;  // Q(t)
+            float2 dq  = (3.0f * cb3 * t9 + 2.0f * cb2) * t9 + cb1; // Q'(t)
+            float2 d2q = 6.0f * cb3 * t9 + 2.0f * cb2;              // Q''(t)
+            float2 diff = q - p;
+            float f  = dot(diff, dq);
+            float fp = dot(dq, dq) + dot(diff, d2q);
+            if (abs(fp) > 1e-10f) t9 -= f / fp;
+            t9 = clamp(t9, 0.0f, 1.0f);
+        }
+
+        float2 closest9 = ((cb3 * t9 + cb2) * t9 + cb1) * t9 + cb0;
+        float d9 = length(p - closest9) - half_sw9;
+
+        // Flat cap 截断（CSG max：端点切线半平面限制描边区域）
+        //   P0 端切线方向（指向曲线内部）：normalize(Cb_B - Cb_A)
+        //   P3 端切线方向（指向曲线内部）：normalize(Cb_D - Cb_C)
+        int scap9 = (int)(p0 + 0.5f);
+        int ecap9 = (int)(p1 + 0.5f);
+        if (scap9 == 0) {
+            float2 t0_vec = Cb_B - Cb_A;
+            float  t0_l   = length(t0_vec);
+            float2 t0     = t0_l > 1e-6f ? t0_vec / t0_l : float2(1.0f, 0.0f);
+            d9 = max(d9, dot(Cb_A - p, t0));
+        }
+        if (ecap9 == 0) {
+            float2 t1_vec = Cb_D - Cb_C;
+            float  t1_l   = length(t1_vec);
+            float2 t1     = t1_l > 1e-6f ? t1_vec / t1_l : float2(1.0f, 0.0f);
+            d9 = max(d9, dot(p - Cb_D, t1));
+        }
+
+        float fw9 = max(fwidth(d9), 0.5f);
+        float al9 = 1.0f - smoothstep(-fw9, fw9, d9);
+        float4 cs9 = i.color;
+        return float4(cs9.rgb * cs9.a * al9, cs9.a * al9);
     } else {
         // 椭圆（half_w = X 半径, half_h = Y 半径）
         d = ellipse_sdf(p, b);
@@ -1547,6 +1630,99 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             cmd_list_->set_pipeline(sdf_pipeline_.get());
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
             cmd_list_->set_vertex_buffer(0, buf8.get(), 0);
+            cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
+        }
+
+        // ── 三次贝塞尔曲线 SDF 描边（kind=9）────────────────────────────
+
+        else if (cmd.kind == DrawCmdKind::StrokeCubicBezier) {
+            // SDF 方案（kind=9），数值迭代（17步采样 + 4步 Newton 精化）。
+            // P2（第二控制点）本地坐标借用 SdfVertex 的 p2/p3 槽。
+            // P3（终点）本地坐标借用 SdfVertex 的 half_w/half_h 槽。
+            if (cmd.brush.kind() != BrushKind::SolidColor) continue;
+            if (cmd.pen.width <= 0.0f) continue;
+
+            const math::Color c = cmd.brush.color();
+            const float sw      = cmd.pen.width;
+            const float half_sw = sw * 0.5f;
+
+            // 四个控制点
+            const float p0x = cmd.pt_a.x, p0y = cmd.pt_a.y;  // 起点 P0
+            const float p1x = cmd.pt_b.x, p1y = cmd.pt_b.y;  // 第一控制点 P1
+            const float p2x = cmd.pt_c.x, p2y = cmd.pt_c.y;  // 第二控制点 P2
+            const float p3x = cmd.pt_d.x, p3y = cmd.pt_d.y;  // 终点 P3
+
+            // Quad 包围盒 = P0/P1/P2/P3 四点 AABB + 描边外扩 + AA 余量
+            // 三次贝塞尔曲线在四点凸包内，四点的 AABB 是保守包围盒
+            const float padding = half_sw + 1.0f;
+            const float xmin = std::min(p0x, std::min(p1x, std::min(p2x, p3x)));
+            const float xmax = std::max(p0x, std::max(p1x, std::max(p2x, p3x)));
+            const float ymin = std::min(p0y, std::min(p1y, std::min(p2y, p3y)));
+            const float ymax = std::max(p0y, std::max(p1y, std::max(p2y, p3y)));
+            const float cx   = (xmin + xmax) * 0.5f;
+            const float cy   = (ymin + ymax) * 0.5f;
+            // 实际 Quad 半尺寸（用于生成顶点坐标）
+            const float quad_hw = (xmax - xmin) * 0.5f + padding;
+            const float quad_hh = (ymax - ymin) * 0.5f + padding;
+
+            // 四点本地坐标（以 Quad 中心为原点）
+            const float lp0x = p0x - cx, lp0y = p0y - cy;  // P0 本地坐标
+            const float lp1x = p1x - cx, lp1y = p1y - cy;  // P1 本地坐标
+            const float lp2x = p2x - cx, lp2y = p2y - cy;  // P2 本地坐标（借用 p2/p3 槽）
+            const float lp3x = p3x - cx, lp3y = p3y - cy;  // P3 本地坐标（借用 half_w/half_h 槽）
+
+            // cap 编码（0=Flat, 1=Round）
+            auto bez_cap = [](LineCap cap) -> float {
+                return cap == LineCap::Round ? 1.0f : 0.0f;
+            };
+            const float scap = bez_cap(cmd.pen.start_cap);
+            const float ecap = bez_cap(cmd.pen.end_cap);
+
+            // 手动构造 6 个 SdfVertex（不用 push_sdf_quad_vertices，
+            // 因为 half_w/half_h 槽用于存放 P3 本地坐标，p2/p3 槽用于存放 P2 本地坐标）
+            containers::Vector<SdfVertex> verts;
+            verts.reserve(6);
+
+            // kind=9：half_w=P3.x_local, half_h=P3.y_local（借用）
+            // p0=start_cap, p1=end_cap, p2=P2.x_local, p3=P2.y_local（借用）
+            // e0,e1=P0本地坐标, e2,e3=P1本地坐标
+            auto make_v9 = [&](float sx, float sy) -> SdfVertex {
+                return {
+                    sx, sy,
+                    c.r, c.g, c.b, c.a,
+                    sx - cx, sy - cy,               // 本地坐标（相对 Quad 中心）
+                    9.0f,                            // kind=9
+                    lp3x, lp3y,                     // half_w=P3.x_local, half_h=P3.y_local
+                    scap,                            // p0=start_cap
+                    ecap, lp2x, lp2y,               // p1=end_cap, p2=P2.x_local, p3=P2.y_local
+                    sw,                              // stroke_w
+                    lp0x, lp0y, lp1x, lp1y          // e0,e1=P0, e2,e3=P1
+                };
+            };
+
+            // Quad 屏幕坐标（包围盒 6 顶点）
+            const float x1 = cx - quad_hw;
+            const float y1 = cy - quad_hh;
+            const float x2 = cx + quad_hw;
+            const float y2 = cy + quad_hh;
+
+            verts.push_back(make_v9(x1, y1));
+            verts.push_back(make_v9(x2, y1));
+            verts.push_back(make_v9(x1, y2));
+            verts.push_back(make_v9(x2, y1));
+            verts.push_back(make_v9(x2, y2));
+            verts.push_back(make_v9(x1, y2));
+
+            gfx::BufferDesc vb9{};
+            vb9.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
+            vb9.stride     = sizeof(SdfVertex);
+            vb9.bind_flags = gfx::BufferBindFlags::Vertex;
+            auto buf9 = device_->create_buffer(vb9, verts.data());
+            if (!buf9) continue;
+
+            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_constant_buffer(0, viewport_cb.get());
+            cmd_list_->set_vertex_buffer(0, buf9.get(), 0);
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
         }
 

@@ -2,23 +2,25 @@
  * @file main.cpp
  * @brief 00-hello-rect 示例：mine.paint Canvas SDF 填充 + 描边命令综合演示。
  *
- * 演示内容（2×8 网格布局，左列填充/右列描边）：
+ * 演示内容（2×9 网格布局，左列填充/右列描边）：
  *   行1 左：FillRect                      — 纯色填充矩形（绿色）
  *   行1 右：StrokeRect                    — 矩形描边（绿色，线宽 4px）
  *   行2 左：FillRoundedRect               — 均匀圆角矩形填充（蓝色，radius=20px）
  *   行2 右：StrokeRoundedRect             — 均匀圆角矩形描边（蓝色，线宽 4px）
  *   行3 左：FillComplexRoundedRect        — 四角独立圆角矩形填充（橙色）
  *   行3 右：StrokeComplexRoundedRect      — 四角独立圆角矩形描边（橙色，线宽 4px）
- *   行4 左：FillEllipse                   — 椭圆填充（紫色）
- *   行4 右：StrokeEllipse                 — 椭圆描边（紫色，线宽 4px）
+ *   行4 左：FillEllipse                   — 満源填充（紫色）
+ *   行4 右：StrokeEllipse                 — 満源描边（紫色，线宽 4px）
  *   行5 左：StrokeBorderedRoundedRect     — 四边不等宽 + 四角独立圆角内侧描边（红色）
- *   行5 右：StrokeBorderedRoundedRect     — 均匀圆角 + 仅上下边框（青色，上下各12px）
+ *   行5 右：StrokeBorderedRoundedRect     — 均匀圆角 + 仅上下边框（青色，上下员4 12px）
  *   行6 左：StrokeLine (Flat cap)          — 平端线段（双色渐变 SDF）
  *   行6 右：StrokeLine (Round + Square)    — 混合端点样式线段对比
  *   行7 左：StrokeArc (Flat cap)           — 四分之一圆弧，平端截断
  *   行7 右：StrokeArc (Round cap)          — 半圆弧，圆形端点
  *   行8 左：StrokeQuadBezier (Flat cap)    — 二次贝塞尔抛物线，平端截断
  *   行8 右：StrokeQuadBezier (Round cap)   — 二次贝塞尔 S 形曲线，圆形端点
+ *   行9 左：StrokeCubicBezier (Flat cap)   — 三次贝塞尔 S 形曲线，平端截断
+ *   行9 右：StrokeCubicBezier (Round cap)  — 三次贝塞尔大 S 形，圆形端点
  */
 
 #include <mine/platform/PlatformAbi.h>
@@ -76,11 +78,11 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
             mine::math::Rect{0.0f, 0.0f, W, H},
             mine::paint::Brush::solid(mine::math::Color{0.12f, 0.12f, 0.12f, 1.0f}));
 
-        // 2×8 网格参数（2列 × 8行）
+        // 2×9 网格参数（2列 × 9行）
         const float outer_pad = 20.0f;
         const float gap       = 10.0f;
         const float cw        = (W - outer_pad * 2.0f - gap) * 0.5f;
-        const float ch        = (H - outer_pad * 2.0f - gap * 7.0f) / 8.0f;
+        const float ch        = (H - outer_pad * 2.0f - gap * 8.0f) / 9.0f;
 
         const float col0 = outer_pad;
         const float col1 = outer_pad + cw + gap;
@@ -93,6 +95,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         const float row5 = outer_pad + (ch + gap) * 5.0f;
         const float row6 = outer_pad + (ch + gap) * 6.0f;
         const float row7 = outer_pad + (ch + gap) * 7.0f;
+        const float row8 = outer_pad + (ch + gap) * 8.0f;
 
         const float ip = 14.0f;
         const float sw = cw - ip * 2.0f;
@@ -337,6 +340,70 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                 mine::math::Vec2{bx + sw * 0.3f, by + sh * 0.9f},  // 控制点（左下）
                 mine::math::Vec2{bx + sw, by + sh * 0.9f},          // 右下
                 mine::paint::Brush::solid(col_cyan), pen_bez_round);
+        }
+
+        // ── 行9 左：StrokeCubicBezier（Flat cap，S 形曲线）──────────────────
+        // 四个控制点组成标准 S 形，Flat cap 截断两端，体现三次贝塞尔的双曲率特性
+        {
+            const float bx = col0 + ip;
+            const float by = row8 + ip;
+
+            mine::paint::Pen pen_cub_flat;
+            pen_cub_flat.width     = 4.0f;
+            pen_cub_flat.start_cap = mine::paint::LineCap::Flat;
+            pen_cub_flat.end_cap   = mine::paint::LineCap::Flat;
+
+            // 主 S 形（Flat cap，蓝色）：P0 左上 → P1 右上（控制向右拱） → P2 左下（控制向左拱） → P3 右下
+            canvas.stroke_cubic_bezier(
+                mine::math::Vec2{bx,            by + sh * 0.1f},  // P0 左上
+                mine::math::Vec2{bx + sw,       by + sh * 0.1f},  // P1（向右拉）
+                mine::math::Vec2{bx,            by + sh * 0.9f},  // P2（向左拉）
+                mine::math::Vec2{bx + sw,       by + sh * 0.9f},  // P3 右下
+                mine::paint::Brush::solid(col_blue), pen_cub_flat);
+
+            // 细线对照：反向 S 形（Flat cap，橙色）
+            mine::paint::Pen pen_cub_flat2;
+            pen_cub_flat2.width     = 2.0f;
+            pen_cub_flat2.start_cap = mine::paint::LineCap::Flat;
+            pen_cub_flat2.end_cap   = mine::paint::LineCap::Flat;
+            canvas.stroke_cubic_bezier(
+                mine::math::Vec2{bx + sw * 0.5f, by},                  // P0 顶中
+                mine::math::Vec2{bx,             by + sh * 0.33f},      // P1（向左）
+                mine::math::Vec2{bx + sw,        by + sh * 0.67f},      // P2（向右）
+                mine::math::Vec2{bx + sw * 0.5f, by + sh},              // P3 底中
+                mine::paint::Brush::solid(col_orange), pen_cub_flat2);
+        }
+
+        // ── 行9 右：StrokeCubicBezier（Round cap，大 S + 对称 C 形）────────────
+        // Round cap 自然圆弧端点，展示三次贝塞尔在复杂路径中的表现
+        {
+            const float bx = col1 + ip;
+            const float by = row8 + ip;
+
+            mine::paint::Pen pen_cub_round;
+            pen_cub_round.width     = 5.0f;
+            pen_cub_round.start_cap = mine::paint::LineCap::Round;
+            pen_cub_round.end_cap   = mine::paint::LineCap::Round;
+
+            // 大 S 形（Round cap，紫色）：控制点拨幅更大形成夸张弯曲
+            canvas.stroke_cubic_bezier(
+                mine::math::Vec2{bx + sw * 0.2f, by + sh * 0.05f},   // P0
+                mine::math::Vec2{bx + sw * 0.9f, by + sh * 0.25f},   // P1（向右上拉）
+                mine::math::Vec2{bx + sw * 0.1f, by + sh * 0.75f},   // P2（向左下拉）
+                mine::math::Vec2{bx + sw * 0.8f, by + sh * 0.95f},   // P3
+                mine::paint::Brush::solid(col_purple), pen_cub_round);
+
+            // C 形弧线对照（Round cap，绿色，细线）
+            mine::paint::Pen pen_cub_round2;
+            pen_cub_round2.width     = 3.0f;
+            pen_cub_round2.start_cap = mine::paint::LineCap::Round;
+            pen_cub_round2.end_cap   = mine::paint::LineCap::Round;
+            canvas.stroke_cubic_bezier(
+                mine::math::Vec2{bx + sw * 0.8f, by + sh * 0.1f},    // P0 右上
+                mine::math::Vec2{bx,             by + sh * 0.1f},     // P1（向左拉顶部）
+                mine::math::Vec2{bx,             by + sh * 0.9f},     // P2（向左拉底部）
+                mine::math::Vec2{bx + sw * 0.8f, by + sh * 0.9f},    // P3 右下
+                mine::paint::Brush::solid(col_green), pen_cub_round2);
         }
 
         mine::paint::DisplayList dl = canvas.end();
