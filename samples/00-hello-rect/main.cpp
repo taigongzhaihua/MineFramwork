@@ -1,14 +1,12 @@
 /**
  * @file main.cpp
- * @brief 00-hello-rect 示例：mine.paint 绘制矩形的最小闭环演示。
+ * @brief 00-hello-rect 示例：mine.paint Canvas 所有已实现填充命令的综合演示。
  *
- * 演示内容：
- *   1. mine::gfx::create_device()：创建 D3D11 图形设备
- *   2. mine::paint::create_renderer()：创建基于 RHI 的 2D 渲染器
- *   3. Canvas → DisplayList → IRenderer：录制绘制命令并渲染到交换链后缓冲
- *   4. Brush::solid()：纯色填充矩形
- *
- * 验收标准（M0.3 任务 #14）：窗口中央显示一个红色矩形，背景为深灰色。
+ * 演示内容（2×2 网格布局）：
+ *   左上：FillRect             — 纯色填充矩形（绿色）
+ *   右上：FillRoundedRect      — 均匀圆角矩形（蓝色，radius=24px）
+ *   左下：FillComplexRoundedRect — 四角独立椭圆半径（橙色，对角线不对称）
+ *   右下：FillEllipse           — 椭圆填充（紫色）
  */
 
 #include <mine/platform/PlatformAbi.h>
@@ -46,7 +44,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
     }
 
     /**
-     * @brief 渲染一帧：清屏 + 画矩形 + 呈现。
+     * @brief 渲染一帧：清屏 + 2×2 网格展示所有填充命令 + 呈现。
      */
     void render() {
         if (!device || !swapchain || !paint_renderer) return;
@@ -61,20 +59,44 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
 
         mine::paint::Canvas canvas;
 
-        // 背景矩形：覆盖整个视口（深灰色，不透明）
+        // 背景：深灰色覆盖整个视口
         canvas.fill_rect(
             mine::math::Rect{0.0f, 0.0f, w, h},
-            mine::paint::Brush::solid(mine::math::Color{0.15f, 0.15f, 0.15f, 1.0f}));
+            mine::paint::Brush::solid(mine::math::Color{0.12f, 0.12f, 0.12f, 1.0f}));
 
-        // 前景矩形：居中显示红色圆角矩形（宽 300，高 200，圆角 24px）
-        const float rect_w = 300.0f;
-        const float rect_h = 200.0f;
-        const float rect_x = (w - rect_w) * 0.5f;
-        const float rect_y = (h - rect_h) * 0.5f;
+        // 每个格子的尺寸（2×2 分割，留出 padding）
+        const float pad   = 24.0f;   // 格子间距和边距
+        const float cw    = (w - pad * 3.0f) * 0.5f;  // 格子宽度
+        const float ch    = (h - pad * 3.0f) * 0.5f;  // 格子高度
 
+        // 各格子左上角坐标
+        const float x0 = pad;
+        const float x1 = pad * 2.0f + cw;
+        const float y0 = pad;
+        const float y1 = pad * 2.0f + ch;
+
+        // 形状尺寸（在格子内留出内边距）
+        const float inner_pad = 24.0f;
+        const float sw = cw - inner_pad * 2.0f;  // 形状宽度
+        const float sh = ch - inner_pad * 2.0f;  // 形状高度
+
+        // ── 左上：FillRect（纯色矩形，绿色）─────────────────────────────
+        canvas.fill_rect(
+            mine::math::Rect{x0 + inner_pad, y0 + inner_pad, sw, sh},
+            mine::paint::Brush::solid(mine::math::Color{0.20f, 0.75f, 0.35f, 1.0f}));
+
+        // ── 右上：FillRoundedRect（均匀圆角矩形，蓝色）───────────────────
+        canvas.fill_rounded_rect(
+            mine::math::RoundedRect{
+                mine::math::Rect{x1 + inner_pad, y0 + inner_pad, sw, sh},
+                24.0f   // 四角统一 24px 圆角半径
+            },
+            mine::paint::Brush::solid(mine::math::Color{0.20f, 0.45f, 0.90f, 1.0f}));
+
+        // ── 左下：FillComplexRoundedRect（四角独立椭圆半径，橙色）────────
         canvas.fill_complex_rounded_rect(
             mine::math::ComplexRoundedRect{
-                mine::math::Rect{rect_x, rect_y, rect_w, rect_h},
+                mine::math::Rect{x0 + inner_pad, y1 + inner_pad, sw, sh},
                 mine::math::CornerRadii{
                     {40.0f, 40.0f},  // 左上角：大圆角
                     {8.0f,  8.0f},   // 右上角：小圆角
@@ -82,7 +104,15 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                     {8.0f,  8.0f}    // 左下角：小圆角
                 }
             },
-            mine::paint::Brush::solid(mine::math::Color{0.85f, 0.15f, 0.10f, 1.0f}));
+            mine::paint::Brush::solid(mine::math::Color{0.95f, 0.55f, 0.10f, 1.0f}));
+
+        // ── 右下：FillEllipse（椭圆，紫色）───────────────────────────────
+        const float ecx = x1 + inner_pad + sw * 0.5f;  // 椭圆中心 X
+        const float ecy = y1 + inner_pad + sh * 0.5f;  // 椭圆中心 Y
+        canvas.fill_ellipse(
+            mine::math::Vec2{ecx, ecy},
+            mine::math::Vec2{sw * 0.5f, sh * 0.5f},
+            mine::paint::Brush::solid(mine::math::Color{0.65f, 0.25f, 0.90f, 1.0f}));
 
         // Canvas::end() 返回不可变的绘制命令列表
         mine::paint::DisplayList dl = canvas.end();
@@ -121,7 +151,7 @@ int main(int /*argc*/, char* /*argv*/[])
 
     // 4. 创建窗口
     mine::platform::WindowDesc win_desc{};
-    win_desc.title         = "MineFramework - Hello Rect（M0.3 Paint 验证）";
+    win_desc.title         = "MineFramework - Canvas 填充命令演示（FillRect / FillRoundedRect / FillComplexRoundedRect / FillEllipse）";
     win_desc.size          = {800.0f, 600.0f};
     win_desc.auto_position = true;
     win_desc.resizable     = true;

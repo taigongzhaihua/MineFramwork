@@ -441,7 +441,28 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             // 步骤3：凸多边形扇形三角化（CSS 钳制保证始终为凸多边形）
             push_convex_polygon_vertices(vertices, polygon, c.r, c.g, c.b, c.a);
         }
-        // M0：其余命令类型（FillEllipse、StrokeRect 等）暂不处理
+        else if (cmd.kind == DrawCmdKind::FillEllipse) {
+            // 仅处理 SolidColor 画刷（M0）
+            if (cmd.brush.kind() != BrushKind::SolidColor) continue;
+
+            const math::Color c = cmd.brush.color();
+
+            // 半径为零退化，跳过（避免生成零面积多边形）
+            if (cmd.pt_b.x <= 0.0f || cmd.pt_b.y <= 0.0f) continue;
+
+            // 步骤1：用 PathBuilder 生成椭圆的贝塞尔路径（4 段三次曲线）
+            PathBuilder builder;
+            builder.add_ellipse(cmd.pt_a, cmd.pt_b);
+            Path path = builder.build();
+
+            // 步骤2：展平贝塞尔路径为屏幕像素多边形
+            containers::Vector<math::Vec2> polygon;
+            flatten_path_to_polygon(polygon, path);
+
+            // 步骤3：凸多边形扇形三角化（椭圆始终是凸形）
+            push_convex_polygon_vertices(vertices, polygon, c.r, c.g, c.b, c.a);
+        }
+        // M0：其余命令类型（StrokeRect 等）暂不处理
     }
 
     if (vertices.empty()) return;

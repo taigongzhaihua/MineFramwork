@@ -5,6 +5,7 @@
 ## [Unreleased]
 
 ### Added
+- **paint（FillEllipse）**：实现椭圆填充渲染支持，复用 `PathBuilder::add_ellipse()` + 展平 + 扇形三角化
 - **paint（FillComplexRoundedRect）**：新增四角各自独立椭圆半径的圆角矩形渲染支持：
   - `DrawCmd`：新增 `FillComplexRoundedRect`、`StrokeComplexRoundedRect` 枚举值及 `complex_rrect` 字段
   - `PathBuilder::add_complex_rounded_rect()`：每角使用独立 (rx, ry) 生成三次贝塞尔路径，复用 CSS 钳制保证凸性
@@ -15,7 +16,7 @@
   - `flatten_path_to_polygon()`：将 PathBuilder 生成的路径展平为屏幕像素多边形（支持 MoveTo/LineTo/CubicTo/QuadTo/Close）；QuadTo 通过提升为三次后细分处理
   - `push_convex_polygon_vertices()`：以 polygon[0] 为扇点的凸多边形扇形三角化（圆角矩形始终满足凸性约束）
   - `radius ≤ 0` 退化路径：自动回退到普通矩形顶点生成，避免不必要的路径展平开销
-- **samples/00-hello-rect（更新）**：将演示改为 `fill_complex_rounded_rect`，展示对角线不对称圆角（左上/右下 40px，右上/左下 8px）
+- **samples/00-hello-rect（综合演示）**：重构为 2×2 网格，展示所有已实现的填充命令效果：FillRect（绿色）/ FillRoundedRect（蓝色）/ FillComplexRoundedRect（橙色，对角线不对称）/ FillEllipse（紫色）
 
 ### Fixed
 - **gfx.d3d11**：修复 D3D11 交换链格式错误导致程序启动即崩溃（退出码 1）的问题：
