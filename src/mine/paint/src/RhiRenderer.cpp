@@ -15,6 +15,7 @@
 #include <mine/paint/IRenderer.h>
 #include <mine/paint/DisplayList.h>
 #include <mine/paint/DrawCmd.h>
+#include <mine/paint/PathBuilder.h>
 #include <mine/gfx/IDevice.h>
 #include <mine/gfx/IQueue.h>
 #include <mine/gfx/ICommandList.h>
@@ -24,6 +25,7 @@
 #include <mine/gfx/GfxTypes.h>
 #include <mine/core/Memory.h>
 #include <mine/containers/Vector.h>
+#include <mine/math/Vec2.h>
 
 namespace mine::paint {
 
@@ -88,6 +90,119 @@ struct ViewportCB {
     float pad0{0.0f};
     float pad1{0.0f};
 };
+
+// ── 路径展平与三角化辅助函数 ──────────────────────────────────────────────────
+
+/**
+ * @brief 将单段三次贝塞尔曲线均匀细分为折线点，追加到 polygon 中。
+ *
+ * 使用 de Casteljau 公式逐步插值，每段 `segments` 个子步骤。
+ * M0 固定 8 段，对应约 11.25° / 段，视觉误差 < 0.04%。
+ *
+ * @param polygon  输出多边形点列表（追加）
+ * @param p0       曲线起点（已包含在 polygon 末尾，不重复写入）
+ * @param p1,p2    两个控制点
+ * @param p3       曲线终点
+ * @param segments 细分段数（默认 8）
+ */
+static void flatten_cubic_bezier(
+    containers::Vector<math::Vec2>& polygon,
+    math::Vec2 p0, math::Vec2 p1, math::Vec2 p2, math::Vec2 p3,
+    int32_t segments = 8)
+{
+    for (int32_t i = 1; i <= segments; ++i) {
+        const float t  = static_cast<float>(i) / static_cast<float>(segments);
+        const float u  = 1.0f - t;
+        const float uu = u * u;
+        const float tt = t * t;
+        // 三次贝塞尔插值公式：B(t) = (1-t)^3*P0 + 3(1-t)^2*t*P1 + 3(1-t)*t^2*P2 + t^3*P3
+        const float x = u * uu * p0.x + 3.0f * uu * t * p1.x + 3.0f * u * tt * p2.x + t * tt * p3.x;
+        const float y = u * uu * p0.y + 3.0f * uu * t * p1.y + 3.0f * u * tt * p2.y + t * tt * p3.y;
+        polygon.push_back({x, y});
+    }
+}
+
+/**
+ * @brief 将 Path（由 PathBuilder 生成）展平为屏幕像素坐标多边形。
+ *
+ * 支持 MoveTo / LineTo / CubicTo / Close 命令（add_rounded_rect 的输出）。
+ * QuadTo 支持：将二次贝塞尔提升为三次后细分。
+ * Close 命令：不重复写入起点，外部使用 % n 环绕处理。
+ *
+ * @param polygon 输出多边形顶点（屏幕像素坐标）
+ * @param path    要展平的路径
+ */
+static void flatten_path_to_polygon(
+    containers::Vector<math::Vec2>& polygon,
+    const Path& path)
+{
+    math::Vec2 current{};
+
+    for (const PathCmd& cmd : path.cmds()) {
+        switch (cmd.kind) {
+        case PathCmdKind::MoveTo:
+            current = cmd.pt[0];
+            polygon.push_back(current);
+            break;
+
+        case PathCmdKind::LineTo:
+            current = cmd.pt[0];
+            polygon.push_back(current);
+            break;
+
+        case PathCmdKind::CubicTo:
+            // pt[0]=控制点1，pt[1]=控制点2，pt[2]=终点
+            flatten_cubic_bezier(polygon, current, cmd.pt[0], cmd.pt[1], cmd.pt[2]);
+            current = cmd.pt[2];
+            break;
+
+        case PathCmdKind::QuadTo: {
+            // 二次贝塞尔 → 提升为三次：
+            //   C1 = P0 + (2/3)*(ctrl - P0)
+            //   C2 = end + (2/3)*(ctrl - end)
+            const math::Vec2 ctrl = cmd.pt[0];
+            const math::Vec2 end  = cmd.pt[1];
+            const math::Vec2 c1{current.x + (2.0f / 3.0f) * (ctrl.x - current.x),
+                                current.y + (2.0f / 3.0f) * (ctrl.y - current.y)};
+            const math::Vec2 c2{end.x + (2.0f / 3.0f) * (ctrl.x - end.x),
+                                end.y + (2.0f / 3.0f) * (ctrl.y - end.y)};
+            flatten_cubic_bezier(polygon, current, c1, c2, end, 4);
+            current = end;
+            break;
+        }
+
+        case PathCmdKind::Close:
+            // 不重复加入起点；外部以 % n 索引处理环绕
+            break;
+        }
+    }
+}
+
+/**
+ * @brief 将凸多边形三角化（以 polygon[0] 为扇点）并写入顶点列表。
+ *
+ * 要求多边形为凸多边形（圆角矩形满足此条件）。
+ * 生成 (n-2) 个三角形：(p[0], p[i], p[i+1])，i ∈ [1, n-2]。
+ *
+ * @param vertices 输出顶点列表（追加）
+ * @param polygon  凸多边形顶点（屏幕像素坐标）
+ * @param r,g,b,a  填充颜色（线性 RGBA）
+ */
+static void push_convex_polygon_vertices(
+    containers::Vector<PaintVertex>& vertices,
+    const containers::Vector<math::Vec2>& polygon,
+    float r, float g, float b, float a)
+{
+    const uint32_t n = static_cast<uint32_t>(polygon.size());
+    if (n < 3) return;
+
+    // 扇形展开：以 polygon[0] 为扇点，覆盖整个凸多边形
+    for (uint32_t i = 1; i + 1 < n; ++i) {
+        vertices.push_back({polygon[0].x, polygon[0].y, r, g, b, a});
+        vertices.push_back({polygon[i].x, polygon[i].y, r, g, b, a});
+        vertices.push_back({polygon[i + 1].x, polygon[i + 1].y, r, g, b, a});
+    }
+}
 
 // ── RhiRenderer 类 ────────────────────────────────────────────────────────────
 
@@ -266,7 +381,35 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
                 cmd.rect.width, cmd.rect.height,
                 c.r, c.g, c.b, c.a);
         }
-        // M0：其他命令类型暂不处理（FillRoundedRect、StrokeLine 等）
+        else if (cmd.kind == DrawCmdKind::FillRoundedRect) {
+            // 仅处理 SolidColor 画刷（M0）
+            if (cmd.brush.kind() != BrushKind::SolidColor) continue;
+
+            const math::Color c = cmd.brush.color();
+
+            // 若圆角半径为零，退化为普通矩形（避免不必要的路径展平开销）
+            if (cmd.rrect.radius_x <= 0.0f || cmd.rrect.radius_y <= 0.0f) {
+                push_rect_vertices(
+                    vertices,
+                    cmd.rrect.rect.x, cmd.rrect.rect.y,
+                    cmd.rrect.rect.width, cmd.rrect.rect.height,
+                    c.r, c.g, c.b, c.a);
+                continue;
+            }
+
+            // 步骤1：用 PathBuilder 生成圆角矩形的三次贝塞尔路径
+            PathBuilder builder;
+            builder.add_rounded_rect(cmd.rrect);
+            Path path = builder.build();
+
+            // 步骤2：展平贝塞尔路径为屏幕像素多边形
+            containers::Vector<math::Vec2> polygon;
+            flatten_path_to_polygon(polygon, path);
+
+            // 步骤3：凸多边形扇形三角化（圆角矩形始终是凸多边形）
+            push_convex_polygon_vertices(vertices, polygon, c.r, c.g, c.b, c.a);
+        }
+        // M0：其余命令类型（FillEllipse、StrokeRect 等）暂不处理
     }
 
     if (vertices.empty()) return;

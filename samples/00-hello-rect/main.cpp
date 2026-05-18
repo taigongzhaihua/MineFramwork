@@ -66,14 +66,17 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
             mine::math::Rect{0.0f, 0.0f, w, h},
             mine::paint::Brush::solid(mine::math::Color{0.15f, 0.15f, 0.15f, 1.0f}));
 
-        // 前景矩形：居中显示红色矩形（宽 300，高 200）
+        // 前景矩形：居中显示红色圆角矩形（宽 300，高 200，圆角 24px）
         const float rect_w = 300.0f;
         const float rect_h = 200.0f;
         const float rect_x = (w - rect_w) * 0.5f;
         const float rect_y = (h - rect_h) * 0.5f;
 
-        canvas.fill_rect(
-            mine::math::Rect{rect_x, rect_y, rect_w, rect_h},
+        canvas.fill_rounded_rect(
+            mine::math::RoundedRect{
+                mine::math::Rect{rect_x, rect_y, rect_w, rect_h},
+                24.0f   // 圆角半径 24px（X/Y 相同）
+            },
             mine::paint::Brush::solid(mine::math::Color{0.85f, 0.15f, 0.10f, 1.0f}));
 
         // Canvas::end() 返回不可变的绘制命令列表
