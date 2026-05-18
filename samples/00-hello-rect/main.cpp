@@ -2,7 +2,7 @@
  * @file main.cpp
  * @brief 00-hello-rect 示例：mine.paint Canvas SDF 填充 + 描边命令综合演示。
  *
- * 演示内容（2×6 网格布局，左列填充/右列描边）：
+ * 演示内容（2×8 网格布局，左列填充/右列描边）：
  *   行1 左：FillRect                      — 纯色填充矩形（绿色）
  *   行1 右：StrokeRect                    — 矩形描边（绿色，线宽 4px）
  *   行2 左：FillRoundedRect               — 均匀圆角矩形填充（蓝色，radius=20px）
@@ -12,9 +12,13 @@
  *   行4 左：FillEllipse                   — 椭圆填充（紫色）
  *   行4 右：StrokeEllipse                 — 椭圆描边（紫色，线宽 4px）
  *   行5 左：StrokeBorderedRoundedRect     — 四边不等宽 + 四角独立圆角内侧描边（红色）
- *   行5 右：StrokeBorderedRoundedRect     — 均匀圆角 + 仅上下边框（青色，上下吆12px）
+ *   行5 右：StrokeBorderedRoundedRect     — 均匀圆角 + 仅上下边框（青色，上下各12px）
  *   行6 左：StrokeLine (Flat cap)          — 平端线段（双色渐变 SDF）
  *   行6 右：StrokeLine (Round + Square)    — 混合端点样式线段对比
+ *   行7 左：StrokeArc (Flat cap)           — 四分之一圆弧，平端截断
+ *   行7 右：StrokeArc (Round cap)          — 半圆弧，圆形端点
+ *   行8 左：StrokeQuadBezier (Flat cap)    — 二次贝塞尔抛物线，平端截断
+ *   行8 右：StrokeQuadBezier (Round cap)   — 二次贝塞尔 S 形曲线，圆形端点
  */
 
 #include <mine/platform/PlatformAbi.h>
@@ -52,7 +56,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
     }
 
     /**
-     * @brief 渲染一帧：清屏 + 2×5 网格展示填充、描边和四边不等宽描边命令 + 呈现。
+     * @brief 渲染一帧：清屏 + 2×8 网格展示填充、描边、线段、圆弧、贝塞尔命令 + 呈现。
      */
     void render() {
         if (!device || !swapchain || !paint_renderer) return;
@@ -72,11 +76,11 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
             mine::math::Rect{0.0f, 0.0f, W, H},
             mine::paint::Brush::solid(mine::math::Color{0.12f, 0.12f, 0.12f, 1.0f}));
 
-        // 2×6 网格参数（2列 × 6行）
+        // 2×8 网格参数（2列 × 8行）
         const float outer_pad = 20.0f;
         const float gap       = 10.0f;
         const float cw        = (W - outer_pad * 2.0f - gap) * 0.5f;
-        const float ch        = (H - outer_pad * 2.0f - gap * 5.0f) / 6.0f;
+        const float ch        = (H - outer_pad * 2.0f - gap * 7.0f) / 8.0f;
 
         const float col0 = outer_pad;
         const float col1 = outer_pad + cw + gap;
@@ -87,6 +91,8 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         const float row3 = outer_pad + (ch + gap) * 3.0f;
         const float row4 = outer_pad + (ch + gap) * 4.0f;
         const float row5 = outer_pad + (ch + gap) * 5.0f;
+        const float row6 = outer_pad + (ch + gap) * 6.0f;
+        const float row7 = outer_pad + (ch + gap) * 7.0f;
 
         const float ip = 14.0f;
         const float sw = cw - ip * 2.0f;
@@ -217,6 +223,120 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                 mine::math::Vec2{x1, y1 + sh * 0.7f},
                 mine::math::Vec2{x1 + sw, y1 + sh * 0.7f},
                 mine::paint::Brush::solid(col_purple), pen_square);
+        }
+
+        // ── 行7 左：StrokeArc（Flat cap，四分之一圆弧）──────────────────
+        // 圆心位于 Quad 区域左下，90° 弧（从 0 到 π/2，顺时针 = 向下方向）
+        {
+            const float cx7 = col0 + ip + sw * 0.5f;
+            const float cy7 = row6 + ip + sh * 0.5f;
+            const float r7  = std::min(sw, sh) * 0.35f;  // 圆弧半径
+
+            mine::paint::Pen pen_arc_flat;
+            pen_arc_flat.width     = 5.0f;
+            pen_arc_flat.start_cap = mine::paint::LineCap::Flat;
+            pen_arc_flat.end_cap   = mine::paint::LineCap::Flat;
+
+            constexpr float k_pi = 3.14159265358979323846f;
+            // 四分之一圆弧：0° → 90°（顺时针，屏幕坐标 Y 向下）
+            canvas.stroke_arc(
+                mine::math::Vec2{cx7, cy7},
+                r7, 0.0f, k_pi * 0.5f,
+                mine::paint::Brush::solid(col_green), pen_arc_flat);
+
+            // 再画一个更大的扇形（180° - 360°，即下半圆，展示 Flat cap 截断）
+            mine::paint::Pen pen_arc_flat2;
+            pen_arc_flat2.width     = 3.0f;
+            pen_arc_flat2.start_cap = mine::paint::LineCap::Flat;
+            pen_arc_flat2.end_cap   = mine::paint::LineCap::Flat;
+            canvas.stroke_arc(
+                mine::math::Vec2{cx7, cy7},
+                r7 * 1.5f, k_pi, k_pi,
+                mine::paint::Brush::solid(col_orange), pen_arc_flat2);
+        }
+
+        // ── 行7 右：StrokeArc（Round cap，半圆弧）─────────────────────────
+        // 180° 半圆弧，两端圆形，展示 Round cap 的自然过渡
+        {
+            const float cx7r = col1 + ip + sw * 0.5f;
+            const float cy7r = row6 + ip + sh * 0.5f;
+            const float r7r  = std::min(sw, sh) * 0.35f;
+
+            mine::paint::Pen pen_arc_round;
+            pen_arc_round.width     = 6.0f;
+            pen_arc_round.start_cap = mine::paint::LineCap::Round;
+            pen_arc_round.end_cap   = mine::paint::LineCap::Round;
+
+            constexpr float k_pi = 3.14159265358979323846f;
+            // 上半圆弧：从 -180° 到 0°（逆时针扫 180°）
+            canvas.stroke_arc(
+                mine::math::Vec2{cx7r, cy7r},
+                r7r, -k_pi, k_pi,
+                mine::paint::Brush::solid(col_blue), pen_arc_round);
+
+            // 小圆弧作为点缀（270° 弧，Round cap）
+            mine::paint::Pen pen_arc_small;
+            pen_arc_small.width     = 2.5f;
+            pen_arc_small.start_cap = mine::paint::LineCap::Round;
+            pen_arc_small.end_cap   = mine::paint::LineCap::Round;
+            canvas.stroke_arc(
+                mine::math::Vec2{cx7r, cy7r},
+                r7r * 1.6f, k_pi * 0.5f, k_pi * 1.5f,
+                mine::paint::Brush::solid(col_cyan), pen_arc_small);
+        }
+
+        // ── 行8 左：StrokeQuadBezier（Flat cap，抛物线弧）──────────────────
+        // P0→P1（控制点）→P2 形成典型弧线，Flat cap 截断两端
+        {
+            const float bx  = col0 + ip;
+            const float by  = row7 + ip;
+            // 单条抛物线贝塞尔（Flat cap，红色）
+            mine::paint::Pen pen_bez_flat;
+            pen_bez_flat.width     = 4.0f;
+            pen_bez_flat.start_cap = mine::paint::LineCap::Flat;
+            pen_bez_flat.end_cap   = mine::paint::LineCap::Flat;
+            canvas.stroke_quad_bezier(
+                mine::math::Vec2{bx, by + sh * 0.8f},          // P0 左下
+                mine::math::Vec2{bx + sw * 0.5f, by},          // P1 顶部控制点
+                mine::math::Vec2{bx + sw, by + sh * 0.8f},     // P2 右下
+                mine::paint::Brush::solid(col_red), pen_bez_flat);
+
+            // 倒置抛物线（细线，Flat cap，橙色，展示方向对称）
+            mine::paint::Pen pen_bez_flat2;
+            pen_bez_flat2.width     = 2.0f;
+            pen_bez_flat2.start_cap = mine::paint::LineCap::Flat;
+            pen_bez_flat2.end_cap   = mine::paint::LineCap::Flat;
+            canvas.stroke_quad_bezier(
+                mine::math::Vec2{bx, by + sh * 0.2f},
+                mine::math::Vec2{bx + sw * 0.5f, by + sh},
+                mine::math::Vec2{bx + sw, by + sh * 0.2f},
+                mine::paint::Brush::solid(col_orange), pen_bez_flat2);
+        }
+
+        // ── 行8 右：StrokeQuadBezier（Round cap，S 形曲线组合）─────────────
+        // 两段贝塞尔组合成 S 形，展示 Round cap 的自然衔接
+        {
+            const float bx  = col1 + ip;
+            const float by  = row7 + ip;
+
+            mine::paint::Pen pen_bez_round;
+            pen_bez_round.width     = 5.0f;
+            pen_bez_round.start_cap = mine::paint::LineCap::Round;
+            pen_bez_round.end_cap   = mine::paint::LineCap::Round;
+
+            // 上半段：左上 → 中 → 右中（圆形端点）
+            canvas.stroke_quad_bezier(
+                mine::math::Vec2{bx, by + sh * 0.1f},           // 左上
+                mine::math::Vec2{bx + sw * 0.7f, by + sh * 0.1f},  // 控制点（右上）
+                mine::math::Vec2{bx + sw * 0.5f, by + sh * 0.5f},  // 中间
+                mine::paint::Brush::solid(col_purple), pen_bez_round);
+
+            // 下半段：中 → 左下 → 右下（圆形端点）
+            canvas.stroke_quad_bezier(
+                mine::math::Vec2{bx + sw * 0.5f, by + sh * 0.5f},  // 中间
+                mine::math::Vec2{bx + sw * 0.3f, by + sh * 0.9f},  // 控制点（左下）
+                mine::math::Vec2{bx + sw, by + sh * 0.9f},          // 右下
+                mine::paint::Brush::solid(col_cyan), pen_bez_round);
         }
 
         mine::paint::DisplayList dl = canvas.end();

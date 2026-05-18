@@ -46,8 +46,10 @@ enum class DrawCmdKind : uint8_t {
     StrokeEllipse,           ///< 描边椭圆
     StrokeBorderedRect,      ///< 四边各自独立宽度的矩形内侧描边（类 CSS border）
     StrokeBorderedRoundedRect, ///< 四边各自独立宽度 + 四角各自独立圆角的内侧描边
-    StrokeLine,        ///< 描边线段（from → to）
-    StrokePath,        ///< 描边任意路径（通过 path_index 引用）
+    StrokeLine,          ///< 描边线段（from → to）
+    StrokeArc,           ///< 描边圆弧（圆心 + 半径 + 起始角 + 扫掠角）
+    StrokeQuadBezier,    ///< 描边二次贝塞尔曲线（起点 + 控制点 + 终点）
+    StrokePath,          ///< 描边任意路径（通过 path_index 引用）
 
     // ── 状态命令 ────────────────────────────────────────────────────────
     ClipPushRect,      ///< 压入矩形裁剪区域（与当前裁剪区域取交集）
@@ -82,6 +84,13 @@ enum class DrawCmdKind : uint8_t {
  *                     | border_radii  |       |     |
  *  StrokeLine         | pt_a(起点)    | ✓     | ✓   |
  *                     | pt_b(终点)    |       |     |
+ *  StrokeArc          | pt_a(圆心)    | ✓     | ✓   |
+ *                     | pt_b.x(半径)  |       |     |
+ *                     | pt_b.y(起始角)|       |     |
+ *                     | pt_c.x(扫掠角)|       |     |
+ *  StrokeQuadBezier   | pt_a(P0起点)  | ✓     | ✓   |
+ *                     | pt_b(P1控制)  |       |     |
+ *                     | pt_c(P2终点)  |       |     |
  *  StrokePath         |               | ✓     | ✓   | ✓
  *  ClipPushRect       | rect          |       |     |
  *  ClipPop            |               |       |     |
@@ -96,7 +105,8 @@ struct DrawCmd {
     math::RoundedRect        rrect{};         ///< 圆角矩形（FillRoundedRect / StrokeRoundedRect）
     math::ComplexRoundedRect complex_rrect{}; ///< 独立四角圆角矩形（FillComplexRoundedRect / StrokeComplexRoundedRect）
     math::Vec2        pt_a{};          ///< 通用向量 A（中心、起点等）
-    math::Vec2        pt_b{};          ///< 通用向量 B（半径、终点等）
+    math::Vec2        pt_b{};          ///< 通用向量 B（半径/angle、终点/控制点等）
+    math::Vec2        pt_c{};          ///< 通用向量 C（二次贝塞尔终点；圆弧：pt_c.x=扫掠角）
     uint32_t          path_index{0};   ///< 路径索引（FillPath / StrokePath）
     math::Transform2D transform{};     ///< 变换矩阵（TransformPush）
 

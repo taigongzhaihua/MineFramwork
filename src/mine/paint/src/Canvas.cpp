@@ -166,6 +166,33 @@ void Canvas::stroke_line(math::Vec2 from, math::Vec2 to, const Brush& brush, con
     push(cmd);
 }
 
+void Canvas::stroke_arc(math::Vec2 center, float radius,
+                        float start_angle, float sweep_angle,
+                        const Brush& brush, const Pen& pen) {
+    // pt_a = 圆心，pt_b.x = 半径，pt_b.y = 起始角，pt_c.x = 扫掠角
+    DrawCmd cmd;
+    cmd.kind    = DrawCmdKind::StrokeArc;
+    cmd.pt_a    = center;
+    cmd.pt_b    = {radius, start_angle};
+    cmd.pt_c    = {sweep_angle, 0.0f};
+    cmd.brush   = brush;
+    cmd.pen     = pen;
+    push(cmd);
+}
+
+void Canvas::stroke_quad_bezier(math::Vec2 p0, math::Vec2 p1, math::Vec2 p2,
+                                const Brush& brush, const Pen& pen) {
+    // pt_a = P0（起点），pt_b = P1（控制点），pt_c = P2（终点）
+    DrawCmd cmd;
+    cmd.kind  = DrawCmdKind::StrokeQuadBezier;
+    cmd.pt_a  = p0;
+    cmd.pt_b  = p1;
+    cmd.pt_c  = p2;
+    cmd.brush = brush;
+    cmd.pen   = pen;
+    push(cmd);
+}
+
 void Canvas::stroke_path(const Path& path, const Brush& brush, const Pen& pen) {
     DrawCmd cmd;
     cmd.kind       = DrawCmdKind::StrokePath;

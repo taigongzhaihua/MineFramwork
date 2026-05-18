@@ -169,6 +169,39 @@ public:
     /// 描边线段（from → to）。
     void stroke_line(math::Vec2 from, math::Vec2 to, const Brush& brush, const Pen& pen = {});
 
+    /**
+     * @brief 描边圆弧。
+     *
+     * 使用 SDF 渲染（kind=7），天然亚像素抗锯齿。
+     * 角度约定：0=右（+X），正值=顺时针（屏幕坐标，Y 向下）。
+     *
+     * @param center       圆心（屏幕像素坐标）
+     * @param radius       圆弧半径（像素）
+     * @param start_angle  起始角（弧度；0=右，正值=顺时针）
+     * @param sweep_angle  扫掠角（弧度；正值=顺时针扫掠，负值=逆时针扫掠）
+     * @param brush        画刷（当前仅支持 SolidColor）
+     * @param pen          描边样式（width、start_cap、end_cap；支持 Flat/Round）
+     */
+    void stroke_arc(math::Vec2 center, float radius,
+                    float start_angle, float sweep_angle,
+                    const Brush& brush, const Pen& pen = {});
+
+    /**
+     * @brief 描边二次贝塞尔曲线。
+     *
+     * 使用 SDF 渲染（kind=8），闭合解析解（IQ 算法），天然亚像素抗锯齿。
+     * 当 start_cap/end_cap = Round 时，端点自然延伸为圆形（IQ clamp 天然支持）。
+     * 当 start_cap/end_cap = Flat 时，端点处以切线方向截断。
+     *
+     * @param p0    起点（对应曲线参数 t=0）
+     * @param p1    控制点（决定曲线弯曲方向和程度）
+     * @param p2    终点（对应曲线参数 t=1）
+     * @param brush 画刷（当前仅支持 SolidColor）
+     * @param pen   描边样式（width、start_cap、end_cap）
+     */
+    void stroke_quad_bezier(math::Vec2 p0, math::Vec2 p1, math::Vec2 p2,
+                            const Brush& brush, const Pen& pen = {});
+
     /// 描边任意路径。
     void stroke_path(const Path& path, const Brush& brush, const Pen& pen = {});
 
