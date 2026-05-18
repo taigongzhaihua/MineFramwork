@@ -26,28 +26,58 @@ Win32Window::Win32Window(const WindowDesc& desc, WindowDestroyCallback on_destro
     // 注册窗口类（首次调用时注册）
     Win32WindowClass::ensure_registered(&Win32Window::window_proc);
 
-    // 根据窗口类型确定样式
-    DWORD style    = WS_OVERLAPPEDWINDOW; // 默认带标题栏、边框、最大最小化按钮
-    DWORD ex_style = WS_EX_APPWINDOW;
+    // 根据窗口类型确定基础样式
+    DWORD style    = 0;
+    DWORD ex_style = 0;
 
-    if (!desc.resizable) {
-        // 移除调整大小和最大化功能
-        style &= ~(WS_THICKFRAME | WS_MAXIMIZEBOX);
-    }
-    if (desc.frameless) {
-        // 自定义标题栏：仅保留基本弹出风格
-        style    = WS_POPUP;
+    switch (desc.kind) {
+    case WindowKind::Normal:
+        // 普通应用窗口：带标题栏/边框/最大最小化按钮，显示在任务栏
+        style    = WS_OVERLAPPEDWINDOW;
         ex_style = WS_EX_APPWINDOW;
+        break;
+    case WindowKind::Tool:
+        // 工具窗口：带标题栏但字体较小，不在任务栏显示
+        style    = WS_OVERLAPPEDWINDOW;
+        ex_style = WS_EX_TOOLWINDOW;
+        break;
+    case WindowKind::Dialog:
+        // 对话框：带标题栏和系统菜单，对话框边框风格，不可调整大小
+        style    = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_DLGFRAME;
+        ex_style = WS_EX_DLGMODALFRAME | WS_EX_APPWINDOW;
+        break;
+    case WindowKind::Splash:
+        // 启动闪屏：无边框无标题，不在任务栏显示
+        style    = WS_POPUP;
+        ex_style = WS_EX_TOOLWINDOW;
+        break;
+    case WindowKind::Popup:
+        // 弹出窗口：无边框，不抢键盘焦点，不在任务栏显示
+        style    = WS_POPUP;
+        ex_style = WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+        break;
+    default:
+        style    = WS_OVERLAPPEDWINDOW;
+        ex_style = WS_EX_APPWINDOW;
+        break;
+    }
+
+    // frameless：对有标题栏的 kind（Normal/Tool/Dialog）去掉系统边框，用于自定义绘制
+    if (desc.frameless &&
+        desc.kind != WindowKind::Popup &&
+        desc.kind != WindowKind::Splash) {
+        style = (style & ~(WS_CAPTION | WS_DLGFRAME | WS_THICKFRAME)) | WS_POPUP;
+    }
+
+    // resizable 仅对含可调整边框的窗口有意义
+    if (!desc.resizable) {
+        style &= ~(WS_THICKFRAME | WS_MAXIMIZEBOX);
     }
     if (desc.always_on_top) {
         ex_style |= WS_EX_TOPMOST;
     }
     if (desc.transparent) {
         ex_style |= WS_EX_LAYERED;
-    }
-    if (desc.kind == WindowKind::Tool) {
-        ex_style |= WS_EX_TOOLWINDOW;
-        ex_style &= ~WS_EX_APPWINDOW;
     }
 
     // 先用临时 DPI=96 估算初始物理尺寸，创建后再根据实际 DPI 调整
