@@ -27,6 +27,7 @@
 
 #include <type_traits>
 #include <utility>
+#include <memory>
 #include <new>
 
 #include <mine/core/Assert.h>

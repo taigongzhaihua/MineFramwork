@@ -102,3 +102,15 @@
   - 创建 D3D11 设备 + 交换链 + Graphics 队列 + 命令列表
   - 首帧清屏为纯蓝色（R=0, G=0.4, B=1, A=1）并呈现
   - 订阅 Resized 事件自动 resize 交换链并重新渲染，窗口大小变化后蓝色持续保持
+- **paint**：新增 `mine.paint` 2D 绘制模块骨架（M0.3 任务 #13）：
+  - `PaintFwd.h`：前向声明伞形头（Brush / Pen / Path / PathBuilder / DrawCmd / DisplayList / Canvas / IRenderer）
+  - `Brush.h`：画刷类型，支持 `SolidColor`（M0 实现）、`LinearGradient`/`RadialGradient`/`ImageBrush`（占位），静态工厂 `solid()` / `solid_rgb()` / `solid_rgba()`
+  - `Pen.h`：描边样式结构体（width / LineJoin / LineCap / miter_limit）
+  - `Path.h`：不可变路径，持有 `PathCmd`（MoveTo / LineTo / CubicTo / QuadTo / Close）序列
+  - `PathBuilder.h` + `PathBuilder.cpp`：流式路径构造器，支持 `add_rect()` / `add_rounded_rect()` / `add_ellipse()`（贝塞尔圆角近似，κ ≈ 0.5523）
+  - `DrawCmd.h`：扁平绘制命令结构体（13 种命令：FillRect~ClipPop~TransformPush 等）
+  - `DisplayList.h`：不可变绘制命令序列，持有 DrawCmd + Path 数组，可移动
+  - `Canvas.h` + `Canvas.cpp`：录制模式绘制上下文，fill_* / stroke_* / clip_rect / translate / scale / rotate / save / restore / end()
+  - `IRenderer.h`：2D 渲染后端抽象接口（begin_frame / end_frame / render），附工厂函数 `create_renderer()`
+  - `Paint.h`：模块伞形头文件，一次 include 引入全部子头
+- **core（修复）**：`Result.h` 补充 `#include <memory>`，修复 MSVC 2026 中 `std::construct_at`/`std::destroy_at` 不再通过 `<new>` 间接引入的编译错误

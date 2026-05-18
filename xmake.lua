@@ -30,6 +30,7 @@ for _, script in ipairs({
     "src/mine/platform/win32/xmake.lua",
     "src/mine/gfx/rhi/xmake.lua",
     "src/mine/gfx/d3d11/xmake.lua",
+    "src/mine/paint/xmake.lua",
     "src/mine/text/xmake.lua",
     "src/mine/reflect/xmake.lua",
     "samples/00-hello-rect/xmake.lua",
