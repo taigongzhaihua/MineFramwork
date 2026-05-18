@@ -26,9 +26,12 @@ for _, script in ipairs({
     "src/mine/async/xmake.lua",
     "src/mine/io/xmake.lua",
     "src/mine/math/xmake.lua",
+    "src/mine/platform/abi/xmake.lua",
+    "src/mine/platform/win32/xmake.lua",
     "src/mine/text/xmake.lua",
     "src/mine/reflect/xmake.lua",
     "samples/00-hello-rect/xmake.lua",
+    "samples/00-blank-window/xmake.lua",
     "tools/mmlc/xmake.lua",
     "tools/mmlfmt/xmake.lua",
     "tools/mmlls/xmake.lua"

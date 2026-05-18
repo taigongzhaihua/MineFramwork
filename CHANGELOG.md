@@ -39,3 +39,35 @@
   - `Transform2D.h`：二维仿射变换封装，支持组合、逆变换与矩形包围盒映射
   - `Math.h`：伞形头文件
   - `MathTest.cpp`：25 个测试用例，68 个断言，全部通过（doctest）
+- **math（扩展）**：新增 `CornerRadii`、`ComplexRoundedRect`、`Thickness` 三个补充几何类型：
+  - `CornerRadii.h`：四角独立圆角半径，支持统一构造、加减法与均匀缩放
+  - `ComplexRoundedRect.h`：带 `CornerRadii` 的圆角矩形，继承 `RoundedRect` 语义
+  - `Thickness.h`：四边内边距/外边距，`deflate`/`inflate` 操作对应 CSS box-model
+  - `MathTest.cpp` 扩展：新增 33 个测试用例（114 断言），全部通过
+- **platform.abi**：新增 `mine.platform.abi` 平台抽象接口层（纯头文件，无实现，依赖 mine.core + mine.math）：
+  - `Api.h`：`MINE_PLATFORM_ABI_API` 宏（接口层无 DLL 导出，留作占位）
+  - `ModuleTag.h`：模块名常量 `kModuleName = "mine.platform.abi"`
+  - `NativeHandle.h`：平台原生句柄联合体，含 `ptr`/`value` 两种访问方式
+  - `WindowKind.h`：`WindowKind` 枚举（Normal/Tool/Dialog/Splash/Popup）
+  - `WindowEvent.h`：扁平 `WindowEvent` 结构体 + `WindowEventKind` 枚举（9 种事件）
+  - `IWindowEventSink.h`：`on_window_event(WindowEvent&)` 纯虚接口
+  - `IWindowEventSource.h`：`subscribe` / `unsubscribe` 观察者注册接口
+  - `ScreenInfo.h`：`ScreenInfo` 显示器信息结构体（bounds、work_area、dpi、scale、is_primary）
+  - `IScreenManager.h`：多显示器查询接口（screen_count / screen_at / primary_screen / screen_for_point）
+  - `IClipboard.h`：系统剪贴板接口（has_text / get_text / set_text / clear）
+  - `IMEService.h`：输入法服务接口（M0 阶段占位）
+  - `WindowDesc.h`：窗口创建参数结构体（title、size、position、resizable、frameless 等）
+  - `IWindow.h`：窗口操作接口（show / hide / close / set_title / set_size / set_position / native_handle / events）
+  - `IApplicationHost.h`：应用宿主接口（run / quit / create_window / clipboard / screens / ime）
+  - `PlatformAbi.h`：伞形头文件，一次 include 引入全部平台接口
+- **platform.win32**：新增 `mine.platform.win32` Win32 窗口后端实现（仅 Windows，依赖 mine.platform.abi）：
+  - 开启 per-monitor DPI v2 感知（`DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2`）
+  - `Win32WindowClass`：WNDCLASSEX 单例注册/注销管理
+  - `Win32WindowEventSource`：IWindowEventSource 的 vector 实现，支持快照迭代防重入
+  - `Win32Window`：IWindow 实现，HWND 管理、GWLP_USERDATA 关联 this，处理 WM_SIZE/WM_MOVE/WM_CLOSE/WM_DESTROY/WM_SETFOCUS/WM_KILLFOCUS/WM_ACTIVATE/WM_DPICHANGED 等核心消息
+  - `Win32ScreenManager`：IScreenManager 实现，基于 `EnumDisplayMonitors` + `GetDpiForMonitor`
+  - `Win32Clipboard`：IClipboard 实现，基于 `OpenClipboard`/`GetClipboardData`/`SetClipboardData`，UTF-16 与 UTF-8 自动互转
+  - `Win32IMEService`：IMEService M0 存根实现（所有方法为空操作）
+  - `Win32ApplicationHostImpl`：IApplicationHost 实现，GetMessage 消息循环，最后一个窗口关闭时自动 PostQuitMessage(0)
+  - 工厂函数：`mine::platform::win32::create_application_host()` 返回 `OwnedPtr<IApplicationHost>`
+- **samples/00-blank-window**：新增最小化 Win32 GUI 示例，演示创建窗口 → 显示 → 消息循环 → 退出全流程，编译并运行通过
