@@ -225,31 +225,48 @@ float4 main(SdfPSIn i) : SV_Target {
         float4 c2 = i.color;
         return float4(c2.rgb * c2.a * al, c2.a * al);
     } else if (kind == 5) {
-        // 四边不等宽 + 四角独立圆角的内侧描边
-        //   p0=top_w, p1=right_w, p2=bottom_w, p3=left_w
-        //   extra.x=r_tl（左上）, extra.y=r_tr（右上）, extra.z=r_br（右下）, extra.w=r_bl（左下）
+        // 四边不等宽 + 四角独立圆角内侧描边
         //
-        // 算法：
-        //   1. 用 complex_rounded_box_sdf 计算外轮廓（含圆角），得到 a_outer
-        //   2. 各边独立遮罩（同 kind=4），得到 a_stroke
-        //   3. al = a_outer * a_stroke（圆角自然裁剪角部描边）
+        // 算法：外轮廓圆角矩形 SDF 减去内轮廓圆角矩形 SDF，描边区域 = 外内之差。
+        // 内矩形由 Thickness 向各边收缩：
+        //   inner_b.x = b.x - (left + right) / 2
+        //   inner_b.y = b.y - (top  + bottom) / 2
+        //   inner_p   = p - float2((left - right) / 2, (top - bottom) / 2)
+        // 内圆角（仿 ComplexRoundedRect::inner_rect 公式，各向同性化后取 min）：
+        //   ir_tl = max(0, r_tl - max(left, top))   ← x=r_tl-left, y=r_tl-top 的标量化
+        //   其余角依此类推
+        //
+        // p0=top_w, p1=right_w, p2=bottom_w, p3=left_w（math::Thickness 字段顺序：left,top,right,bottom）
+        // extra.x=r_tl（左上）, extra.y=r_tr（右上）, extra.z=r_br（右下）, extra.w=r_bl（左下）
         float r_tl = i.extra.x;
         float r_tr = i.extra.y;
         float r_br = i.extra.z;
         float r_bl = i.extra.w;
-        // complex_rounded_box_sdf 参数顺序：(右下, 右上, 左下, 左上)
+
+        // 外轮廓（含圆角）
         float d_outer = complex_rounded_box_sdf(p, b, float4(r_br, r_tr, r_bl, r_tl));
         float fw_o = max(fwidth(d_outer), 0.5f);
         float a_outer = 1.0f - smoothstep(-fw_o, fw_o, d_outer);
 
-        float fy = max(fwidth(p.y), 0.5f);
-        float fx = max(fwidth(p.x), 0.5f);
-        float a_top    = p0 > 0.0f ? 1.0f - smoothstep(p0 - fy, p0 + fy, p.y + b.y) : 0.0f;
-        float a_bottom = p2 > 0.0f ? 1.0f - smoothstep(p2 - fy, p2 + fy, b.y - p.y) : 0.0f;
-        float a_left   = p3 > 0.0f ? 1.0f - smoothstep(p3 - fx, p3 + fx, p.x + b.x) : 0.0f;
-        float a_right  = p1 > 0.0f ? 1.0f - smoothstep(p1 - fx, p1 + fx, b.x - p.x) : 0.0f;
-        float a_stroke = max(max(a_top, a_bottom), max(a_left, a_right));
-        float al = a_outer * a_stroke;
+        // 内矩形：各边内缩，中心随非对称边宽偏移
+        float2 inner_b = max(float2(b.x - (p3 + p1) * 0.5f, b.y - (p0 + p2) * 0.5f),
+                             float2(0.0f, 0.0f));
+        float2 inner_p = p - float2((p3 - p1) * 0.5f, (p0 - p2) * 0.5f);
+
+        // 内圆角（对应 ComplexRoundedRect::inner_rect：x 分量减水平边宽，y 分量减垂直边宽）
+        // 各向同性化后：min(r - left, r - top) = r - max(left, top)，再 clamp 到 0
+        float ir_tl = max(0.0f, r_tl - max(p3, p0));  // 左上：left=p3, top=p0
+        float ir_tr = max(0.0f, r_tr - max(p1, p0));  // 右上：right=p1, top=p0
+        float ir_br = max(0.0f, r_br - max(p1, p2));  // 右下：right=p1, bottom=p2
+        float ir_bl = max(0.0f, r_bl - max(p3, p2));  // 左下：left=p3, bottom=p2
+
+        // 内轮廓
+        float d_inner = complex_rounded_box_sdf(inner_p, inner_b, float4(ir_br, ir_tr, ir_bl, ir_tl));
+        float fw_i = max(fwidth(d_inner), 0.5f);
+        float a_inner = 1.0f - smoothstep(-fw_i, fw_i, d_inner);
+
+        // 外轮廓内 且 内轮廓外 → 描边带
+        float al = a_outer * (1.0f - a_inner);
         float4 c3 = i.color;
         return float4(c3.rgb * c3.a * al, c3.a * al);
     } else {

@@ -19,7 +19,6 @@
 
 #include <mine/paint/Brush.h>
 #include <mine/paint/Pen.h>
-#include <mine/paint/BorderWidths.h>
 #include <mine/math/Rect.h>
 #include <mine/math/RoundedRect.h>
 #include <mine/math/ComplexRoundedRect.h>
@@ -102,10 +101,10 @@ struct DrawCmd {
     math::Transform2D transform{};     ///< 变换矩阵（TransformPush）
 
     // ── 绘制属性 ────────────────────────────────────────────────────────
-    Brush        brush{};          ///< 填充/描边画刷
-    Pen          pen{};            ///< 描边样式（描边命令使用）
-    BorderWidths border_widths{};  ///< 四边独立描边宽度（StrokeBorderedRect / StrokeBorderedRoundedRect）
-    math::CornerRadii border_radii{}; ///< 四角独立圆角半径（StrokeBorderedRoundedRect 使用）
+    Brush             brush{};          ///< 填充/描边画刷
+    Pen               pen{};            ///< 描边样式（描边命令使用）
+    math::Thickness   border_widths{};  ///< 四边独立描边宽度（StrokeBorderedRect / StrokeBorderedRoundedRect）
+    math::CornerRadii border_radii{};   ///< 四角独立圆角半径（StrokeBorderedRoundedRect 使用）
 };
 
 } // namespace mine::paint

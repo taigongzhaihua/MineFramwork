@@ -28,7 +28,7 @@
 
 #include <mine/paint/DisplayList.h>
 #include <mine/paint/PathBuilder.h>
-#include <mine/paint/BorderWidths.h>
+#include <mine/math/Thickness.h>
 #include <mine/math/Transform2D.h>
 #include <mine/math/ComplexRoundedRect.h>
 #include <mine/math/CornerRadii.h>
@@ -139,7 +139,7 @@ public:
      * @param brush   填充画刷
      * @param widths  四边宽度（调用 BorderWidths::all(w) 得到四边等宽）
      */
-    void stroke_bordered_rect(math::Rect rect, const Brush& brush, BorderWidths widths);
+    void stroke_bordered_rect(math::Rect rect, const Brush& brush, math::Thickness widths);
 
     /**
      * @brief 四边各自独立宽度 + 四角各自独立圆角的矩形内侧描边。
@@ -152,7 +152,7 @@ public:
      * @param radii  四角圆角半径（外轮廓）
      */
     void stroke_bordered_rounded_rect(math::Rect rect, const Brush& brush,
-                                      BorderWidths widths, math::CornerRadii radii);
+                                      math::Thickness widths, math::CornerRadii radii);
 
     /**
      * @brief 描边椭圆。

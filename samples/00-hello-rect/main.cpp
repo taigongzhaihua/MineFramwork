@@ -151,7 +151,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         canvas.stroke_bordered_rounded_rect(
             mine::math::Rect{col0 + ip, row4 + ip, sw, sh},
             mine::paint::Brush::solid(col_red),
-            mine::paint::BorderWidths{4.0f, 2.0f, 16.0f, 8.0f},
+            mine::math::Thickness{8.0f, 4.0f, 2.0f, 16.0f},  // left=8, top=4, right=2, bottom=16
             mine::math::CornerRadii{
                 {30.0f, 30.0f},  // 左上角
                 {10.0f, 10.0f},  // 右上角
@@ -163,7 +163,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         canvas.stroke_bordered_rounded_rect(
             mine::math::Rect{col1 + ip, row4 + ip, sw, sh},
             mine::paint::Brush::solid(col_cyan),
-            mine::paint::BorderWidths{.top = 12.0f, .bottom = 12.0f},
+            mine::math::Thickness::symmetric(0.0f, 12.0f),  // 仅上下各 12px（symmetric: horizontal=0, vertical=12）
             mine::math::CornerRadii::uniform(16.0f));
 
         mine::paint::DisplayList dl = canvas.end();

@@ -126,7 +126,7 @@ void Canvas::stroke_complex_rounded_rect(math::ComplexRoundedRect rrect, const B
     push(cmd);
 }
 
-void Canvas::stroke_bordered_rect(math::Rect rect, const Brush& brush, BorderWidths widths) {
+void Canvas::stroke_bordered_rect(math::Rect rect, const Brush& brush, math::Thickness widths) {
     DrawCmd cmd;
     cmd.kind          = DrawCmdKind::StrokeBorderedRect;
     cmd.rect          = rect;
@@ -136,7 +136,7 @@ void Canvas::stroke_bordered_rect(math::Rect rect, const Brush& brush, BorderWid
 }
 
 void Canvas::stroke_bordered_rounded_rect(math::Rect rect, const Brush& brush,
-                                          BorderWidths widths, math::CornerRadii radii) {
+                                          math::Thickness widths, math::CornerRadii radii) {
     DrawCmd cmd;
     cmd.kind          = DrawCmdKind::StrokeBorderedRoundedRect;
     cmd.rect          = rect;
