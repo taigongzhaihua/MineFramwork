@@ -109,7 +109,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         const mine::math::Color col_red    {0.90f, 0.20f, 0.20f, 1.0f};
         const mine::math::Color col_cyan   {0.15f, 0.80f, 0.85f, 1.0f};
 
-        const mine::paint::Pen pen{.width = 4.0f, .miter_limit = 4.0f};
+        const mine::paint::Pen pen{.width = 2.0f, .miter_limit = 4.0f};
 
         // ── 行1 左：FillRect ────────────────────────────────────────────
         canvas.fill_rect(

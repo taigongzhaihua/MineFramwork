@@ -578,16 +578,17 @@ R"hlsl(
         float4 cs8 = i.color;
         return float4(cs8.rgb * cs8.a * al8, cs8.a * al8);
     } else if (kind == 9) {
-        // ── 三次贝塞尔曲线描边 SDF（双起点 Newton：24 步采样 + 两候选各 4 步精化）──
+        // ── 三次贝塞尔曲线描边 SDF（三区间候选 + Newton 精化）──
         //
-        // 参数映射（同上次注释，略）
+        // 参数映射：
         //   half_w, half_h = P3 本地坐标；p2, p3 = P2 本地坐标
         //   p0=start_cap, p1=end_cap, stroke_w=线宽
         //   extra.xy=P0, extra.zw=P1
         //
-        // 单起点 Newton 在曲线有多个局部极值时会收敛到错误极值，产生断线和孤立亮斑。
-        // 修复：先用 24 步均匀采样找到距离最近的两个候选 t（相距 > 2/24 防止聚堆），
-        //       再从两候选各做 4 步 Newton 精化，最终取两结果中距离最小者。
+        // 三次贝塞尔点到曲线的距离函数最多有 3 个局部极小值。
+        // 将参数区间 [0,1] 分成 [0,1/3]、[1/3,2/3]、[2/3,1] 三段，
+        // 每段各用 12 步采样找最优候选，再各做 6 步 Newton 精化，
+        // 最终取三者中距离最小者，彻底消除局部极值遗漏导致的孤立亮斑。
         float2 Cb_A = i.extra.xy;               // P0（起点）
         float2 Cb_B = i.extra.zw;               // P1（第一控制点）
         float2 Cb_C = float2(p2, p3);           // P2（第二控制点）← 借用 p2/p3 槽
@@ -600,30 +601,27 @@ R"hlsl(
         float2 cb1 = -3.0f * Cb_A + 3.0f * Cb_B;
         float2 cb0 =  Cb_A;
 
-        // ── 阶段 1：24 步均匀采样，追踪最优两个候选 t ──────────────────────
-        // 两候选要求相距 > 2/24（避免同一局部极值区被重复选中）
-        float ta = 0.0f, tb = 1.0f;       // 候选 t（a=最优, b=次优）
-        float da_sq = 1e20f, db_sq = 1e20f;
+        // ── 阶段 1：三区间各 12 步采样，找三个独立候选 t ────────────────────
+        float ta = 0.0f,  tb = 0.5f,  tc = 1.0f;
+        float da_sq = 1e20f, db_sq = 1e20f, dc_sq = 1e20f;
         [unroll]
-        for (int si = 0; si <= 24; si++) {
-            float t = float(si) / 24.0f;
+        for (int si = 0; si <= 36; si++) {
+            float t = float(si) / 36.0f;
             float2 q = ((cb3 * t + cb2) * t + cb1) * t + cb0;
             float  dd = dot(p - q, p - q);
-            if (dd < da_sq) {
-                // 新的最优：将旧最优降为次优（仅在相距足够远时）
-                if (abs(t - ta) > 2.0f / 24.0f) {
-                    tb = ta; db_sq = da_sq;
-                }
-                ta = t; da_sq = dd;
-            } else if (dd < db_sq && abs(t - ta) > 2.0f / 24.0f) {
-                tb = t; db_sq = dd;
+            if (t <= 1.0f / 3.0f) {
+                if (dd < da_sq) { ta = t; da_sq = dd; }
+            } else if (t <= 2.0f / 3.0f) {
+                if (dd < db_sq) { tb = t; db_sq = dd; }
+            } else {
+                if (dd < dc_sq) { tc = t; dc_sq = dd; }
             }
         }
 
-        // ── 阶段 2：从两候选各做 4 步 Newton-Raphson 精化 ──────────────────
+        // ── 阶段 2：三个候选各做 6 步 Newton-Raphson 精化 ──────────────────
         // f(t) = dot(Q(t)-p, Q'(t)) = 0，牛顿步：t -= f / f'
         [unroll]
-        for (int ni = 0; ni < 4; ni++) {
+        for (int ni = 0; ni < 6; ni++) {
             // 候选 a
             float2 qa   = ((cb3 * ta + cb2) * ta + cb1) * ta + cb0;
             float2 dqa  = (3.0f * cb3 * ta + 2.0f * cb2) * ta + cb1;
@@ -642,12 +640,22 @@ R"hlsl(
             float  fpb  = dot(dqb, dqb) + dot(dfb, d2qb);
             if (abs(fpb) > 1e-10f) tb -= fb / fpb;
             tb = clamp(tb, 0.0f, 1.0f);
+            // 候选 c
+            float2 qc   = ((cb3 * tc + cb2) * tc + cb1) * tc + cb0;
+            float2 dqc  = (3.0f * cb3 * tc + 2.0f * cb2) * tc + cb1;
+            float2 d2qc = 6.0f * cb3 * tc + 2.0f * cb2;
+            float2 dfc  = qc - p;
+            float  fc   = dot(dfc, dqc);
+            float  fpc  = dot(dqc, dqc) + dot(dfc, d2qc);
+            if (abs(fpc) > 1e-10f) tc -= fc / fpc;
+            tc = clamp(tc, 0.0f, 1.0f);
         }
 
-        // ── 阶段 3：取两候选精化结果中距离最小者 ─────────────────────────
+        // ── 阶段 3：取三候选精化结果中距离最小者 ─────────────────────────
         float2 cla = ((cb3 * ta + cb2) * ta + cb1) * ta + cb0;
         float2 clb = ((cb3 * tb + cb2) * tb + cb1) * tb + cb0;
-        float d9 = min(length(p - cla), length(p - clb)) - half_sw9;
+        float2 clc = ((cb3 * tc + cb2) * tc + cb1) * tc + cb0;
+        float d9 = min(min(length(p - cla), length(p - clb)), length(p - clc)) - half_sw9;
 
         // Flat cap 截断（CSG max：端点切线半平面截断）
         int scap9 = (int)(p0 + 0.5f);
