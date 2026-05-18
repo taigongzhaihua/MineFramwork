@@ -12,16 +12,20 @@
  *   - FillEllipse / StrokeEllipse：椭圆 SDF（IQ 近似公式）
  *   - StrokeBorderedRect：四边各自独立宽度的矩形内侧描边 SDF（kind=4）
  *   - StrokeBorderedRoundedRect：四边独立宽度 + 四角独立圆角的内侧描边 SDF（kind=5）
- *   - StrokeLine：折线展开描边（Miter join 方案）
+ *   - StrokeLine：线段 SDF 描边，天然抗锯齿，支持 Flat/Round/Square 端点样式（kind=6）
  *
  * 渲染架构：
- *   - SDF 形状（矩形/圆角/椭圆）：每命令一次 DrawCall，SDF 参数编入顶点
- *   - 折线描边（StrokeLine）：顶点展开为三角带，solid pipeline
+ *   - 所有形状（含线段）均走 SDF 管线，SDF 参数编入顶点，逐像素精确 AA
+ *   - StrokePath 等折线命令留至后续里程碑，届时使用 CPU 展开三角带（solid pipeline）
  *
  * SDF 顶点格式（SdfVertex，80 字节）：
  *   pos(2) + color(4) + local(2) + params0(4) + params1(4) + extra(4) float
- * 折线顶点格式（PaintVertex，24 字节）：pos(2) + color(4) float
  * 视口变换：顶点着色器将屏幕像素坐标映射到 NDC（Y 轴翻转）
+ *
+ * SDF kind 常量：
+ *   0=矩形, 1=均匀圆角矩形, 2=四角独立圆角矩形, 3=椭圆
+ *   4=四边不等宽矩形内侧描边, 5=四边不等宽+四角独立圆角内侧描边
+ *   6=线段描边（Flat/Round/Square 端点样式）
  */
 
 #include <mine/paint/IRenderer.h>
@@ -287,6 +291,75 @@ float4 main(SdfPSIn i) : SV_Target {
         float al = a_outer * (1.0f - a_inner);
         float4 c3 = i.color;
         return float4(c3.rgb * c3.a * al, c3.a * al);
+    } else if (kind == 6) {
+        // ── 线段 SDF 描边（天然抗锯齿，含独立起止端点样式）──────────────
+        //
+        // 参数映射：
+        //   extra.xy = 端点 A 本地坐标（起点，以线段中心为原点）
+        //   extra.zw = 端点 B 本地坐标（终点，以线段中心为原点）
+        //   p0       = start_cap（0=Flat 截断, 1=Round 圆形, 2=Square 方形延伸）
+        //   p1       = end_cap（同上）
+        //   stroke_w = 线宽（总宽度，非半宽）
+        //
+        // 算法：将像素投影到线段方向和法线方向，
+        //   按投影位置分三段（A 端/主体/B 端）分别计算 SDF，
+        //   最终用 smoothstep AA 过渡。
+        float2 a = i.extra.xy;             // 端点 A（本地坐标）
+        float2 b = i.extra.zw;             // 端点 B（本地坐标）
+        float half_sw = stroke_w * 0.5f;  // 线宽一半
+
+        float2 ba = b - a;
+        float seg_len = length(ba);
+        // 线段单位方向向量（零长线段退化为水平方向）
+        float2 dir = seg_len > 1e-6f ? ba / seg_len : float2(1.0f, 0.0f);
+        // 法线单位向量（左旋 90°）
+        float2 nor = float2(-dir.y, dir.x);
+
+        float2 pa = p - a;                      // 像素相对于端点 A 的向量
+        float proj_along = dot(pa, dir);        // 沿线段方向的投影（0=A点, seg_len=B点）
+        float v = abs(dot(pa, nor));            // 垂直线段方向的距离（取绝对值）
+
+        int scap = (int)(p0 + 0.5f);           // start_cap 类型
+        int ecap = (int)(p1 + 0.5f);           // end_cap 类型
+
+        float d6;
+        if (proj_along < 0.0f) {
+            // A 端 cap 区域（投影超出 A 点之外）
+            if (scap == 1) {
+                // Round：圆形端点，到端点 A 的欧氏距离 - 半线宽
+                d6 = length(pa) - half_sw;
+            } else if (scap == 2) {
+                // Square：从 A 点向外延伸 half_sw 的矩形角
+                d6 = length(float2(max(-proj_along - half_sw, 0.0f),
+                                   max(v - half_sw, 0.0f)));
+            } else {
+                // Flat（默认）：在 A 端面精确截断，超出端面即外部
+                d6 = length(float2(-proj_along, max(v - half_sw, 0.0f)));
+            }
+        } else if (proj_along > seg_len) {
+            // B 端 cap 区域（投影超出 B 点之外）
+            float2 pb = p - b;                  // 像素相对于端点 B 的向量
+            float pb_over = proj_along - seg_len; // 超出 B 端的量（>0）
+            if (ecap == 1) {
+                // Round：圆形端点，到端点 B 的欧氏距离 - 半线宽
+                d6 = length(pb) - half_sw;
+            } else if (ecap == 2) {
+                // Square：从 B 点向外延伸 half_sw 的矩形角
+                d6 = length(float2(max(pb_over - half_sw, 0.0f),
+                                   max(v - half_sw, 0.0f)));
+            } else {
+                // Flat（默认）：在 B 端面精确截断
+                d6 = length(float2(pb_over, max(v - half_sw, 0.0f)));
+            }
+        } else {
+            // 主体区域（投影在线段内 [0, seg_len]）：仅垂直方向距离
+            d6 = v - half_sw;
+        }
+
+        float fw6 = max(fwidth(d6), 0.5f);
+        float al6 = 1.0f - smoothstep(-fw6, fw6, d6);
+        float4 cs = i.color;
+        return float4(cs.rgb * cs.a * al6, cs.a * al6);
     } else {
         // 椭圆（half_w = X 半径, half_h = Y 半径）
         d = ellipse_sdf(p, b);
@@ -363,13 +436,16 @@ struct ViewportCB {
     float pad1{0.0f};
 };
 
-// ── 折线描边展开辅助函数（StrokeLine 使用）────────────────────────────────────
+// ── 折线描边展开辅助函数（StrokePath 备用，当前未调用）───────────────────────
 
 /**
  * @brief 将折线描边展开为顶点并写入列表（Miter join + Butt/Square cap）。
  *
  * 对折线每个顶点计算角平分线 (miter) 方向的偏移量，生成上下两侧对称的点，
  * 相邻两点之间生成一个矩形（两个三角形）。
+ *
+ * 注：StrokeLine 单线段命令已改为 SDF 方案（kind=6）。
+ *     本函数为后续 StrokePath（多段折线）预留，暂未被调用。
  *
  * @param vertices  输出顶点列表（追加）
  * @param pts       折线点序列（屏幕像素坐标）
@@ -378,6 +454,9 @@ struct ViewportCB {
  * @param closed    是否为闭合路径（最后一段连回起点）
  * @param miter_lim Miter 上限，超出时截断为 Bevel（对应 Pen::miter_limit）
  */
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
+#pragma warning(push)
+#pragma warning(disable: 4505)  // 暂未调用，为 StrokePath 预留
 static void push_polyline_stroke_vertices(
     containers::Vector<PaintVertex>& vertices,
     const containers::Vector<math::Vec2>& pts,
@@ -483,6 +562,7 @@ static void push_polyline_stroke_vertices(
         vertices.push_back({l0.x, l0.y, r, g, b, a});
     }
 }
+#pragma warning(pop)
 
 // ── RhiRenderer 类 ────────────────────────────────────────────────────────────
 
@@ -1084,35 +1164,66 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
         }
 
-        // ── 折线描边命令（保留折线展开方案）─────────────────────────────
+        // ── 线段 SDF 描边（kind=6）──────────────────────────────────────
 
         else if (cmd.kind == DrawCmdKind::StrokeLine) {
+            // 使用 SDF 方案（kind=6），天然抗锯齿，支持 Flat/Round/Square 端点样式。
+            // 包围盒 = 线段 AABB + 描边外扩（half_sw）+ 端点最大延伸（half_sw）+ AA 余量（1px）
             if (cmd.brush.kind() != BrushKind::SolidColor) continue;
             if (cmd.pen.width <= 0.0f) continue;
+
             const math::Color c = cmd.brush.color();
-            const float half_w  = cmd.pen.width * 0.5f;
+            const float sw      = cmd.pen.width;
+            const float half_sw = sw * 0.5f;
 
-            containers::Vector<math::Vec2> pts(2u);
-            pts[0] = cmd.pt_a;
-            pts[1] = cmd.pt_b;
+            const float ax = cmd.pt_a.x, ay = cmd.pt_a.y;
+            const float bx = cmd.pt_b.x, by = cmd.pt_b.y;
 
-            containers::Vector<PaintVertex> verts;
-            push_polyline_stroke_vertices(
-                verts, pts, half_w,
-                c.r, c.g, c.b, c.a, /*closed=*/false, cmd.pen.miter_limit);
+            // 线段中心（本地坐标系原点）
+            const float cx = (ax + bx) * 0.5f;
+            const float cy = (ay + by) * 0.5f;
+
+            // AABB 半尺寸 + 描边外扩 + 端点 cap 最大延伸（half_sw）+ AA 余量（1px）
+            // Round/Square cap 各延伸 half_sw，Flat 无延伸；保守取 half_sw 覆盖所有情况
+            const float padding = half_sw + 1.0f;
+            const float hw = std::abs(bx - ax) * 0.5f + padding;
+            const float hh = std::abs(by - ay) * 0.5f + padding;
+
+            // 端点 A/B 在本地坐标系中的坐标（extra.xy / extra.zw）
+            const float lax = ax - cx, lay = ay - cy;
+            const float lbx = bx - cx, lby = by - cy;
+
+            // 端点样式编码（0=Flat, 1=Round, 2=Square）→ p0=start_cap, p1=end_cap
+            auto encode_cap = [](LineCap cap) -> float {
+                if (cap == LineCap::Round)  return 1.0f;
+                if (cap == LineCap::Square) return 2.0f;
+                return 0.0f;  // Flat
+            };
+            const float scap = encode_cap(cmd.pen.start_cap);
+            const float ecap = encode_cap(cmd.pen.end_cap);
+
+            containers::Vector<SdfVertex> verts;
+            // kind=6，p0=start_cap, p1=end_cap，p2/p3 未用，stroke_w=线宽
+            // e0,e1 = A端本地坐标，e2,e3 = B端本地坐标
+            push_sdf_quad_vertices(verts, cx, cy, hw, hh, 0.0f,
+                c.r, c.g, c.b, c.a,
+                6.0f,           // kind=6（线段 SDF）
+                scap, ecap, 0.0f, 0.0f,  // p0=start_cap, p1=end_cap
+                sw,             // stroke_w
+                lax, lay, lbx, lby);  // e0..e3 = 端点本地坐标
 
             if (verts.empty()) continue;
 
-            gfx::BufferDesc vb{};
-            vb.size       = static_cast<uint64_t>(verts.size()) * sizeof(PaintVertex);
-            vb.stride     = sizeof(PaintVertex);
-            vb.bind_flags = gfx::BufferBindFlags::Vertex;
-            auto buf = device_->create_buffer(vb, verts.data());
-            if (!buf) continue;
+            gfx::BufferDesc vb6{};
+            vb6.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
+            vb6.stride     = sizeof(SdfVertex);
+            vb6.bind_flags = gfx::BufferBindFlags::Vertex;
+            auto buf6 = device_->create_buffer(vb6, verts.data());
+            if (!buf6) continue;
 
-            cmd_list_->set_pipeline(solid_pipeline_.get());
+            cmd_list_->set_pipeline(sdf_pipeline_.get());
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
-            cmd_list_->set_vertex_buffer(0, buf.get(), 0);
+            cmd_list_->set_vertex_buffer(0, buf6.get(), 0);
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
         }
         // StrokePath、ClipPushRect 等高级命令留至后续里程碑实现

@@ -2,7 +2,7 @@
  * @file main.cpp
  * @brief 00-hello-rect 示例：mine.paint Canvas SDF 填充 + 描边命令综合演示。
  *
- * 演示内容（2×5 网格布局，左列填充/右列描边）：
+ * 演示内容（2×6 网格布局，左列填充/右列描边）：
  *   行1 左：FillRect                      — 纯色填充矩形（绿色）
  *   行1 右：StrokeRect                    — 矩形描边（绿色，线宽 4px）
  *   行2 左：FillRoundedRect               — 均匀圆角矩形填充（蓝色，radius=20px）
@@ -12,7 +12,9 @@
  *   行4 左：FillEllipse                   — 椭圆填充（紫色）
  *   行4 右：StrokeEllipse                 — 椭圆描边（紫色，线宽 4px）
  *   行5 左：StrokeBorderedRoundedRect     — 四边不等宽 + 四角独立圆角内侧描边（红色）
- *   行5 右：StrokeBorderedRoundedRect     — 均匀圆角 + 仅上下边框（青色，上下各12px）
+ *   行5 右：StrokeBorderedRoundedRect     — 均匀圆角 + 仅上下边框（青色，上下吆12px）
+ *   行6 左：StrokeLine (Flat cap)          — 平端线段（双色渐变 SDF）
+ *   行6 右：StrokeLine (Round + Square)    — 混合端点样式线段对比
  */
 
 #include <mine/platform/PlatformAbi.h>
@@ -70,11 +72,11 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
             mine::math::Rect{0.0f, 0.0f, W, H},
             mine::paint::Brush::solid(mine::math::Color{0.12f, 0.12f, 0.12f, 1.0f}));
 
-        // 2×5 网格参数（2列 × 5行）
+        // 2×6 网格参数（2列 × 6行）
         const float outer_pad = 20.0f;
         const float gap       = 10.0f;
         const float cw        = (W - outer_pad * 2.0f - gap) * 0.5f;
-        const float ch        = (H - outer_pad * 2.0f - gap * 4.0f) / 5.0f;
+        const float ch        = (H - outer_pad * 2.0f - gap * 5.0f) / 6.0f;
 
         const float col0 = outer_pad;
         const float col1 = outer_pad + cw + gap;
@@ -84,6 +86,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         const float row2 = outer_pad + (ch + gap) * 2.0f;
         const float row3 = outer_pad + (ch + gap) * 3.0f;
         const float row4 = outer_pad + (ch + gap) * 4.0f;
+        const float row5 = outer_pad + (ch + gap) * 5.0f;
 
         const float ip = 14.0f;
         const float sw = cw - ip * 2.0f;
@@ -165,6 +168,56 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
             mine::paint::Brush::solid(col_cyan),
             mine::math::Thickness::symmetric(0.0f, 12.0f),  // 仅上下各 12px（symmetric: horizontal=0, vertical=12）
             mine::math::CornerRadii::uniform(16.0f));
+
+        // ── 行6 左：StrokeLine（Flat cap，斜线，SDF 抗锯齿）──────────────
+        // 展示 SDF 线段的平端截断，线条边缘无锯齿
+        {
+            const float x0 = col0 + ip;
+            const float y0 = row5 + ip;
+            // 第一条：水平线（Flat，粗）
+            mine::paint::Pen pen_flat;
+            pen_flat.width     = 6.0f;
+            pen_flat.start_cap = mine::paint::LineCap::Flat;
+            pen_flat.end_cap   = mine::paint::LineCap::Flat;
+            canvas.stroke_line(
+                mine::math::Vec2{x0, y0 + sh * 0.25f},
+                mine::math::Vec2{x0 + sw, y0 + sh * 0.25f},
+                mine::paint::Brush::solid(col_green), pen_flat);
+            // 第二条：斜线（Flat，细）
+            mine::paint::Pen pen_flat_thin;
+            pen_flat_thin.width     = 2.0f;
+            pen_flat_thin.start_cap = mine::paint::LineCap::Flat;
+            pen_flat_thin.end_cap   = mine::paint::LineCap::Flat;
+            canvas.stroke_line(
+                mine::math::Vec2{x0, y0 + sh * 0.5f},
+                mine::math::Vec2{x0 + sw, y0 + sh * 0.75f},
+                mine::paint::Brush::solid(col_orange), pen_flat_thin);
+        }
+
+        // ── 行6 右：StrokeLine（Round/Square 混合端点对比）──────────────────
+        // 上：Round cap（两端圆形）；下：Square cap（两端方形延伸）
+        {
+            const float x1 = col1 + ip;
+            const float y1 = row5 + ip;
+            // Round cap
+            mine::paint::Pen pen_round;
+            pen_round.width     = 8.0f;
+            pen_round.start_cap = mine::paint::LineCap::Round;
+            pen_round.end_cap   = mine::paint::LineCap::Round;
+            canvas.stroke_line(
+                mine::math::Vec2{x1, y1 + sh * 0.3f},
+                mine::math::Vec2{x1 + sw, y1 + sh * 0.3f},
+                mine::paint::Brush::solid(col_blue), pen_round);
+            // Square cap
+            mine::paint::Pen pen_square;
+            pen_square.width     = 8.0f;
+            pen_square.start_cap = mine::paint::LineCap::Square;
+            pen_square.end_cap   = mine::paint::LineCap::Square;
+            canvas.stroke_line(
+                mine::math::Vec2{x1, y1 + sh * 0.7f},
+                mine::math::Vec2{x1 + sw, y1 + sh * 0.7f},
+                mine::paint::Brush::solid(col_purple), pen_square);
+        }
 
         mine::paint::DisplayList dl = canvas.end();
 
