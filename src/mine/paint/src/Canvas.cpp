@@ -97,6 +97,36 @@ void Canvas::fill_path(const Path& path, const Brush& brush) {
     push(cmd);
 }
 
+void Canvas::fill_polygon(core::Span<const math::Vec2> vertices, const Brush& brush) {
+    if (vertices.size() < 3) return;  // 少于3个顶点不构成多边形
+
+    // 计算顶点 AABB，用于确定 SDF 渲染包围盒中心和半尺寸
+    float min_x = vertices[0].x, min_y = vertices[0].y;
+    float max_x = vertices[0].x, max_y = vertices[0].y;
+    for (size_t i = 1; i < vertices.size(); ++i) {
+        if (vertices[i].x < min_x) min_x = vertices[i].x;
+        if (vertices[i].y < min_y) min_y = vertices[i].y;
+        if (vertices[i].x > max_x) max_x = vertices[i].x;
+        if (vertices[i].y > max_y) max_y = vertices[i].y;
+    }
+
+    // 将多边形顶点存为 Path（MoveTo + LineTo × N-1 + Close）
+    PathBuilder pb;
+    pb.move_to(vertices[0]);
+    for (size_t i = 1; i < vertices.size(); ++i) {
+        pb.line_to(vertices[i]);
+    }
+    pb.close();
+
+    DrawCmd cmd;
+    cmd.kind       = DrawCmdKind::FillPolygon;
+    cmd.pt_a       = {(min_x + max_x) * 0.5f, (min_y + max_y) * 0.5f};  // AABB 中心
+    cmd.pt_b       = {(max_x - min_x) * 0.5f, (max_y - min_y) * 0.5f};  // AABB 半尺寸
+    cmd.path_index = intern_path(pb.build());
+    cmd.brush      = brush;
+    push(cmd);
+}
+
 // ── 描边命令 ──────────────────────────────────────────────────────────────────
 
 void Canvas::stroke_rect(math::Rect rect, const Brush& brush, const Pen& pen) {
@@ -211,6 +241,42 @@ void Canvas::stroke_path(const Path& path, const Brush& brush, const Pen& pen) {
     DrawCmd cmd;
     cmd.kind       = DrawCmdKind::StrokePath;
     cmd.path_index = intern_path(path);
+    cmd.brush      = brush;
+    cmd.pen        = pen;
+    push(cmd);
+}
+
+void Canvas::stroke_polygon(core::Span<const math::Vec2> vertices, const Brush& brush, const Pen& pen) {
+    if (vertices.size() < 3) return;  // 少于3个顶点不构成多边形
+
+    // 计算顶点 AABB，包围盒外扩 stroke_w/2 以容纳描边区域
+    const float half_sw = pen.width * 0.5f;
+    float min_x = vertices[0].x - half_sw, min_y = vertices[0].y - half_sw;
+    float max_x = vertices[0].x + half_sw, max_y = vertices[0].y + half_sw;
+    for (size_t i = 1; i < vertices.size(); ++i) {
+        const float lx = vertices[i].x - half_sw;
+        const float ly = vertices[i].y - half_sw;
+        const float rx = vertices[i].x + half_sw;
+        const float ry = vertices[i].y + half_sw;
+        if (lx < min_x) min_x = lx;
+        if (ly < min_y) min_y = ly;
+        if (rx > max_x) max_x = rx;
+        if (ry > max_y) max_y = ry;
+    }
+
+    // 将多边形顶点存为 Path（MoveTo + LineTo × N-1 + Close）
+    PathBuilder pb;
+    pb.move_to(vertices[0]);
+    for (size_t i = 1; i < vertices.size(); ++i) {
+        pb.line_to(vertices[i]);
+    }
+    pb.close();
+
+    DrawCmd cmd;
+    cmd.kind       = DrawCmdKind::StrokePolygon;
+    cmd.pt_a       = {(min_x + max_x) * 0.5f, (min_y + max_y) * 0.5f};  // AABB 中心
+    cmd.pt_b       = {(max_x - min_x) * 0.5f, (max_y - min_y) * 0.5f};  // AABB 半尺寸（含描边外扩）
+    cmd.path_index = intern_path(pb.build());
     cmd.brush      = brush;
     cmd.pen        = pen;
     push(cmd);

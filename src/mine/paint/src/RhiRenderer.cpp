@@ -218,6 +218,47 @@ float ellipse_sdf(float2 p, float2 ab) {
 
 // ── 像素着色器主函数 ─────────────────────────────────────────────────────────
 
+// ── 多边形顶点常量缓冲（b1 槽，仅多边形 DrawCall 绑定）────────────────────
+// 内存布局（16 字节对齐）：
+//   偏移   0: poly_vert_count（int）— 实际顶点数（3..64）
+//   偏移   4: _poly_pad0/1/2（填充）
+//   偏移  16: poly_verts[0..63]（float4，每顶点 xy=本地坐标，zw 填充为0）
+cbuffer PolygonVertsCB : register(b1) {
+    int   poly_vert_count;  // 多边形实际顶点数（3..64）
+    float _poly_pad0;
+    float _poly_pad1;
+    float _poly_pad2;
+    float4 poly_verts[64];  // 顶点本地坐标（x=local_x, y=local_y，zw 不使用）
+};
+
+// 多边形 SDF（IQ 绕数法，支持凸多边形和凹多边形，任意简单多边形均正确）
+// 算法来源：https://iquilezles.org/articles/distfunctions2d/
+// 参数 p：当前像素的本地坐标（以 AABB 中心为原点，单位像素）
+// 返回值：外正内负的有向距离（像素单位）
+float sdPolygon(float2 p) {
+    int n = poly_vert_count;
+    // 以第一条边到 p 的最近点距离平方作为初始最小距离
+    float d = dot(p - poly_verts[0].xy, p - poly_verts[0].xy);
+    float s = 1.0f;  // 符号（1=外部，-1=内部）
+    [loop]
+    for (int i = 0, j = n - 1; i < n; j = i, i++) {
+        float2 vi = poly_verts[i].xy;
+        float2 vj = poly_verts[j].xy;
+        // 点 p 到边 (vi, vj) 的最近点投影，计算距离平方
+        float2 e = vj - vi;
+        float2 w = p - vi;
+        float2 b = w - e * clamp(dot(w, e) / dot(e, e), 0.0f, 1.0f);
+        d = min(d, dot(b, b));
+        // 用射线法（绕数法变体）判断 p 是否在多边形内部，确定 SDF 符号
+        // 三个条件同为 true 或同为 false 时翻转符号（等价于 all(cond) || all(!cond)）
+        bool c0 = (p.y >= vi.y);
+        bool c1 = (p.y <  vj.y);
+        bool c2 = (e.x * w.y > e.y * w.x);
+        if ((c0 && c1 && c2) || (!c0 && !c1 && !c2)) s = -s;
+    }
+    return s * sqrt(d);
+}
+
 struct SdfPSIn {
     float4 pos     : SV_Position;
     float4 color   : COLOR;
@@ -691,6 +732,33 @@ R"hlsl(
         float al9 = 1.0f - smoothstep(-fw9, fw9, d9);
         float4 cs9 = i.color;
         return float4(cs9.rgb * cs9.a * al9, cs9.a * al9);
+    }
+)hlsl"
+// ── 字符串拆分（MSVC 原始字符串长度限制），以下为 kind=10/11 多边形续接 ──
+R"hlsl(
+    else if (kind == 10 || kind == 11) {
+        // ── kind=10：FillPolygon（填充多边形 SDF）─────────────────────────
+        // ── kind=11：StrokePolygon（描边多边形 SDF）──────────────────────
+        //
+        // 顶点数据来自 PolygonVertsCB（b1 槽），坐标为本地坐标（以 AABB 中心为原点）。
+        // sdPolygon() 使用 IQ 绕数法，同时支持凸多边形和凹多边形。
+        float dpoly = sdPolygon(p);
+
+        float fpoly = max(fwidth(dpoly), 0.5f);
+        float apoly;
+        if (kind == 10) {
+            // 填充：多边形内部（d<0）不透明，边界处平滑过渡
+            apoly = 1.0f - smoothstep(-fpoly, fpoly, dpoly);
+        } else {
+            // 描边：围绕多边形轮廓向内外各扩展 stroke_w/2
+            float half_sw11 = stroke_w * 0.5f;
+            float a_outer   = 1.0f - smoothstep(-fpoly, fpoly, dpoly - half_sw11);
+            float a_inner   = smoothstep(-fpoly, fpoly, dpoly + half_sw11);
+            apoly = a_outer * a_inner;
+        }
+        float4 cpoly = i.color;
+        float  apre  = cpoly.a * apoly;
+        return float4(cpoly.rgb * apre, apre);
     } else {
         // 椭圆（half_w = X 半径, half_h = Y 半径）
         d = ellipse_sdf(p, b);
@@ -765,6 +833,18 @@ struct ViewportCB {
     float height;
     float pad0{0.0f};
     float pad1{0.0f};
+};
+
+/// 多边形顶点常量缓冲（b1 槽，仅多边形 DrawCall 绑定）
+/// 内存布局与 HLSL PolygonVertsCB 完全一致（16 字节对齐）：
+///   偏移   0: vert_count（int）
+///   偏移   4: pad[3]（3 × float 填充）
+///   偏移  16: verts[64][4]（每顶点 float4，xy=本地坐标，zw=0）
+/// 总大小：16 + 64×16 = 1040 字节（65 × 16，符合 D3D11 16 字节倍数要求）
+struct alignas(16) PolygonVertsCB {
+    int   vert_count;  ///< 多边形顶点数（3..64）
+    float pad[3];      ///< 填充至 16 字节
+    float verts[64][4]; ///< 各顶点本地坐标（[k][0]=local_x, [k][1]=local_y, [k][2..3]=0）
 };
 
 // ── 折线描边展开辅助函数（StrokePath 备用，当前未调用）───────────────────────
@@ -1812,6 +1892,77 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
         }
 
         // StrokePath、ClipPushRect 等高级命令留至后续里程碑实现
+
+        // ── FillPolygon / StrokePolygon（SDF 多边形）─────────────────────────
+
+        else if (cmd.kind == DrawCmdKind::FillPolygon
+              || cmd.kind == DrawCmdKind::StrokePolygon)
+        {
+            if (cmd.brush.kind() != BrushKind::SolidColor) continue;
+
+            // 从 DisplayList 的 paths 中取出多边形顶点路径
+            if (cmd.path_index >= static_cast<uint32_t>(dl.paths().size())) continue;
+            const Path& poly_path = dl.paths()[cmd.path_index];
+
+            // 收集有效顶点（只读 MoveTo/LineTo 命令的首个点，跳过 Close）
+            containers::Vector<math::Vec2> poly_verts_list;
+            for (const auto& pc : poly_path.cmds()) {
+                if (pc.kind == PathCmdKind::MoveTo || pc.kind == PathCmdKind::LineTo) {
+                    poly_verts_list.push_back(pc.pt[0]);
+                }
+            }
+            const int poly_n = static_cast<int>(poly_verts_list.size());
+            if (poly_n < 3 || poly_n > 64) continue;  // 顶点数超出支持范围
+
+            const math::Color c    = cmd.brush.color();
+            const float       cx   = cmd.pt_a.x;         // AABB 中心 x
+            const float       cy   = cmd.pt_a.y;         // AABB 中心 y
+            const float       hw   = cmd.pt_b.x;         // AABB 半宽
+            const float       hh   = cmd.pt_b.y;         // AABB 半高
+            const float       kind_val = (cmd.kind == DrawCmdKind::FillPolygon) ? 10.0f : 11.0f;
+            const float       stroke_w = (cmd.kind == DrawCmdKind::StrokePolygon)
+                                         ? cmd.pen.width : 0.0f;
+
+            // ── 构建 SDF 包围盒顶点（复用现有辅助函数）──────────────────
+            containers::Vector<SdfVertex> sdf_verts;
+            push_sdf_quad_vertices(sdf_verts, cx, cy, hw, hh, 1.0f,
+                c.r, c.g, c.b, c.a,
+                kind_val,
+                0.0f, 0.0f, 0.0f, 0.0f,
+                stroke_w);
+
+            gfx::BufferDesc vb_poly{};
+            vb_poly.size       = static_cast<uint64_t>(sdf_verts.size()) * sizeof(SdfVertex);
+            vb_poly.stride     = sizeof(SdfVertex);
+            vb_poly.bind_flags = gfx::BufferBindFlags::Vertex;
+            auto poly_vb = device_->create_buffer(vb_poly, sdf_verts.data());
+            if (!poly_vb) continue;
+
+            // ── 构建多边形顶点常量缓冲（b1 槽）──────────────────────────
+            // 顶点转换为本地坐标（相对 AABB 中心），与像素着色器中的 local 坐标系一致
+            PolygonVertsCB poly_cb{};
+            poly_cb.vert_count = poly_n;
+            poly_cb.pad[0] = poly_cb.pad[1] = poly_cb.pad[2] = 0.0f;
+            for (int k = 0; k < poly_n; ++k) {
+                poly_cb.verts[k][0] = poly_verts_list[k].x - cx;  // 本地 x
+                poly_cb.verts[k][1] = poly_verts_list[k].y - cy;  // 本地 y
+                poly_cb.verts[k][2] = 0.0f;
+                poly_cb.verts[k][3] = 0.0f;
+            }
+
+            gfx::BufferDesc cb_poly{};
+            cb_poly.size       = sizeof(PolygonVertsCB);
+            cb_poly.stride     = 0;
+            cb_poly.bind_flags = gfx::BufferBindFlags::Constant;
+            auto poly_cb_buf = device_->create_buffer(cb_poly, &poly_cb);
+            if (!poly_cb_buf) continue;
+
+            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_constant_buffer(0, viewport_cb.get());
+            cmd_list_->set_constant_buffer(1, poly_cb_buf.get());  // 多边形顶点（b1）
+            cmd_list_->set_vertex_buffer(0, poly_vb.get(), 0);
+            cmd_list_->draw(static_cast<uint32_t>(sdf_verts.size()), 1, 0, 0);
+        }
     }
     // 注：所有在循环内创建的临时顶点缓冲在 OwnedPtr 析构时释放，
     //     D3D11 延迟上下文在录制时已通过 COM 引用计数持有缓冲，安全释放。

@@ -32,6 +32,7 @@
 #include <mine/math/Transform2D.h>
 #include <mine/math/ComplexRoundedRect.h>
 #include <mine/math/CornerRadii.h>
+#include <mine/core/Span.h>
 
 namespace mine::paint {
 
@@ -118,6 +119,18 @@ public:
 
     /// 填充任意路径。
     void fill_path(const Path& path, const Brush& brush);
+
+    /**
+     * @brief 填充多边形（SDF，支持凸多边形和凹多边形）。
+     *
+     * 使用 IQ 绕数法多边形 SDF 渲染，亚像素抗锯齿。
+     * 顶点顺序可以是顺时针或逆时针，均正确处理。
+     * 支持任意简单多边形（无自交），最多 64 个顶点。
+     *
+     * @param vertices  多边形顶点序列（至少 3 个，最多 64 个）
+     * @param brush     画刷（当前仅支持 SolidColor）
+     */
+    void fill_polygon(core::Span<const math::Vec2> vertices, const Brush& brush);
 
     // ── 描边命令 ────────────────────────────────────────────────────────
 
@@ -217,6 +230,19 @@ public:
 
     /// 描边任意路径。
     void stroke_path(const Path& path, const Brush& brush, const Pen& pen = {});
+
+    /**
+     * @brief 描边多边形轮廓（SDF，支持凸多边形和凹多边形）。
+     *
+     * 使用 IQ 绕数法多边形 SDF 渲染，亚像素抗锯齿。
+     * 描边沿轮廓向内外各扩展 pen.width/2，端点角部自然连接。
+     * 支持任意简单多边形（无自交），最多 64 个顶点。
+     *
+     * @param vertices  多边形顶点序列（至少 3 个，最多 64 个）
+     * @param brush     画刷（当前仅支持 SolidColor）
+     * @param pen       描边样式（width 决定线宽）
+     */
+    void stroke_polygon(core::Span<const math::Vec2> vertices, const Brush& brush, const Pen& pen = {});
 
     // ── 完成录制 ────────────────────────────────────────────────────────
 

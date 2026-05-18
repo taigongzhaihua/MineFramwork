@@ -21,6 +21,8 @@
  *   行8 右：StrokeQuadBezier (Round cap)   — 二次贝塞尔 S 形曲线，圆形端点
  *   行9 左：StrokeCubicBezier (Flat cap)   — 水平 S/反 S 对照曲线（蓝色4px + 橙色2px，同起同终）
  *   行9 右：StrokeCubicBezier (Round cap)  — 三次贝塞尔大 S 形，圆形端点
+ *   行10左：FillPolygon（凸多边形）         — SDF 填充正六边形（蓝色，IQ 绕数法）
+ *   行10右：FillPolygon（凹多边形）         — SDF 填充五角星 + StrokePolygon 六边形描边
  */
 
 #include <mine/platform/PlatformAbi.h>
@@ -98,11 +100,11 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
             mine::math::Rect{0.0f, 0.0f, W, H},
             mine::paint::Brush::solid(mine::math::Color{0.12f, 0.12f, 0.12f, 1.0f}));
 
-        // 2×9 网格参数（2列 × 9行）
+        // 2×10 网格参数（2列 × 10行）
         const float outer_pad = 20.0f;
         const float gap       = 10.0f;
         const float cw        = (W - outer_pad * 2.0f - gap) * 0.5f;
-        const float ch        = (H - outer_pad * 2.0f - gap * 8.0f) / 9.0f;
+        const float ch        = (H - outer_pad * 2.0f - gap * 9.0f) / 10.0f;
 
         const float col0 = outer_pad;
         const float col1 = outer_pad + cw + gap;
@@ -116,6 +118,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         const float row6 = outer_pad + (ch + gap) * 6.0f;
         const float row7 = outer_pad + (ch + gap) * 7.0f;
         const float row8 = outer_pad + (ch + gap) * 8.0f;
+        const float row9 = outer_pad + (ch + gap) * 9.0f;
 
         const float ip = 14.0f;
         const float sw = cw - ip * 2.0f;
@@ -425,6 +428,62 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                 mine::math::Vec2{bx,             by + sh * 0.9f},     // P2（向左拉底部）
                 mine::math::Vec2{bx + sw * 0.8f, by + sh * 0.9f},    // P3 右下
                 mine::paint::Brush::solid(col_green), pen_cub_round2);
+        }
+
+        // ── 行10 左：FillPolygon（SDF 填充正六边形，凸多边形示例）──────────
+        // 以格子中心为圆心，绘制内切六边形（flat-top 朝向，6 个顶点均匀分布）
+        {
+            const float cx10  = col0 + ip + sw * 0.5f;
+            const float cy10  = row9 + ip + sh * 0.5f;
+            const float r10   = std::min(sw, sh) * 0.44f;  // 外接圆半径
+            constexpr float k_pi = 3.14159265358979323846f;
+            mine::math::Vec2 hex[6];
+            for (int k = 0; k < 6; ++k) {
+                const float ang = k_pi / 6.0f + k * k_pi / 3.0f;  // 从 30° 起，每 60° 一个顶点
+                hex[k] = mine::math::Vec2{cx10 + r10 * std::cos(ang),
+                                          cy10 + r10 * std::sin(ang)};
+            }
+            canvas.fill_polygon(
+                mine::core::Span<const mine::math::Vec2>{hex, 6},
+                mine::paint::Brush::solid(col_blue));
+        }
+
+        // ── 行10 右：FillPolygon 五角星（凹多边形）+ StrokePolygon 六边形描边 ──
+        // 五角星：10 个顶点，外圈 5 个（outer_r）和内圈 5 个（inner_r）交替排列
+        // StrokePolygon：描边正六边形叠加，展示轮廓描边效果
+        {
+            const float cx10r = col1 + ip + sw * 0.5f;
+            const float cy10r = row9 + ip + sh * 0.5f;
+            const float outer_r = std::min(sw, sh) * 0.44f;  // 外圈半径
+            const float inner_r = outer_r * 0.38f;            // 内圈半径（约 0.382 = 1/φ²，黄金比例）
+            constexpr float k_pi = 3.14159265358979323846f;
+
+            // 构建五角星顶点（10 点，从顶部开始，顺时针）
+            mine::math::Vec2 star[10];
+            for (int k = 0; k < 10; ++k) {
+                const float ang = -k_pi * 0.5f + k * k_pi / 5.0f;  // 从 -90° 起，每 36° 一点
+                const float r   = (k % 2 == 0) ? outer_r : inner_r;
+                star[k] = mine::math::Vec2{cx10r + r * std::cos(ang),
+                                           cy10r + r * std::sin(ang)};
+            }
+            // 填充五角星（凹多边形，IQ 绕数法正确处理内凹区域）
+            canvas.fill_polygon(
+                mine::core::Span<const mine::math::Vec2>{star, 10},
+                mine::paint::Brush::solid(col_red));
+
+            // 叠加描边六边形（flat-top，蓝色轮廓，2px 线宽）
+            mine::math::Vec2 hex2[6];
+            for (int k = 0; k < 6; ++k) {
+                const float ang = k_pi / 6.0f + k * k_pi / 3.0f;
+                hex2[k] = mine::math::Vec2{cx10r + outer_r * std::cos(ang),
+                                           cy10r + outer_r * std::sin(ang)};
+            }
+            mine::paint::Pen pen_poly;
+            pen_poly.width = 2.0f;
+            canvas.stroke_polygon(
+                mine::core::Span<const mine::math::Vec2>{hex2, 6},
+                mine::paint::Brush::solid(col_cyan),
+                pen_poly);
         }
 
         mine::paint::DisplayList dl = canvas.end();

@@ -38,6 +38,7 @@ enum class DrawCmdKind : uint8_t {
     FillComplexRoundedRect,  ///< 填充四角各自独立的椭圆圆角矩形
     FillEllipse,             ///< 填充椭圆
     FillPath,                ///< 填充任意路径（通过 path_index 引用）
+    FillPolygon,             ///< 填充多边形——SDF（path_index 引用顶点序列；pt_a=AABB中心，pt_b=AABB半尺寸）
 
     // ── 描边命令 ────────────────────────────────────────────────────────
     StrokeRect,              ///< 描边矩形（均匀描边，Pen.width 决定线宽）
@@ -50,6 +51,7 @@ enum class DrawCmdKind : uint8_t {
     StrokeArc,           ///< 描边圆弧（圆心 + 半径 + 起始角 + 扫掠角）
     StrokeQuadBezier,    ///< 描边二次贝塞尔曲线（起点 + 控制点 + 终点）
     StrokeCubicBezier,   ///< 描边三次贝塞尔曲线（起点 + 两控制点 + 终点）
+    StrokePolygon,       ///< 描边多边形轮廓——SDF（path_index 引用顶点序列；pt_a=AABB中心，pt_b=AABB半尺寸）
     StrokePath,          ///< 描边任意路径（通过 path_index 引用）
 
     // ── 状态命令 ────────────────────────────────────────────────────────
