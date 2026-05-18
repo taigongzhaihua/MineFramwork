@@ -115,6 +115,7 @@ IMEService& Win32ApplicationHostImpl::ime() {
 
 // ── 工厂函数 ─────────────────────────────────────────────────────────────────
 
+/// win32 命名空间内的工厂（供需要显式指定平台的代码使用）
 core::OwnedPtr<IApplicationHost> create_application_host() {
     return core::OwnedPtr<IApplicationHost>(
         MINE_NEW(Win32ApplicationHostImpl),
@@ -122,3 +123,18 @@ core::OwnedPtr<IApplicationHost> create_application_host() {
 }
 
 } // namespace mine::platform::win32
+
+// ── 平台无关工厂（mine::platform::create_application_host）────────────────────
+// 定义在 mine::platform 命名空间，与 PlatformHost.h 中的声明对应。
+// 其他平台后端（macos/linux）提供同名函数，由链接时选择，
+// 应用代码无需任何 #ifdef 或平台特定 #include。
+
+#include <mine/platform/PlatformHost.h>
+
+namespace mine::platform {
+
+core::OwnedPtr<IApplicationHost> create_application_host() {
+    return win32::create_application_host();
+}
+
+} // namespace mine::platform

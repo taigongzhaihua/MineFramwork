@@ -33,3 +33,4 @@
 #include <mine/platform/WindowDesc.h>
 #include <mine/platform/IWindow.h>
 #include <mine/platform/IApplicationHost.h>
+#include <mine/platform/PlatformHost.h>
