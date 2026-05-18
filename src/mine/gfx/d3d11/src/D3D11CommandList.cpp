@@ -6,6 +6,7 @@
 #include "D3D11CommandList.h"
 #include "D3D11Buffer.h"
 #include "D3D11Texture.h"
+#include "D3D11Pipeline.h"
 
 namespace mine::gfx::d3d11 {
 
@@ -136,8 +137,39 @@ void D3D11CommandList::set_scissor(const ScissorRect& rect) {
 
 // ── 绘制相关（M0 阶段仅支持基础绑定，完整绘制在 M0.3 实现）─────────────────
 
-void D3D11CommandList::set_pipeline(IPipeline* /*pipeline*/) {
-    // M0 阶段不实现，等待 mine.paint 管线对象设计完成后补充
+void D3D11CommandList::set_pipeline(IPipeline* pipeline) {
+    if (!deferred_ctx_ || !recording_ || pipeline == nullptr) {
+        return;
+    }
+
+    // 将 IPipeline 向下转型为 D3D11Pipeline，绑定所有状态对象
+    auto* d3d_pipeline = static_cast<D3D11Pipeline*>(pipeline);
+
+    // 绑定顶点输入布局
+    deferred_ctx_->IASetInputLayout(d3d_pipeline->input_layout());
+    // 设置图元拓扑：三角形列表（用于 2D 填充矩形）
+    deferred_ctx_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    // 绑定顶点着色器
+    deferred_ctx_->VSSetShader(d3d_pipeline->vertex_shader(), nullptr, 0);
+    // 绑定像素着色器
+    deferred_ctx_->PSSetShader(d3d_pipeline->pixel_shader(),  nullptr, 0);
+    // 绑定混合状态（nullptr 使用默认混合系数 {1,1,1,1}，采样掩码 0xFFFFFFFF）
+    deferred_ctx_->OMSetBlendState(d3d_pipeline->blend_state(), nullptr, 0xFFFFFFFF);
+    // 绑定光栅化状态
+    deferred_ctx_->RSSetState(d3d_pipeline->rasterizer_state());
+    // 绑定深度/模板状态（模板参考值 0）
+    deferred_ctx_->OMSetDepthStencilState(d3d_pipeline->depth_stencil_state(), 0);
+}
+
+void D3D11CommandList::set_constant_buffer(uint32_t slot, IBuffer* buffer) {
+    if (!deferred_ctx_ || !recording_ || buffer == nullptr) {
+        return;
+    }
+
+    ID3D11Buffer* raw = static_cast<D3D11Buffer*>(buffer)->buffer();
+    // 同时绑定到顶点着色器和像素着色器的相同槽位
+    deferred_ctx_->VSSetConstantBuffers(slot, 1, &raw);
+    deferred_ctx_->PSSetConstantBuffers(slot, 1, &raw);
 }
 
 void D3D11CommandList::set_vertex_buffer(

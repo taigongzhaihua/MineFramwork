@@ -81,6 +81,15 @@ public:
     virtual void set_pipeline(IPipeline* pipeline) = 0;
 
     /**
+     * @brief 绑定常量缓冲（Uniform Buffer）到顶点/像素着色器。
+     * @param slot    绑定槽位（对应 HLSL: register(bN)）
+     * @param buffer  常量缓冲（必须以 BufferBindFlags::Constant 创建）
+     *
+     * 同时绑定到顶点着色器（VSSetConstantBuffers）和像素着色器（PSSetConstantBuffers）。
+     */
+    virtual void set_constant_buffer(uint32_t slot, IBuffer* buffer) = 0;
+
+    /**
      * @brief 绑定顶点缓冲。
      * @param slot    绑定槽位
      * @param buffer  顶点缓冲

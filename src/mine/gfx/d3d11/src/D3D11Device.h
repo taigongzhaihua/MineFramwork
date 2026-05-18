@@ -42,8 +42,9 @@ public:
 
     [[nodiscard]] mine::core::OwnedPtr<IQueue>       create_queue      (QueueType type)              override;
     [[nodiscard]] mine::core::OwnedPtr<ISwapchain>   create_swapchain  (const SwapchainDesc& desc)   override;
-    [[nodiscard]] mine::core::OwnedPtr<IBuffer>      create_buffer     (const BufferDesc& desc)       override;
+    [[nodiscard]] mine::core::OwnedPtr<IBuffer>      create_buffer     (const BufferDesc& desc, const void* initial_data = nullptr) override;
     [[nodiscard]] mine::core::OwnedPtr<ITexture>     create_texture    (const TextureDesc& desc)      override;
+    [[nodiscard]] mine::core::OwnedPtr<IPipeline>    create_pipeline   (const PipelineDesc& desc)     override;
     [[nodiscard]] mine::core::OwnedPtr<ICommandList> create_command_list(QueueType type = QueueType::Graphics) override;
     [[nodiscard]] mine::core::OwnedPtr<IFence>       create_fence      (uint64_t initial_value = 0)   override;
 

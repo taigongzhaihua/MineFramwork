@@ -114,3 +114,22 @@
   - `IRenderer.h`：2D 渲染后端抽象接口（begin_frame / end_frame / render），附工厂函数 `create_renderer()`
   - `Paint.h`：模块伞形头文件，一次 include 引入全部子头
 - **core（修复）**：`Result.h` 补充 `#include <memory>`，修复 MSVC 2026 中 `std::construct_at`/`std::destroy_at` 不再通过 `<new>` 间接引入的编译错误
+- **gfx.rhi（扩展）**：扩展 RHI 抽象层以支持着色器图形管线（M0.3 任务 #14）：
+  - `GfxTypes.h`：新增 `ShaderLanguage`/`ShaderDesc`/`VertexSemantic`/`VertexElementFormat`/`VertexElement`/`PipelineDesc` 等着色器与管线描述类型
+  - `IDevice.h`：新增 `create_pipeline(const PipelineDesc&)` 纯虚接口；`create_buffer()` 添加 `initial_data` 参数支持含初始数据的不可变缓冲
+  - `ICommandList.h`：新增 `set_constant_buffer(uint32_t slot, IBuffer*)` 接口，同时绑定 VS/PS 的相同槽位
+- **gfx.d3d11（扩展）**：实现 RHI 着色器管线扩展（M0.3 任务 #14）：
+  - `D3D11Pipeline`：新建类，使用 D3DCompile 运行时编译 HLSL（Debug 含调试信息，Release 启用 O2），创建 InputLayout / BlendState（预乘 Alpha）/ RasterizerState（CULL_NONE, FILL_SOLID）/ DepthStencilState（2D 关闭深度测试）
+  - `D3D11Device`：实现 `create_pipeline()` 接口，并更新 `create_buffer()` 以透传初始数据
+  - `D3D11CommandList`：完整实现 `set_pipeline()`（绑定 VS/PS/InputLayout/BlendState 等），新增 `set_constant_buffer()` 实现
+  - `xmake.lua`：添加 `d3dcompiler` 系统链接库
+- **paint（RHI 渲染器）**：实现 `mine.paint.IRenderer` 基于 RHI 的真实渲染后端（M0.3 任务 #14）：
+  - `RhiRenderer.cpp`：内嵌 HLSL 着色器源码（VS 做像素→NDC 变换，Y 轴翻转；PS 直接输出插值颜色）
+  - 顶点格式：`PaintVertex{x, y, r, g, b, a}` = 24 字节；常量缓冲：`ViewportCB{width, height, pad, pad}` = 16 字节（D3D11 对齐要求）
+  - `render(dl, target)`：将 FillRect 命令转换为三角形顶点（每矩形 6 顶点），通过 `create_buffer(desc, initial_data)` 创建不可变顶点缓冲，录制绘制命令后提交
+  - 工厂函数 `mine::paint::create_renderer(IDevice*)` 在 `namespace mine::paint` 中实现
+  - 架构决策：paint 模块直接依赖 `mine.gfx.rhi`，不依赖任何具体图形 API，无 mine.paint.d3d11 独立后端
+- **samples/00-hello-rect（完成）**：实现 M0.3 端到端样例（M0.3 任务 #14），演示 Canvas → Paint 渲染器 → 交换链完整链路：
+  - 创建 D3D11 设备 + `mine::paint::create_renderer()` 2D 渲染器 + 交换链
+  - 每帧：Canvas 录制深灰色背景矩形 + 居中红色矩形 → `begin_frame` / `render` / `end_frame` → `present`
+  - 订阅 Resized 事件自动更新交换链尺寸并重新渲染

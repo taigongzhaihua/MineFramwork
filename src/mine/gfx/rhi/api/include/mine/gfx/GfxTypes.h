@@ -154,4 +154,63 @@ struct SwapchainDesc {
     Vsync       vsync{Vsync::On};
 };
 
+// ── 着色器与管线 ──────────────────────────────────────────────────────────────
+
+/// 着色器源码/字节码语言标识
+enum class ShaderLanguage : int {
+    HLSL,   ///< 高级着色器语言（Direct3D 11/12）
+    SPIRV,  ///< SPIR-V 中间语言（Vulkan）
+    MSL,    ///< Metal 着色器语言（macOS/iOS）
+};
+
+/**
+ * @brief 单个着色器描述符（含源码或预编译字节码）。
+ *
+ * M0 阶段：D3D11 后端接受 HLSL 源码，在 create_pipeline() 内部调用
+ * D3DCompile 完成编译；后续工具链（tool.shadercc）可提供预编译字节码。
+ */
+struct ShaderDesc {
+    const void*    data{nullptr};                  ///< 着色器源码或字节码指针
+    size_t         size{0};                        ///< 数据字节长度（源码可传 0 由后端自动计算）
+    ShaderLanguage language{ShaderLanguage::HLSL}; ///< 语言类型
+    const char*    entry_point{"main"};            ///< 入口函数名
+    bool           is_source{true};               ///< true=源码字符串，false=预编译字节码
+};
+
+/// 顶点输入元素语义
+enum class VertexSemantic : int {
+    Position, ///< 位置（POSITION）
+    Color,    ///< 颜色（COLOR）
+    TexCoord, ///< 纹理坐标（TEXCOORD）
+    Normal,   ///< 法线（NORMAL）
+};
+
+/// 顶点元素数据格式
+enum class VertexElementFormat : int {
+    Float2,       ///< 两个 float（8 字节）
+    Float3,       ///< 三个 float（12 字节）
+    Float4,       ///< 四个 float（16 字节）
+    UByte4_UNorm, ///< 四个无符号字节归一化（4 字节，等价 RGBA8）
+};
+
+/// 顶点输入布局元素（对应 D3D11 D3D11_INPUT_ELEMENT_DESC）
+struct VertexElement {
+    VertexSemantic      semantic{VertexSemantic::Position}; ///< 语义类型
+    uint32_t            semantic_index{0};                  ///< 语义索引（多纹理坐标时使用）
+    VertexElementFormat format{VertexElementFormat::Float2};///< 数据格式
+    uint32_t            slot{0};                            ///< 顶点缓冲绑定槽位
+    uint32_t            offset{0};                          ///< 元素在顶点结构内的字节偏移
+};
+
+/// 图形管线创建描述符（M0 最小集，支持 2D 纯色渲染）
+struct PipelineDesc {
+    ShaderDesc   vertex_shader;                  ///< 顶点着色器
+    ShaderDesc   pixel_shader;                   ///< 像素着色器
+    VertexElement vertex_elements[8]{};          ///< 顶点输入布局（最多 8 个元素）
+    uint32_t     vertex_element_count{0};        ///< 实际使用的元素数量
+    uint32_t     vertex_stride{0};               ///< 单个顶点字节大小
+    bool         enable_blend{false};            ///< 是否启用 Alpha 混合（预乘 Alpha 模式）
+    bool         enable_depth{false};            ///< 是否启用深度测试（2D 渲染通常关闭）
+};
+
 } // namespace mine::gfx

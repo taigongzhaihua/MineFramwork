@@ -54,11 +54,12 @@ public:
 
     /**
      * @brief 创建 GPU 缓冲。
-     * @param desc  缓冲描述符（大小、绑定标志等）
+     * @param desc        缓冲描述符（大小、绑定标志等）
+     * @param initial_data 可选初始数据指针（传 nullptr 则创建空缓冲）
      * @return 缓冲对象；失败返回 nullptr
      */
     [[nodiscard]] virtual core::OwnedPtr<IBuffer>
-        create_buffer(const BufferDesc& desc) = 0;
+        create_buffer(const BufferDesc& desc, const void* initial_data = nullptr) = 0;
 
     /**
      * @brief 创建 GPU 纹理。
@@ -67,7 +68,18 @@ public:
      */
     [[nodiscard]] virtual core::OwnedPtr<ITexture>
         create_texture(const TextureDesc& desc) = 0;
+    // ── 管线创建 ──────────────────────────────────────────────────────────────
 
+    /**
+     * @brief 编译并创建图形管线状态对象（含着色器、顶点布局、混合/光栅化状态）。
+     * @param desc  管线描述符（着色器源码/字节码、顶点布局、混合开关等）
+     * @return 管线对象；着色器编译失败或参数非法时返回 nullptr
+     *
+     * @note D3D11 后端在此调用 D3DCompile 完成 HLSL 编译；
+     *       后续工具链（tool.shadercc）将改为传入预编译字节码。
+     */
+    [[nodiscard]] virtual core::OwnedPtr<IPipeline>
+        create_pipeline(const PipelineDesc& desc) = 0;
     // ── 命令列表创建 ──────────────────────────────────────────────────────
 
     /**

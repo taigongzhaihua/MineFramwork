@@ -52,6 +52,7 @@ public:
     void set_scissor (const ScissorRect& rect)     override;
 
     void set_pipeline    (IPipeline* pipeline)               override;
+    void set_constant_buffer(uint32_t slot, IBuffer* buffer) override;
     void set_vertex_buffer(uint32_t slot, IBuffer* buffer, uint64_t offset = 0) override;
     void set_index_buffer (IBuffer* buffer, uint64_t offset = 0, bool use32bit = false) override;
 

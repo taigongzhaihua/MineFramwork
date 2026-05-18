@@ -10,6 +10,7 @@
 #include "D3D11Texture.h"
 #include "D3D11CommandList.h"
 #include "D3D11Fence.h"
+#include "D3D11Pipeline.h"
 
 #include <mine/core/Memory.h>
 #include <iterator> // std::size
@@ -156,10 +157,11 @@ mine::core::OwnedPtr<ISwapchain> D3D11DeviceImpl::create_swapchain(const Swapcha
         &mine::core::detail::typed_deleter<D3D11Swapchain>);
 }
 
-mine::core::OwnedPtr<IBuffer> D3D11DeviceImpl::create_buffer(const BufferDesc& desc) {
+mine::core::OwnedPtr<IBuffer> D3D11DeviceImpl::create_buffer(
+    const BufferDesc& desc, const void* initial_data) {
     if (!device_) return nullptr;
 
-    auto* raw = MINE_NEW(D3D11Buffer, device_.Get(), desc);
+    auto* raw = MINE_NEW(D3D11Buffer, device_.Get(), desc, initial_data);
 
     if (!raw->is_valid()) {
         MINE_DELETE(raw);
@@ -205,6 +207,22 @@ mine::core::OwnedPtr<IFence> D3D11DeviceImpl::create_fence(uint64_t initial_valu
     return mine::core::OwnedPtr<IFence>(
         raw,
         &mine::core::detail::typed_deleter<D3D11Fence>);
+}
+
+mine::core::OwnedPtr<IPipeline> D3D11DeviceImpl::create_pipeline(const PipelineDesc& desc) {
+    if (!device_) return nullptr;
+
+    // D3D11Pipeline 内部调用 D3DCompile 编译 HLSL 并创建所有 D3D11 状态对象
+    auto* raw = MINE_NEW(D3D11Pipeline, device_.Get(), desc);
+
+    if (!raw->is_valid()) {
+        MINE_DELETE(raw);
+        return nullptr;
+    }
+
+    return mine::core::OwnedPtr<IPipeline>(
+        raw,
+        &mine::core::detail::typed_deleter<D3D11Pipeline>);
 }
 
 } // namespace mine::gfx::d3d11
