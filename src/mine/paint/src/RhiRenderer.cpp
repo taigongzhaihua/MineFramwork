@@ -534,67 +534,78 @@ R"hlsl(
         float4 cs8 = i.color;
         return float4(cs8.rgb * cs8.a * al8, cs8.a * al8);
     } else if (kind == 9) {
-        // ── 三次贝塞尔曲线描边 SDF（数值迭代：17 步采样 + 4 步 Newton 精化）──
+        // ── 三次贝塞尔曲线描边 SDF（双起点 Newton：24 步采样 + 两候选各 4 步精化）──
         //
-        // 参数映射：
-        //   half_w, half_h = P3 本地坐标（终点）← 借用"半尺寸"槽
-        //   p0        = start_cap（0=Flat 截断, 1=Round 圆形）
-        //   p1        = end_cap（同上）
-        //   p2, p3    = P2 本地坐标（第二控制点）← 借用 p2/p3 槽
-        //   stroke_w  = 线宽（总宽度）
-        //   extra.xy  = P0 本地坐标（起点，t=0）
-        //   extra.zw  = P1 本地坐标（第一控制点）
+        // 参数映射（同上次注释，略）
+        //   half_w, half_h = P3 本地坐标；p2, p3 = P2 本地坐标
+        //   p0=start_cap, p1=end_cap, stroke_w=线宽
+        //   extra.xy=P0, extra.zw=P1
         //
-        // 算法（数值法，三次贝塞尔无解析极值公式）：
-        //   1. 沿曲线均匀采样 17 个点（t = 0/16 … 16/16），找到初始最近点参数 best_t
-        //   2. 对 best_t 做 4 步 Newton-Raphson 精化（最小化 f(t)=dot(Q(t)-p, Q'(t))=0）
-        //   3. clamp(t, 0, 1) 天然实现 Round cap 端点延伸
-        //   4. Flat cap：端点切线半平面截断（CSG max 操作，类比 kind=8）
+        // 单起点 Newton 在曲线有多个局部极值时会收敛到错误极值，产生断线和孤立亮斑。
+        // 修复：先用 24 步均匀采样找到距离最近的两个候选 t（相距 > 2/24 防止聚堆），
+        //       再从两候选各做 4 步 Newton 精化，最终取两结果中距离最小者。
         float2 Cb_A = i.extra.xy;               // P0（起点）
         float2 Cb_B = i.extra.zw;               // P1（第一控制点）
         float2 Cb_C = float2(p2, p3);           // P2（第二控制点）← 借用 p2/p3 槽
         float2 Cb_D = float2(half_w, half_h);   // P3（终点）← 借用 half_w/half_h 槽
         float half_sw9 = stroke_w * 0.5f;
 
-        // 三次贝塞尔多项式系数（Horner 展开，Q(t) = cb3 t³ + cb2 t² + cb1 t + cb0）
-        //   Q(t) = (1-t)³ A + 3(1-t)²t B + 3(1-t)t² C + t³ D
-        float2 cb3 = -Cb_A + 3.0f * Cb_B - 3.0f * Cb_C + Cb_D;  // 三次项
-        float2 cb2 =  3.0f * Cb_A - 6.0f * Cb_B + 3.0f * Cb_C;  // 二次项
-        float2 cb1 = -3.0f * Cb_A + 3.0f * Cb_B;                 // 一次项
-        float2 cb0 =  Cb_A;                                        // 常数项
+        // 三次贝塞尔多项式系数（Horner 展开）
+        float2 cb3 = -Cb_A + 3.0f * Cb_B - 3.0f * Cb_C + Cb_D;
+        float2 cb2 =  3.0f * Cb_A - 6.0f * Cb_B + 3.0f * Cb_C;
+        float2 cb1 = -3.0f * Cb_A + 3.0f * Cb_B;
+        float2 cb0 =  Cb_A;
 
-        // 采样 17 个点，找到最小距离平方及其参数 best_t（粗定位）
-        float best_t  = 0.0f;
-        float best_d2 = 1e30f;
+        // ── 阶段 1：24 步均匀采样，追踪最优两个候选 t ──────────────────────
+        // 两候选要求相距 > 2/24（避免同一局部极值区被重复选中）
+        float ta = 0.0f, tb = 1.0f;       // 候选 t（a=最优, b=次优）
+        float da_sq = 1e20f, db_sq = 1e20f;
         [unroll]
-        for (int si = 0; si <= 16; si++) {
-            float t = float(si) / 16.0f;
+        for (int si = 0; si <= 24; si++) {
+            float t = float(si) / 24.0f;
             float2 q = ((cb3 * t + cb2) * t + cb1) * t + cb0;
             float  dd = dot(p - q, p - q);
-            if (dd < best_d2) { best_d2 = dd; best_t = t; }
+            if (dd < da_sq) {
+                // 新的最优：将旧最优降为次优（仅在相距足够远时）
+                if (abs(t - ta) > 2.0f / 24.0f) {
+                    tb = ta; db_sq = da_sq;
+                }
+                ta = t; da_sq = dd;
+            } else if (dd < db_sq && abs(t - ta) > 2.0f / 24.0f) {
+                tb = t; db_sq = dd;
+            }
         }
 
-        // Newton-Raphson 精化（4 步）：最小化 f(t) = dot(Q(t)-p, Q'(t)) = 0
-        //   f'(t) = dot(Q'(t), Q'(t)) + dot(Q(t)-p, Q''(t))
-        float t9 = best_t;
+        // ── 阶段 2：从两候选各做 4 步 Newton-Raphson 精化 ──────────────────
+        // f(t) = dot(Q(t)-p, Q'(t)) = 0，牛顿步：t -= f / f'
         [unroll]
         for (int ni = 0; ni < 4; ni++) {
-            float2 q   = ((cb3 * t9 + cb2) * t9 + cb1) * t9 + cb0;  // Q(t)
-            float2 dq  = (3.0f * cb3 * t9 + 2.0f * cb2) * t9 + cb1; // Q'(t)
-            float2 d2q = 6.0f * cb3 * t9 + 2.0f * cb2;              // Q''(t)
-            float2 diff = q - p;
-            float f  = dot(diff, dq);
-            float fp = dot(dq, dq) + dot(diff, d2q);
-            if (abs(fp) > 1e-10f) t9 -= f / fp;
-            t9 = clamp(t9, 0.0f, 1.0f);
+            // 候选 a
+            float2 qa   = ((cb3 * ta + cb2) * ta + cb1) * ta + cb0;
+            float2 dqa  = (3.0f * cb3 * ta + 2.0f * cb2) * ta + cb1;
+            float2 d2qa = 6.0f * cb3 * ta + 2.0f * cb2;
+            float2 dfa  = qa - p;
+            float  fa   = dot(dfa, dqa);
+            float  fpa  = dot(dqa, dqa) + dot(dfa, d2qa);
+            if (abs(fpa) > 1e-10f) ta -= fa / fpa;
+            ta = clamp(ta, 0.0f, 1.0f);
+            // 候选 b
+            float2 qb   = ((cb3 * tb + cb2) * tb + cb1) * tb + cb0;
+            float2 dqb  = (3.0f * cb3 * tb + 2.0f * cb2) * tb + cb1;
+            float2 d2qb = 6.0f * cb3 * tb + 2.0f * cb2;
+            float2 dfb  = qb - p;
+            float  fb   = dot(dfb, dqb);
+            float  fpb  = dot(dqb, dqb) + dot(dfb, d2qb);
+            if (abs(fpb) > 1e-10f) tb -= fb / fpb;
+            tb = clamp(tb, 0.0f, 1.0f);
         }
 
-        float2 closest9 = ((cb3 * t9 + cb2) * t9 + cb1) * t9 + cb0;
-        float d9 = length(p - closest9) - half_sw9;
+        // ── 阶段 3：取两候选精化结果中距离最小者 ─────────────────────────
+        float2 cla = ((cb3 * ta + cb2) * ta + cb1) * ta + cb0;
+        float2 clb = ((cb3 * tb + cb2) * tb + cb1) * tb + cb0;
+        float d9 = min(length(p - cla), length(p - clb)) - half_sw9;
 
-        // Flat cap 截断（CSG max：端点切线半平面限制描边区域）
-        //   P0 端切线方向（指向曲线内部）：normalize(Cb_B - Cb_A)
-        //   P3 端切线方向（指向曲线内部）：normalize(Cb_D - Cb_C)
+        // Flat cap 截断（CSG max：端点切线半平面截断）
         int scap9 = (int)(p0 + 0.5f);
         int ecap9 = (int)(p1 + 0.5f);
         if (scap9 == 0) {

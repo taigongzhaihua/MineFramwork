@@ -443,7 +443,7 @@ int main(int /*argc*/, char* /*argv*/[])
     // 4. 创建窗口
     mine::platform::WindowDesc win_desc{};
     win_desc.title         = "MineFramework - Canvas SDF 渲染演示（Fill / Stroke × Rect / RoundedRect / ComplexRoundedRect / Ellipse）";
-    win_desc.size          = {800.0f, 600.0f};
+    win_desc.size          = {960.0f, 810.0f};
     win_desc.auto_position = true;
     win_desc.resizable     = true;
     win_desc.kind          = mine::platform::WindowKind::Normal;
