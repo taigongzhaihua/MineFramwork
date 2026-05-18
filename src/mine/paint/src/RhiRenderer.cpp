@@ -166,10 +166,13 @@ float complex_rounded_box_sdf(float2 p, float2 b, float4 r) {
 }
 
 // 椭圆 SDF（IQ 近似，适用于中等扁率椭圆）
+// 原式 d = (k1-1)*k1/k2，数学上等价于 (k1-1)/k2_unit（k2_unit = k2/k1 为有限常数）。
+// 但在中心点 k1=k2=0 时，浮点先算 (k1-1)*k1 = -1*0 = 0，导致 d=0（应为 -min(a,b)）。
+// 修复：将分子中第二个 k1 clamp 至 1e-4f，中心点得到 d ≈ -100（深度内部），消除缺色。
 float ellipse_sdf(float2 p, float2 ab) {
     float k1 = length(p / ab);
     float k2 = length(p / (ab * ab));
-    return (k1 - 1.0f) * k1 / max(k2, 1e-6f);
+    return (k1 - 1.0f) * max(k1, 1e-4f) / max(k2, 1e-6f);
 }
 
 // ── 像素着色器主函数 ─────────────────────────────────────────────────────────
