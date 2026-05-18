@@ -71,6 +71,14 @@ void Canvas::fill_rounded_rect(math::RoundedRect rrect, const Brush& brush) {
     push(cmd);
 }
 
+void Canvas::fill_complex_rounded_rect(math::ComplexRoundedRect rrect, const Brush& brush) {
+    DrawCmd cmd;
+    cmd.kind         = DrawCmdKind::FillComplexRoundedRect;
+    cmd.complex_rrect = rrect;
+    cmd.brush        = brush;
+    push(cmd);
+}
+
 void Canvas::fill_ellipse(math::Vec2 center, math::Vec2 radii, const Brush& brush) {
     // 以 pt_a 存中心，pt_b 存半径
     DrawCmd cmd;
@@ -106,6 +114,15 @@ void Canvas::stroke_rounded_rect(math::RoundedRect rrect, const Brush& brush, co
     cmd.rrect = rrect;
     cmd.brush = brush;
     cmd.pen   = pen;
+    push(cmd);
+}
+
+void Canvas::stroke_complex_rounded_rect(math::ComplexRoundedRect rrect, const Brush& brush, const Pen& pen) {
+    DrawCmd cmd;
+    cmd.kind          = DrawCmdKind::StrokeComplexRoundedRect;
+    cmd.complex_rrect = rrect;
+    cmd.brush         = brush;
+    cmd.pen           = pen;
     push(cmd);
 }
 

@@ -29,6 +29,7 @@
 #include <mine/paint/DisplayList.h>
 #include <mine/paint/PathBuilder.h>
 #include <mine/math/Transform2D.h>
+#include <mine/math/ComplexRoundedRect.h>
 
 namespace mine::paint {
 
@@ -98,6 +99,9 @@ public:
     /// 填充圆角矩形。
     void fill_rounded_rect(math::RoundedRect rrect, const Brush& brush);
 
+    /// 填充四角各自独立椭圆半径的圆角矩形。
+    void fill_complex_rounded_rect(math::ComplexRoundedRect rrect, const Brush& brush);
+
     /**
      * @brief 填充椭圆。
      * @param center 椭圆中心点
@@ -120,6 +124,9 @@ public:
 
     /// 描边圆角矩形。
     void stroke_rounded_rect(math::RoundedRect rrect, const Brush& brush, const Pen& pen = {});
+
+    /// 描边四角各自独立椭圆半径的圆角矩形。
+    void stroke_complex_rounded_rect(math::ComplexRoundedRect rrect, const Brush& brush, const Pen& pen = {});
 
     /**
      * @brief 描边椭圆。

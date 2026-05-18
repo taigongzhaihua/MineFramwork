@@ -72,10 +72,15 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         const float rect_x = (w - rect_w) * 0.5f;
         const float rect_y = (h - rect_h) * 0.5f;
 
-        canvas.fill_rounded_rect(
-            mine::math::RoundedRect{
+        canvas.fill_complex_rounded_rect(
+            mine::math::ComplexRoundedRect{
                 mine::math::Rect{rect_x, rect_y, rect_w, rect_h},
-                24.0f   // 圆角半径 24px（X/Y 相同）
+                mine::math::CornerRadii{
+                    {40.0f, 40.0f},  // 左上角：大圆角
+                    {8.0f,  8.0f},   // 右上角：小圆角
+                    {40.0f, 40.0f},  // 右下角：大圆角
+                    {8.0f,  8.0f}    // 左下角：小圆角
+                }
             },
             mine::paint::Brush::solid(mine::math::Color{0.85f, 0.15f, 0.10f, 1.0f}));
 

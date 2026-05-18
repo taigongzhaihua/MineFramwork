@@ -21,6 +21,7 @@
 #include <mine/paint/Pen.h>
 #include <mine/math/Rect.h>
 #include <mine/math/RoundedRect.h>
+#include <mine/math/ComplexRoundedRect.h>
 #include <mine/math/Vec2.h>
 #include <mine/math/Transform2D.h>
 
@@ -31,14 +32,16 @@ namespace mine::paint {
  */
 enum class DrawCmdKind : uint8_t {
     // ── 填充命令 ────────────────────────────────────────────────────────
-    FillRect,          ///< 填充矩形
-    FillRoundedRect,   ///< 填充圆角矩形
-    FillEllipse,       ///< 填充椭圆
-    FillPath,          ///< 填充任意路径（通过 path_index 引用）
+    FillRect,                ///< 填充矩形
+    FillRoundedRect,         ///< 填充圆角矩形（uniform radius_x/radius_y）
+    FillComplexRoundedRect,  ///< 填充四角各自独立的椭圆圆角矩形
+    FillEllipse,             ///< 填充椭圆
+    FillPath,                ///< 填充任意路径（通过 path_index 引用）
 
     // ── 描边命令 ────────────────────────────────────────────────────────
-    StrokeRect,        ///< 描边矩形
-    StrokeRoundedRect, ///< 描边圆角矩形
+    StrokeRect,              ///< 描边矩形
+    StrokeRoundedRect,       ///< 描边圆角矩形
+    StrokeComplexRoundedRect,///< 描边四角各自独立的椭圆圆角矩形
     StrokeEllipse,     ///< 描边椭圆
     StrokeLine,        ///< 描边线段（from → to）
     StrokePath,        ///< 描边任意路径（通过 path_index 引用）
@@ -81,8 +84,9 @@ struct DrawCmd {
     DrawCmdKind kind{DrawCmdKind::FillRect};
 
     // ── 几何数据 ────────────────────────────────────────────────────────
-    math::Rect        rect{};          ///< 矩形（FillRect / StrokeRect / ClipPushRect）
-    math::RoundedRect rrect{};         ///< 圆角矩形（FillRoundedRect / StrokeRoundedRect）
+    math::Rect               rect{};          ///< 矩形（FillRect / StrokeRect / ClipPushRect）
+    math::RoundedRect        rrect{};         ///< 圆角矩形（FillRoundedRect / StrokeRoundedRect）
+    math::ComplexRoundedRect complex_rrect{}; ///< 独立四角圆角矩形（FillComplexRoundedRect / StrokeComplexRoundedRect）
     math::Vec2        pt_a{};          ///< 通用向量 A（中心、起点等）
     math::Vec2        pt_b{};          ///< 通用向量 B（半径、终点等）
     uint32_t          path_index{0};   ///< 路径索引（FillPath / StrokePath）

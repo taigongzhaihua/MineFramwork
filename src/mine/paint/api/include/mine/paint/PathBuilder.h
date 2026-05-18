@@ -23,6 +23,7 @@
 #include <mine/paint/Path.h>
 #include <mine/math/Rect.h>
 #include <mine/math/RoundedRect.h>
+#include <mine/math/ComplexRoundedRect.h>
 
 namespace mine::paint {
 
@@ -84,6 +85,15 @@ public:
      * M0 阶段将圆角近似为三次贝塞尔曲线（κ ≈ 0.5523）。
      */
     PathBuilder& add_rounded_rect(math::RoundedRect rrect);
+
+    /**
+     * @brief 添加一个四角各自独立椭圆半径的圆角矩形。
+     *
+     * 每个角使用 CornerRadii 中各自的 (rx, ry)。
+     * 若某角 rx=0 或 ry=0 则该角退化为直角。
+     * M0 阶段将圆角近似为三次贝塞尔曲线（κ ≈ 0.5523）。
+     */
+    PathBuilder& add_complex_rounded_rect(math::ComplexRoundedRect rrect);
 
     /**
      * @brief 添加一个椭圆。

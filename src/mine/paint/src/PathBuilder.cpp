@@ -152,6 +152,64 @@ PathBuilder& PathBuilder::add_ellipse(math::Vec2 center, math::Vec2 radii) {
     return *this;
 }
 
+PathBuilder& PathBuilder::add_complex_rounded_rect(math::ComplexRoundedRect rrect) {
+    const float x = rrect.rect.x;
+    const float y = rrect.rect.y;
+    const float w = rrect.rect.width;
+    const float h = rrect.rect.height;
+
+    // 各角各自的椭圆半轴（已由 ComplexRoundedRect 构造器按 CSS 比例钳制）
+    const float tl_rx = rrect.radii.top_left.x;
+    const float tl_ry = rrect.radii.top_left.y;
+    const float tr_rx = rrect.radii.top_right.x;
+    const float tr_ry = rrect.radii.top_right.y;
+    const float br_rx = rrect.radii.bottom_right.x;
+    const float br_ry = rrect.radii.bottom_right.y;
+    const float bl_rx = rrect.radii.bottom_left.x;
+    const float bl_ry = rrect.radii.bottom_left.y;
+
+    // 每角的贝塞尔控制点偏移量：κ * 半轴长
+    const float tl_kx = tl_rx * kKappa;
+    const float tl_ky = tl_ry * kKappa;
+    const float tr_kx = tr_rx * kKappa;
+    const float tr_ky = tr_ry * kKappa;
+    const float br_kx = br_rx * kKappa;
+    const float br_ky = br_ry * kKappa;
+    const float bl_kx = bl_rx * kKappa;
+    const float bl_ky = bl_ry * kKappa;
+
+    // 顺时针绘制，从顶边左上角弧结束点出发：
+    //   顶左弧末 → 顶边 → 右上弧 → 右边 → 右下弧 → 底边 → 左下弧 → 左边 → 左上弧 → 闭合
+    move_to({x + tl_rx, y});
+
+    // 顶边 + 右上圆角
+    line_to ({x + w - tr_rx, y});
+    cubic_to({x + w - tr_rx + tr_kx, y},
+             {x + w,                  y + tr_ry - tr_ky},
+             {x + w,                  y + tr_ry});
+
+    // 右边 + 右下圆角
+    line_to ({x + w, y + h - br_ry});
+    cubic_to({x + w,                  y + h - br_ry + br_ky},
+             {x + w - br_rx + br_kx,  y + h},
+             {x + w - br_rx,          y + h});
+
+    // 底边 + 左下圆角
+    line_to ({x + bl_rx, y + h});
+    cubic_to({x + bl_rx - bl_kx, y + h},
+             {x,                  y + h - bl_ry + bl_ky},
+             {x,                  y + h - bl_ry});
+
+    // 左边 + 左上圆角
+    line_to ({x, y + tl_ry});
+    cubic_to({x,                  y + tl_ry - tl_ky},
+             {x + tl_rx - tl_kx, y},
+             {x + tl_rx,         y});
+
+    close();
+    return *this;
+}
+
 // ── 完成构建 ──────────────────────────────────────────────────────────────────
 
 Path PathBuilder::build() {

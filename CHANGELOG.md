@@ -5,12 +5,17 @@
 ## [Unreleased]
 
 ### Added
+- **paint（FillComplexRoundedRect）**：新增四角各自独立椭圆半径的圆角矩形渲染支持：
+  - `DrawCmd`：新增 `FillComplexRoundedRect`、`StrokeComplexRoundedRect` 枚举值及 `complex_rrect` 字段
+  - `PathBuilder::add_complex_rounded_rect()`：每角使用独立 (rx, ry) 生成三次贝塞尔路径，复用 CSS 钳制保证凸性
+  - `Canvas::fill_complex_rounded_rect()` / `Canvas::stroke_complex_rounded_rect()`：录制对应绘制命令
+  - `RhiRenderer`：新增 `FillComplexRoundedRect` 渲染分支，复用现有展平+三角化辅助函数
 - **paint（RhiRenderer 扩展）**：新增 `FillRoundedRect` 渲染支持：
   - `flatten_cubic_bezier()`：使用 de Casteljau 公式将三次贝塞尔段均匀细分为折线点（8 段 / 圆角弧，视觉误差 < 0.04%）
   - `flatten_path_to_polygon()`：将 PathBuilder 生成的路径展平为屏幕像素多边形（支持 MoveTo/LineTo/CubicTo/QuadTo/Close）；QuadTo 通过提升为三次后细分处理
   - `push_convex_polygon_vertices()`：以 polygon[0] 为扇点的凸多边形扇形三角化（圆角矩形始终满足凸性约束）
   - `radius ≤ 0` 退化路径：自动回退到普通矩形顶点生成，避免不必要的路径展平开销
-- **samples/00-hello-rect（更新）**：将演示用红色矩形改为红色圆角矩形（半径 24px），验证 FillRoundedRect 端到端渲染链路
+- **samples/00-hello-rect（更新）**：将演示改为 `fill_complex_rounded_rect`，展示对角线不对称圆角（左上/右下 40px，右上/左下 8px）
 
 ### Fixed
 - **gfx.d3d11**：修复 D3D11 交换链格式错误导致程序启动即崩溃（退出码 1）的问题：

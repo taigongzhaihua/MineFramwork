@@ -409,6 +409,38 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             // 步骤3：凸多边形扇形三角化（圆角矩形始终是凸多边形）
             push_convex_polygon_vertices(vertices, polygon, c.r, c.g, c.b, c.a);
         }
+        else if (cmd.kind == DrawCmdKind::FillComplexRoundedRect) {
+            // 仅处理 SolidColor 画刷（M0）
+            if (cmd.brush.kind() != BrushKind::SolidColor) continue;
+
+            const math::Color c = cmd.brush.color();
+            const auto& r = cmd.complex_rrect.radii;
+
+            // 若所有圆角半径均为零，退化为普通矩形（避免路径展平开销）
+            if (r.top_left.x <= 0.0f && r.top_left.y <= 0.0f &&
+                r.top_right.x <= 0.0f && r.top_right.y <= 0.0f &&
+                r.bottom_right.x <= 0.0f && r.bottom_right.y <= 0.0f &&
+                r.bottom_left.x <= 0.0f && r.bottom_left.y <= 0.0f) {
+                push_rect_vertices(
+                    vertices,
+                    cmd.complex_rrect.rect.x, cmd.complex_rrect.rect.y,
+                    cmd.complex_rrect.rect.width, cmd.complex_rrect.rect.height,
+                    c.r, c.g, c.b, c.a);
+                continue;
+            }
+
+            // 步骤1：用 PathBuilder 生成四角独立椭圆半径的圆角矩形路径
+            PathBuilder builder;
+            builder.add_complex_rounded_rect(cmd.complex_rrect);
+            Path path = builder.build();
+
+            // 步骤2：展平贝塞尔路径为屏幕像素多边形
+            containers::Vector<math::Vec2> polygon;
+            flatten_path_to_polygon(polygon, path);
+
+            // 步骤3：凸多边形扇形三角化（CSS 钳制保证始终为凸多边形）
+            push_convex_polygon_vertices(vertices, polygon, c.r, c.g, c.b, c.a);
+        }
         // M0：其余命令类型（FillEllipse、StrokeRect 等）暂不处理
     }
 
