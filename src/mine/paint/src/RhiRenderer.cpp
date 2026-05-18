@@ -248,10 +248,28 @@ float4 main(SdfPSIn i) : SV_Target {
         float fw_o = max(fwidth(d_outer), 0.5f);
         float a_outer = 1.0f - smoothstep(-fw_o, fw_o, d_outer);
 
-        // 内矩形：各边内缩，中心随非对称边宽偏移
-        float2 inner_b = max(float2(b.x - (p3 + p1) * 0.5f, b.y - (p0 + p2) * 0.5f),
+        // 内矩形：各边内缩，中心随非对称边宽偏移。
+        //
+        // 问题：当某边宽为0时，内矩形该侧边界与外矩形边界重合，
+        //       两个 smoothstep 过渡同时激活，产生 a*(1-a)≤0.25 的 ghost 细线。
+        //
+        // 修复：对宽度为0的边，将内矩形对应侧边界向外扩展 (fw_o+1)px，
+        //       超出外矩形 AA 区，使该侧 a_inner→1，消除 ghost。
+        //       扩展时只移动零宽那侧边界，通过同步调整内矩形中心保证对侧边界不变。
+        //
+        // 设 la/ra/ta/ba 为各侧扩展量（零宽边取 fw_o+1，否则取 0）：
+        //   inner_center_x 偏移 = (p3-p1-la+ra)/2  （向右为正）
+        //   inner_b.x = b.x - (p3+p1)/2 + (la+ra)/2
+        //   inner_p.x = p.x - (p3-p1-la+ra)/2
+        float ghost = fw_o + 1.0f;
+        float la = p3 < 0.0001f ? ghost : 0.0f;  // 左边宽=0时，内矩形左侧外扩
+        float ra = p1 < 0.0001f ? ghost : 0.0f;  // 右边宽=0时，内矩形右侧外扩
+        float ta = p0 < 0.0001f ? ghost : 0.0f;  // 上边宽=0时，内矩形上侧外扩
+        float ba = p2 < 0.0001f ? ghost : 0.0f;  // 下边宽=0时，内矩形下侧外扩
+        float2 inner_b = max(float2(b.x - (p3 + p1) * 0.5f + (la + ra) * 0.5f,
+                                    b.y - (p0 + p2) * 0.5f + (ta + ba) * 0.5f),
                              float2(0.0f, 0.0f));
-        float2 inner_p = p - float2((p3 - p1) * 0.5f, (p0 - p2) * 0.5f);
+        float2 inner_p = p - float2((p3 - p1 - la + ra) * 0.5f, (p0 - p2 - ta + ba) * 0.5f);
 
         // 内圆角（对应 ComplexRoundedRect::inner_rect：x 分量减水平边宽，y 分量减垂直边宽）
         // 各向同性化后：min(r - left, r - top) = r - max(left, top)，再 clamp 到 0
