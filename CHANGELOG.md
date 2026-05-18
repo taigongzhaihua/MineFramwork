@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### Fixed
+- **gfx.d3d11**：修复 D3D11 交换链格式错误导致程序启动即崩溃（退出码 1）的问题：
+  - `swapchain_typeless_format`：DXGI FLIP_DISCARD 交换链不接受 TYPELESS 格式，改为返回 BGRA8_UNORM/RGBA8_UNORM
+  - `swapchain_rtv_format`：为保证 D3D11 标准兼容性（完全类型资源不可使用不同格式视图），RTV 格式与交换链格式统一为 UNORM，不再强制 sRGB
+- **samples/00-blank-window**：错误报告改用 `MessageBoxA`（GUI 子系统无控制台，`fprintf(stderr,...)` 无效）；补充命令队列/命令列表空指针检查；修复 WIN32_LEAN_AND_MEAN/NOMINMAX 宏重定义警告
+
 ### Added
 - 初始化顶层 xmake 构建入口、构建规则与基础工程配置
 - 初始化 M0 基础模块、样例、工具、测试与脚本目录骨架

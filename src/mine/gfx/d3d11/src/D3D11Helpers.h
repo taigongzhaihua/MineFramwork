@@ -91,35 +91,43 @@ inline PixelFormat from_dxgi_format(DXGI_FORMAT fmt) noexcept {
 }
 
 /**
- * @brief 获取交换链格式对应的"无类型"基础格式（用于 CreateRTV 时的 sRGB 正确处理）。
+ * @brief 获取交换链使用的实际格式。
  *
- * DXGI 交换链本身使用无类型格式（如 DXGI_FORMAT_B8G8R8A8_TYPELESS），
- * RTV 则指定 sRGB 格式，以便在交换链呈现时自动 gamma 校正。
+ * DXGI FLIP_DISCARD 交换链只支持以下格式：
+ *   DXGI_FORMAT_B8G8R8A8_UNORM、DXGI_FORMAT_R8G8B8A8_UNORM、
+ *   DXGI_FORMAT_R16G16B16A16_FLOAT、DXGI_FORMAT_R10G10B10A2_UNORM
+ * 不支持 TYPELESS 格式，因此使用 UNORM（非 sRGB）格式创建交换链，
+ * 再用 sRGB 格式创建 RTV（D3D11 允许对 UNORM 资源使用 sRGB 视图）。
  */
 inline DXGI_FORMAT swapchain_typeless_format(PixelFormat fmt) noexcept {
     switch (fmt) {
     case PixelFormat::BGRA8_UNorm:
     case PixelFormat::BGRA8_UNorm_sRGB:
-        return DXGI_FORMAT_B8G8R8A8_TYPELESS;
+        return DXGI_FORMAT_B8G8R8A8_UNORM;   // FLIP 模式不接受 TYPELESS
     case PixelFormat::RGBA8_UNorm:
     case PixelFormat::RGBA8_UNorm_sRGB:
-        return DXGI_FORMAT_R8G8B8A8_TYPELESS;
+        return DXGI_FORMAT_R8G8B8A8_UNORM;
     default:
         return to_dxgi_format(fmt);
     }
 }
 
 /**
- * @brief 获取交换链 RTV 使用的 sRGB 格式（保证输出 gamma 正确）。
+ * @brief 获取交换链 RTV 使用的格式。
+ *
+ * 交换链后缓冲由 DXGI 以 UNORM 格式创建（FLIP 模式只支持非 TYPELESS 格式）。
+ * D3D11 标准不保证能对 UNORM 资源创建 UNORM_SRGB 视图（需 D3D11.1 extended cast）。
+ * 为保证兼容性，RTV 格式与交换链格式一致，均使用 UNORM，
+ * sRGB 伽马校正由显示器硬件/合成器处理，或留给后续渲染管线。
  */
 inline DXGI_FORMAT swapchain_rtv_format(PixelFormat fmt) noexcept {
     switch (fmt) {
     case PixelFormat::BGRA8_UNorm:
     case PixelFormat::BGRA8_UNorm_sRGB:
-        return DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+        return DXGI_FORMAT_B8G8R8A8_UNORM;   // 与 swapchain_typeless_format 保持一致
     case PixelFormat::RGBA8_UNorm:
     case PixelFormat::RGBA8_UNorm_sRGB:
-        return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        return DXGI_FORMAT_R8G8B8A8_UNORM;
     default:
         return to_dxgi_format(fmt);
     }
