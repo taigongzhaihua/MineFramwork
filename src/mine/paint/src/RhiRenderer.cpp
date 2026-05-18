@@ -196,23 +196,27 @@ float4 main(SdfPSIn i) : SV_Target {
     } else if (kind == 4) {
         // 四边不等宽矩形内侧描边（p0=top_w, p1=right_w, p2=bottom_w, p3=left_w）
         //
-        // 原理：以原矩形为外框，向内收缩各边指定宽度后得到内框。
-        // 内框的半尺寸根据像素所在象限动态确定：
-        //   - X 方向：像素在右半（lx>0）收缩 right_w，左半收缩 left_w
-        //   - Y 方向：像素在下半（ly>0）收缩 bottom_w，上半收缩 top_w
-        // 角落像素由对应象限的边宽决定，产生斜切效果（与 CSS border 行为一致）。
+        // 算法：对四条边各自独立计算描边遮罩，取联集（max）。
+        //   - 到上边缘的距离：dist_top    = p.y + b.y  （0 在上边缘，正值向下）
+        //   - 到下边缘的距离：dist_bottom = b.y - p.y  （0 在下边缘，正值向上）
+        //   - 到左边缘的距离：dist_left   = p.x + b.x
+        //   - 到右边缘的距离：dist_right  = b.x - p.x
+        // 当 dist < edge_width 时该像素在对应边的描边带内；用 smoothstep AA 过渡。
+        // 宽度为 0 的边直接返回 0，不产生任何描边，彻底避免宽度相等时的 SDF 叠乘伪影。
         float d_outer = box_sdf(p, b);
-        float ihw = b.x - (p.x > 0.0f ? p1 : p3);  // 右半减去 right_w，左半减去 left_w
-        float ihh = b.y - (p.y > 0.0f ? p2 : p0);  // 下半减去 bottom_w，上半减去 top_w
-        ihw = max(ihw, 0.001f);  // 防止内框半尺寸退化为零导致 box_sdf 精度问题
-        ihh = max(ihh, 0.001f);
-        float d_inner = box_sdf(p, float2(ihw, ihh));
-        // 边框区域 alpha：外矩形内（d_outer < 0）且内矩形外（d_inner > 0）
         float fw_o = max(fwidth(d_outer), 0.5f);
-        float fw_i = max(fwidth(d_inner), 0.5f);
-        float a_outer = 1.0f - smoothstep(-fw_o, fw_o, d_outer);
-        float a_inner = smoothstep(-fw_i, fw_i, d_inner);
-        float al = a_outer * a_inner;
+        float a_outer = 1.0f - smoothstep(-fw_o, fw_o, d_outer);  // 1=矩形内，外侧 AA
+
+        float fy = max(fwidth(p.y), 0.5f);
+        float fx = max(fwidth(p.x), 0.5f);
+        // 各边遮罩：dist < edge_width → 1.0（在带内），dist > edge_width → 0.0（带外），smoothstep AA
+        float a_top    = p0 > 0.0f ? 1.0f - smoothstep(p0 - fy, p0 + fy, p.y + b.y) : 0.0f;
+        float a_bottom = p2 > 0.0f ? 1.0f - smoothstep(p2 - fy, p2 + fy, b.y - p.y) : 0.0f;
+        float a_left   = p3 > 0.0f ? 1.0f - smoothstep(p3 - fx, p3 + fx, p.x + b.x) : 0.0f;
+        float a_right  = p1 > 0.0f ? 1.0f - smoothstep(p1 - fx, p1 + fx, b.x - p.x) : 0.0f;
+        // 联集：任意一边有描边即显示；乘以外矩形遮罩确保超出矩形外的部分透明
+        float a_stroke = max(max(a_top, a_bottom), max(a_left, a_right));
+        float al = a_outer * a_stroke;
         float4 c2 = i.color;
         return float4(c2.rgb * c2.a * al, c2.a * al);
     } else {
