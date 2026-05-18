@@ -917,6 +917,7 @@ public:
     void begin_frame() override;
     void end_frame()   override;
     void render(const DisplayList& dl, gfx::ITexture* target) override;
+    void set_dpi_scale(float scale) override;
 
     /// 判断渲染器是否初始化成功
     [[nodiscard]] bool is_valid() const noexcept { return valid_; }
@@ -951,7 +952,8 @@ private:
         float stroke_w,
         float e0 = 0.0f, float e1 = 0.0f, float e2 = 0.0f, float e3 = 0.0f);
 
-    bool valid_{false};
+    bool  valid_{false};
+    float dpi_scale_{1.0f};  ///< 物理像素 / 逻辑像素缩放因子，默认 1（不缩放）
 
     gfx::IDevice*                        device_{nullptr};       ///< 图形设备（不拥有）
     core::OwnedPtr<gfx::IQueue>          queue_;                 ///< 提交队列
@@ -1145,6 +1147,10 @@ void RhiRenderer::push_sdf_quad_vertices(
 
 // ── 渲染 ──────────────────────────────────────────────────────────────────────
 
+void RhiRenderer::set_dpi_scale(float scale) {
+    dpi_scale_ = (scale > 0.0f) ? scale : 1.0f;
+}
+
 void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
     if (!valid_ || target == nullptr) return;
 
@@ -1152,10 +1158,12 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
     if (cmds.empty()) return;
 
     // ── 1. 创建视口常量缓冲（所有 DrawCall 共享，每帧创建一次）──────────
-
+    //
+    // 使用逻辑像素大小（物理大小 / dpi_scale），使逻辑坐标到 NDC 的映射
+    // 始终正确；光栅化视口仍使用物理大小，fwidth() 在物理像素精度下工作。
     const ViewportCB cb_data{
-        static_cast<float>(target->width()),
-        static_cast<float>(target->height()),
+        static_cast<float>(target->width())  / dpi_scale_,
+        static_cast<float>(target->height()) / dpi_scale_,
         0.0f, 0.0f
     };
 

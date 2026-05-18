@@ -42,11 +42,31 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
     mine::core::OwnedPtr<mine::gfx::ICommandList> cmd_list;   ///< 用于背景清除
     mine::core::OwnedPtr<mine::paint::IRenderer>  paint_renderer;
 
-    // IWindowEventSink：响应窗口尺寸变化事件
+    /// 物理像素 / 逻辑像素缩放因子（由 IWindow::dpi() 初始化，DpiChanged 时更新）
+    float dpi_scale_{1.0f};
+
+    // IWindowEventSink：响应窗口尺寸变化和 DPI 变化事件
     void on_window_event(mine::platform::WindowEvent& event) override {
-        if (event.kind == mine::platform::WindowEventKind::Resized) {
-            const auto w = static_cast<uint32_t>(std::max(1.0f, event.new_size.width));
-            const auto h = static_cast<uint32_t>(std::max(1.0f, event.new_size.height));
+        if (event.kind == mine::platform::WindowEventKind::DpiChanged) {
+            // 更新 DPI 缩放因子并同步通知渲染器
+            const float old_scale = dpi_scale_;
+            dpi_scale_ = event.new_dpi / 96.0f;
+            paint_renderer->set_dpi_scale(dpi_scale_);
+
+            // 当前交换链是物理大小，换算出逻辑大小后以新 scale 重新计算物理大小
+            const float logical_w = static_cast<float>(swapchain->width())  / old_scale;
+            const float logical_h = static_cast<float>(swapchain->height()) / old_scale;
+            const auto  new_phys_w = static_cast<uint32_t>(std::max(1.0f, logical_w * dpi_scale_));
+            const auto  new_phys_h = static_cast<uint32_t>(std::max(1.0f, logical_h * dpi_scale_));
+
+            queue->wait_idle();
+            swapchain->resize(new_phys_w, new_phys_h);
+            render();
+        }
+        else if (event.kind == mine::platform::WindowEventKind::Resized) {
+            // new_size 是逻辑像素，× dpi_scale_ 得物理像素大小
+            const auto w = static_cast<uint32_t>(std::max(1.0f, event.new_size.width  * dpi_scale_));
+            const auto h = static_cast<uint32_t>(std::max(1.0f, event.new_size.height * dpi_scale_));
 
             // 等待 GPU 空闲后再 resize 交换链
             queue->wait_idle();
@@ -482,19 +502,32 @@ int main(int /*argc*/, char* /*argv*/[])
         return 1;
     }
 
-    // 7. 订阅窗口事件（Resized）
+    // 7. 从窗口获取实际 DPI 缩放因子，以物理像素大小重新创建交换链
+    {
+        const float dpi_scale = window->dpi() / 96.0f;
+        if (dpi_scale > 1.001f) {
+            // DPI 大于 100%，重建交换链为物理像素大小（此时交换链尚未 present 过，可直接 resize）
+            const auto phys_w = static_cast<uint32_t>(win_desc.size.width  * dpi_scale);
+            const auto phys_h = static_cast<uint32_t>(win_desc.size.height * dpi_scale);
+            renderer.swapchain->resize(phys_w, phys_h);
+        }
+        renderer.dpi_scale_ = dpi_scale;
+        renderer.paint_renderer->set_dpi_scale(dpi_scale);
+    }
+
+    // 8. 订阅窗口事件（Resized + DpiChanged）
     window->events().subscribe(&renderer);
 
-    // 8. 显示窗口
+    // 9. 显示窗口
     window->show();
 
-    // 9. 渲染第一帧
+    // 10. 渲染第一帧
     renderer.render();
 
-    // 10. 进入消息循环，直到窗口关闭
+    // 11. 进入消息循环，直到窗口关闭
     const int exit_code = host->run();
 
-    // 11. 清理
+    // 12. 清理
     window->events().unsubscribe(&renderer);
 
     return exit_code;
