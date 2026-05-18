@@ -21,6 +21,9 @@ target("sample.00-blank-window")
     if is_plat("windows") then
         add_defines("UNICODE", "_UNICODE", "NOMINMAX", "WIN32_LEAN_AND_MEAN")
         add_cxflags("/utf-8", {tools = {"cl", "clang_cl"}})
-        add_ldflags("/SUBSYSTEM:WINDOWS", {tools = {"link", "lld-link"}})
+        -- /SUBSYSTEM:WINDOWS 隐藏控制台窗口；
+        -- /ENTRY:mainCRTStartup 让链接器接受标准 main() 而非 WinMain()
+        add_ldflags("/SUBSYSTEM:WINDOWS", "/ENTRY:mainCRTStartup",
+                    {tools = {"link", "lld-link"}, force = true})
     end
 target_end()

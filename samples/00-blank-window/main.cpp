@@ -13,22 +13,12 @@
  * 改为对应后端，此 main.cpp 无需修改。
  */
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-
 #include <mine/platform/PlatformAbi.h>
 // 无需 include 任何平台特定头文件；链接 mine.platform.win32（或其他后端）即可
 
-int WINAPI WinMain(
-    HINSTANCE /*hInstance*/,
-    HINSTANCE /*hPrevInstance*/,
-    LPSTR     /*lpCmdLine*/,
-    int       /*nCmdShow*/)
+#include <cstdio>
+
+int main(int /*argc*/, char* /*argv*/[])
 {
     // 创建应用宿主（实际实现由链接的平台后端库决定，此处无平台特定代码）
     auto host = mine::platform::create_application_host();
@@ -44,7 +34,7 @@ int WINAPI WinMain(
     // 创建窗口
     auto window = host->create_window(desc);
     if (!window) {
-        MessageBoxW(nullptr, L"窗口创建失败", L"错误", MB_ICONERROR | MB_OK);
+        std::fprintf(stderr, "错误：窗口创建失败\n");
         return 1;
     }
 
