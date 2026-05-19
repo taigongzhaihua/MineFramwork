@@ -5,6 +5,26 @@
 ## [Unreleased]
 
 ### Added
+- **paint（变换系统）**：实现 Canvas 2D 变换系统（平移、缩放、旋转）：
+  - `DrawCmdKind::TransformSet`：新增非压栈变换命令（`transform()`/`translate()`/`rotate()`/`scale()` 使用）
+  - `DrawCmdKind::TransformPush`：语义修正为仅保存当前变换快照（`save()` 使用，不级联变换）
+  - `Canvas::save()`/`restore()`：正确实现 HTML Canvas 风格的状态保存/恢复语义
+  - `Canvas::translate(Vec2)`/`scale(float)`/`scale(Vec2)`/`rotate(float)` 现在实际生效
+  - `RhiRenderer::render()` 新增 CPU 端变换状态追踪（`current_transform` + `transform_save_stack`）
+  - 方案：CPU 端后置变换 — 对 SDF 顶点屏幕坐标应用变换，`local` 坐标保持画布空间不变
+  - GPU 属性插值机制确保旋转/缩放后 SDF 仍在画布本地坐标系中正确计算，**无需修改任何 HLSL**
+  - 支持无限嵌套变换栈（`save()`/`restore()` 正确恢复整组变换）
+  - 所有 SDF 形状（FillRect/FillRoundedRect/FillEllipse/StrokeRect/StrokeLine/StrokeArc/StrokeQuadBezier/StrokeCubicBezier/FillPolygon 等）、文字（DrawText）均支持当前累积变换
+  - 当变换为单位矩阵时零开销（`current_transform_is_identity` 快速路径跳过顶点遍历）
+  - 支持 `Transform2D::rotation_about(angle, pivot)` 绕任意点旋转
+
+- **samples（样例更新）**：
+  - `00-hello-rect`：增加 2 行新演示（行16-17）：
+    - 行16左：`save/translate/rotate/restore` — 旋转 30° 的圆角矩形（含未旋转轮廓参考）
+    - 行16右：`save/translate/scale/restore` — 放大 1.5 倍的椭圆（含正常大小轮廓参考）
+    - 行17左：嵌套变换演示 — 外层旋转15° 绿色矩形 + 内层叠加旋转30°+缩放0.6的橙色矩形
+    - 行17右：`rotation_about` 演示 — 五个彩色圆角矩形绕格子中心以72°间隔均匀分布
+
 - **paint（裁剪系统）**：新增基于 D3D11 模板缓冲（Stencil Buffer）的 SDF 嵌套裁剪系统：
   - `Canvas::clip_rect(Rect)`：压入矩形裁剪区域
   - `Canvas::clip_rounded_rect(RoundedRect)`：压入均匀圆角矩形裁剪区域

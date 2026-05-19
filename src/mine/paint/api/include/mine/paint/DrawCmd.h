@@ -60,8 +60,9 @@ enum class DrawCmdKind : uint8_t {
     ClipPushComplexRoundedRect, ///< 压入四角独立圆角矩形裁剪区域（complex_rrect 字段）
     ClipPushPolygon,            ///< 压入多边形裁剪区域（path_index 引用顶点；pt_a=AABB中心，pt_b=AABB半尺寸）
     ClipPop,                    ///< 弹出最近一次裁剪状态
-    TransformPush,     ///< 压入变换矩阵（与当前变换级联）
-    TransformPop,      ///< 弹出最近一次变换状态
+    TransformPush,     ///< 保存当前变换快照到栈（save() 使用）
+    TransformSet,      ///< 将当前变换与 cmd.transform 级联（不压栈；transform/translate/rotate/scale 使用）
+    TransformPop,      ///< 弹出最近一次 TransformPush 保存的变换（restore() 使用）
 
     // ── 文字命令 ────────────────────────────────────────────────────────
     DrawText,          ///< 绘制文字（path_index 引用 DisplayList::text_runs_；brush=文字颜色）

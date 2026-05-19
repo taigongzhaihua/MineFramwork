@@ -2622,9 +2622,62 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
         return device_->create_buffer(vb, verts.data());
     };
 
+    // ── 变换状态（save/restore/translate/scale/rotate 使用）─────────────
+
+    /// 当前累积变换（默认单位矩阵；命令序列中按 TransformSet 逐步级联）
+    math::Transform2D current_transform;
+    /// 是否为单位矩阵（优化：跳过无变换时的顶点遍历）
+    bool current_transform_is_identity = true;
+    /// save()/restore() 保存/恢复变换快照的栈
+    containers::Vector<math::Transform2D> transform_save_stack;
+
+    /// 对 SDF 顶点批次应用当前变换（仅更新屏幕坐标 x/y，local 坐标保持画布空间不变）
+    auto apply_sdf_transform = [&](containers::Vector<SdfVertex>& verts) {
+        if (current_transform_is_identity) return;
+        for (auto& v : verts) {
+            const math::Point sp = current_transform.apply(math::Point{v.x, v.y});
+            v.x = sp.x;
+            v.y = sp.y;
+            // v.local_x / v.local_y 不变 → SDF 在画布本地坐标系中正确计算
+        }
+    };
+
+    /// 对文字顶点批次应用当前变换（更新字形角点屏幕坐标 x/y）
+    auto apply_text_transform = [&](containers::Vector<TextVertex>& verts) {
+        if (current_transform_is_identity) return;
+        for (auto& v : verts) {
+            const math::Point sp = current_transform.apply(math::Point{v.x, v.y});
+            v.x = sp.x;
+            v.y = sp.y;
+        }
+    };
+
     // ── 5. 逐命令处理（每命令单独 DrawCall，保证绘制顺序）───────────────
 
     for (const DrawCmd& cmd : cmds) {
+
+        // ── 变换命令（最先处理，直接 continue，不进入后续绘制分支）─────────
+
+        if (cmd.kind == DrawCmdKind::TransformPush) {
+            // save() — 将当前累积变换快照压入保存栈，current_transform 不变
+            transform_save_stack.push_back(current_transform);
+            continue;
+        }
+        if (cmd.kind == DrawCmdKind::TransformSet) {
+            // transform()/translate()/rotate()/scale() — 将 cmd.transform 右乘到当前变换
+            current_transform = current_transform * cmd.transform;
+            current_transform_is_identity = (current_transform == math::Transform2D{});
+            continue;
+        }
+        if (cmd.kind == DrawCmdKind::TransformPop) {
+            // restore() — 弹出最近一次 save() 保存的变换快照
+            if (!transform_save_stack.empty()) {
+                current_transform = transform_save_stack.back();
+                transform_save_stack.pop_back();
+                current_transform_is_identity = (current_transform == math::Transform2D{});
+            }
+            continue;
+        }
 
         // ── 裁剪状态辅助：预选管线，ClipPush*/ClipPop 分支自行覆盖 ──────────
         //
@@ -2660,6 +2713,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             // 矩形（kind=0），填充（stroke_w=0），1px AA 余量
             push_sdf_quad_vertices(verts, cx, cy, hw, hh, 1.0f,
                 c.r, c.g, c.b, c.a, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+            apply_sdf_transform(verts);
 
             gfx::BufferDesc vb{};
             vb.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
@@ -2706,6 +2760,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             // 均匀圆角矩形（kind=1），p0=统一圆角半径
             push_sdf_quad_vertices(verts, cx, cy, hw, hh, 1.0f,
                 c.r, c.g, c.b, c.a, 1.0f, r_clamped, 0.0f, 0.0f, 0.0f, 0.0f);
+            apply_sdf_transform(verts);
 
             gfx::BufferDesc vb{};
             vb.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
@@ -2751,6 +2806,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             // 复杂圆角矩形（kind=2），p0=右下, p1=右上, p2=左下, p3=左上
             push_sdf_quad_vertices(verts, cx, cy, hw, hh, 1.0f,
                 c.r, c.g, c.b, c.a, 2.0f, r_br, r_tr, r_bl, r_tl, 0.0f);
+            apply_sdf_transform(verts);
 
             gfx::BufferDesc vb{};
             vb.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
@@ -2792,6 +2848,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             // 椭圆（kind=3），half_w=rx，half_h=ry
             push_sdf_quad_vertices(verts, cx, cy, hw, hh, 1.0f,
                 c.r, c.g, c.b, c.a, 3.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+            apply_sdf_transform(verts);
 
             gfx::BufferDesc vb{};
             vb.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
@@ -2837,6 +2894,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             // 矩形描边（kind=0，stroke_w=线宽）
             push_sdf_quad_vertices(verts, cx, cy, hw, hh, pad,
                 c.r, c.g, c.b, c.a, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, sw);
+            apply_sdf_transform(verts);
 
             gfx::BufferDesc vb{};
             vb.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
@@ -2870,6 +2928,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             push_sdf_quad_vertices(verts, cx, cy, hw, hh, pad,
                 c.r, c.g, c.b, c.a, 4.0f,
                 bw.top, bw.right, bw.bottom, bw.left, 0.0f);
+            apply_sdf_transform(verts);
 
             gfx::BufferDesc vb{};
             vb.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
@@ -2909,6 +2968,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
                 c.r, c.g, c.b, c.a, 5.0f,
                 bw.top, bw.right, bw.bottom, bw.left, 0.0f,
                 r_tl, r_tr, r_br, r_bl);
+            apply_sdf_transform(verts);
 
             gfx::BufferDesc vb{};
             vb.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
@@ -2939,6 +2999,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             // 均匀圆角矩形描边（kind=1，stroke_w=线宽）
             push_sdf_quad_vertices(verts, cx, cy, hw, hh, pad,
                 c.r, c.g, c.b, c.a, 1.0f, r_clamped, 0.0f, 0.0f, 0.0f, sw);
+            apply_sdf_transform(verts);
 
             gfx::BufferDesc vb{};
             vb.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
@@ -2972,6 +3033,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             // 复杂圆角矩形描边（kind=2，stroke_w=线宽）
             push_sdf_quad_vertices(verts, cx, cy, hw, hh, pad,
                 c.r, c.g, c.b, c.a, 2.0f, r_br, r_tr, r_bl, r_tl, sw);
+            apply_sdf_transform(verts);
 
             gfx::BufferDesc vb{};
             vb.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
@@ -3001,6 +3063,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             // 椭圆描边（kind=3，stroke_w=线宽）
             push_sdf_quad_vertices(verts, cx, cy, hw, hh, pad,
                 c.r, c.g, c.b, c.a, 3.0f, 0.0f, 0.0f, 0.0f, 0.0f, sw);
+            apply_sdf_transform(verts);
 
             gfx::BufferDesc vb{};
             vb.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
@@ -3064,6 +3127,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
                 lax, lay, lbx, lby);  // e0..e3 = 端点本地坐标
 
             if (verts.empty()) continue;
+            apply_sdf_transform(verts);
 
             gfx::BufferDesc vb6{};
             vb6.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
@@ -3126,6 +3190,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
                 0.0f, 0.0f, 0.0f, 0.0f);      // e0,e1=圆心本地坐标(0,0)，e2,e3 未用
 
             if (verts.empty()) continue;
+            apply_sdf_transform(verts);
 
             gfx::BufferDesc vb7{};
             vb7.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
@@ -3216,6 +3281,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             verts.push_back(make_v8(x2, y1));
             verts.push_back(make_v8(x2, y2));
             verts.push_back(make_v8(x1, y2));
+            apply_sdf_transform(verts);
 
             gfx::BufferDesc vb8{};
             vb8.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
@@ -3309,6 +3375,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             verts.push_back(make_v9(x2, y1));
             verts.push_back(make_v9(x2, y2));
             verts.push_back(make_v9(x1, y2));
+            apply_sdf_transform(verts);
 
             gfx::BufferDesc vb9{};
             vb9.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
@@ -3422,6 +3489,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
                 kind_val,
                 0.0f, 0.0f, 0.0f, 0.0f,
                 stroke_w);
+            apply_sdf_transform(sdf_verts);
 
             gfx::BufferDesc vb_poly{};
             vb_poly.size       = static_cast<uint64_t>(sdf_verts.size()) * sizeof(SdfVertex);
@@ -3601,6 +3669,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             }
 
             if (text_verts.empty()) continue;
+            apply_text_transform(text_verts);
 
             // ── 阶段 4：提交 DrawCall ──────────────────────────────────────────
             gfx::BufferDesc vb{};

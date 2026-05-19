@@ -25,7 +25,7 @@ void Canvas::restore() {
 
 void Canvas::transform(const math::Transform2D& t) {
     DrawCmd cmd;
-    cmd.kind      = DrawCmdKind::TransformPush;
+    cmd.kind      = DrawCmdKind::TransformSet;  // 仅级联当前变换，不压栈
     cmd.transform = t;
     push(cmd);
 }

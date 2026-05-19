@@ -1,8 +1,8 @@
 /**
  * @file main.cpp
- * @brief 00-hello-rect 示例：mine.paint Canvas SDF 填充 + 描边 + 裁剪命令综合演示。
+ * @brief 00-hello-rect 示例：mine.paint Canvas SDF 填充 + 描边 + 裁剪 + 变换命令综合演示。
  *
- * 演示内容（2×15 网格布局，左列填充/右列描边）：
+ * 演示内容（2×17 网格布局，左列填充/右列描边）：
  *   行1 左：FillRect                      — 纯色填充矩形（绿色）
  *   行1 右：StrokeRect                    — 矩形描边（绿色，线宽 4px）
  *   行2 左：FillRoundedRect               — 均匀圆角矩形填充（蓝色，radius=20px）
@@ -33,6 +33,10 @@
  *   行14右：clip_rounded_rect + FillRect    — 均匀圆角矩形裁剪演示
  *   行15左：clip_complex_rounded_rect       — 四角独立圆角矩形裁剪演示
  *   行15右：clip_polygon + FillRect         — 三角形多边形裁剪演示
+ *   行16左：translate + rotate              — 平移后旋转30°的圆角矩形（save/restore）
+ *   行16右：translate + scale               — 平移后缩放1.5倍的椭圆（save/restore）
+ *   行17左：嵌套变换（外层旋转 + 内层旋转+缩放）— 叠加变换演示
+ *   行17右：rotation_about                  — 五个小矩形绕中心点匀角分布旋转
  */
 
 #include <mine/platform/PlatformAbi.h>
@@ -112,11 +116,11 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
             mine::math::Rect{0.0f, 0.0f, W, H},
             mine::paint::Brush::solid(mine::math::Color{0.12f, 0.12f, 0.12f, 1.0f}));
 
-        // 2×13 网格参数（2列 × 13行）
+        // 2×17 网格参数（2列 × 17行）
         const float outer_pad = 20.0f;
         const float gap       = 10.0f;
         const float cw        = (W - outer_pad * 2.0f - gap) * 0.5f;
-        const float ch        = (H - outer_pad * 2.0f - gap * 14.0f) / 15.0f;
+        const float ch        = (H - outer_pad * 2.0f - gap * 16.0f) / 17.0f;
 
         const float col0 = outer_pad;
         const float col1 = outer_pad + cw + gap;
@@ -137,6 +141,9 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         const float row12 = outer_pad + (ch + gap) * 12.0f;
         const float row13 = outer_pad + (ch + gap) * 13.0f;
         const float row14 = outer_pad + (ch + gap) * 14.0f;
+        // 新增：变换演示行（平移、旋转、缩放）
+        const float row15 = outer_pad + (ch + gap) * 15.0f;
+        const float row16 = outer_pad + (ch + gap) * 16.0f;
 
         const float ip = 14.0f;
         const float sw = cw - ip * 2.0f;
@@ -702,6 +709,133 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                     mine::paint::Brush::solid(mine::math::Color{1.0f, 1.0f, 1.0f, 0.4f}),
                     mine::paint::Pen{1.5f, mine::paint::LineJoin::Miter,
                                  mine::paint::LineCap::Round, mine::paint::LineCap::Round});
+            }
+        }
+
+        // ── 行16 左：translate + rotate（平移后旋转 30° 的圆角矩形）──────────
+        // save() → translate到格子中心 → rotate(30°) → fill_rounded_rect → restore()
+        // 同时叠加一个未旋转的轮廓（半透明），对比旋转效果。
+        {
+            const float x = col0, y = row15, w = cw, h = ch;
+            const float cx = x + w * 0.5f, cy = y + h * 0.5f;
+            const float rw = sw * 0.72f, rh = sh * 0.52f;
+            constexpr float kPi = 3.14159265f;
+            const float angle = kPi / 6.0f;  // 30°
+
+            // 未旋转的参考轮廓（半透明白色）
+            canvas.stroke_rounded_rect(
+                mine::math::RoundedRect{
+                    mine::math::Rect{cx - rw * 0.5f, cy - rh * 0.5f, rw, rh},
+                    12.0f, 12.0f},
+                mine::paint::Brush::solid(mine::math::Color{1.0f, 1.0f, 1.0f, 0.2f}),
+                mine::paint::Pen{1.0f});
+
+            // save → translate → rotate → 绘制 → restore
+            canvas.save();
+            canvas.translate(mine::math::Vec2{cx, cy});
+            canvas.rotate(angle);
+            // 画布原点已在格子中心，矩形以原点为中心放置
+            canvas.fill_rounded_rect(
+                mine::math::RoundedRect{
+                    mine::math::Rect{-rw * 0.5f, -rh * 0.5f, rw, rh}, 12.0f, 12.0f},
+                mine::paint::Brush::solid(col_orange));
+            canvas.restore();
+        }
+
+        // ── 行16 右：translate + scale（平移后放大 1.5 倍的椭圆）───────────
+        // 先绘制正常大小轮廓作参考，再 save → translate → scale → fill_ellipse → restore。
+        {
+            const float x = col1, y = row15, w = cw, h = ch;
+            const float cx = x + w * 0.5f, cy = y + h * 0.5f;
+            const float erx = sw * 0.28f, ery = sh * 0.33f;
+
+            // 正常大小轮廓（半透明白色，scale=1 参考）
+            canvas.stroke_ellipse(
+                mine::math::Vec2{cx, cy},
+                mine::math::Vec2{erx, ery},
+                mine::paint::Brush::solid(mine::math::Color{1.0f, 1.0f, 1.0f, 0.2f}),
+                mine::paint::Pen{1.0f});
+
+            // save → translate → scale(1.5) → fill_ellipse → restore
+            canvas.save();
+            canvas.translate(mine::math::Vec2{cx, cy});
+            canvas.scale(1.5f);
+            // 现在原点在格子中心，scale 已生效
+            canvas.fill_ellipse(
+                mine::math::Vec2{0.0f, 0.0f},
+                mine::math::Vec2{erx, ery},
+                mine::paint::Brush::solid(mine::math::Color{0.25f, 0.5f, 1.0f, 0.85f}));
+            canvas.restore();
+        }
+
+        // ── 行17 左：嵌套变换（外层旋转 + 内层旋转+缩放）────────────────────
+        // 外层：save → translate → rotate(15°) → fill_rounded_rect（绿色）
+        // 内层：再 save → rotate(30°) → scale(0.6) → fill_rounded_rect（橙色）→ restore → restore
+        {
+            const float x = col0, y = row16, w = cw, h = ch;
+            const float cx = x + w * 0.5f, cy = y + h * 0.5f;
+            const float rw = sw * 0.60f, rh = sh * 0.58f;
+            constexpr float kPi = 3.14159265f;
+
+            // 外层：旋转 15°
+            canvas.save();
+            canvas.translate(mine::math::Vec2{cx, cy});
+            canvas.rotate(kPi / 12.0f);  // 15°
+
+            canvas.fill_rounded_rect(
+                mine::math::RoundedRect{
+                    mine::math::Rect{-rw * 0.5f, -rh * 0.5f, rw, rh}, 10.0f, 10.0f},
+                mine::paint::Brush::solid(mine::math::Color{0.25f, 0.72f, 0.30f, 0.9f}));
+
+            // 内层（叠加在外层变换之上）：再旋转 30° + 缩放 0.6
+            canvas.save();
+            canvas.rotate(kPi / 6.0f);  // 再旋转 30°（相对于外层画布）
+            canvas.scale(0.6f);
+            canvas.fill_rounded_rect(
+                mine::math::RoundedRect{
+                    mine::math::Rect{-rw * 0.5f, -rh * 0.5f, rw, rh}, 10.0f, 10.0f},
+                mine::paint::Brush::solid(mine::math::Color{0.92f, 0.42f, 0.12f, 0.9f}));
+            canvas.restore();  // 恢复外层变换
+
+            canvas.restore();  // 恢复初始变换
+        }
+
+        // ── 行17 右：rotation_about（五个矩形绕格子中心均匀旋转分布）────────
+        // 五个彩色圆角矩形绕格子中心以 72° 间隔排布，使用 Transform2D::rotation_about
+        // 演示绕任意点旋转的能力。
+        {
+            const float x = col1, y = row16, w = cw, h = ch;
+            const float cx = x + w * 0.5f, cy = y + h * 0.5f;
+            const float orbit_r = std::min(sw, sh) * 0.30f;  // 轨道半径
+            const float rw = sw * 0.22f, rh = sh * 0.18f;    // 小矩形尺寸
+            constexpr float kPi = 3.14159265f;
+
+            // 中心参考点（白色小圆）
+            canvas.fill_ellipse(
+                mine::math::Vec2{cx, cy},
+                mine::math::Vec2{4.0f, 4.0f},
+                mine::paint::Brush::solid(mine::math::Color{1.0f, 1.0f, 1.0f, 0.6f}));
+
+            // 五个小矩形，初始位置均在 (cx + orbit_r, cy)，用 rotation_about 旋转到各自位置
+            const mine::math::Color orbit_colors[5] = {
+                {1.0f, 0.30f, 0.30f, 0.90f},  // 红
+                {0.30f, 1.0f, 0.30f, 0.90f},  // 绿
+                {0.30f, 0.45f, 1.0f, 0.90f},  // 蓝
+                {1.0f, 0.85f, 0.20f, 0.90f},  // 黄
+                {0.90f, 0.30f, 0.90f, 0.90f}, // 紫
+            };
+            for (int k = 0; k < 5; ++k) {
+                const float angle = static_cast<float>(k) * (2.0f * kPi / 5.0f);  // 72° 间隔
+                // rotation_about(angle, pivot) 将坐标系绕 pivot 旋转 angle 弧度
+                canvas.save();
+                canvas.transform(mine::math::Transform2D::rotation_about(
+                    angle, mine::math::Point{cx, cy}));
+                // 矩形初始位于中心右方 orbit_r 处，旋转后被映射到轨道对应位置
+                canvas.fill_rounded_rect(
+                    mine::math::RoundedRect{
+                        mine::math::Rect{cx + orbit_r - rw * 0.5f, cy - rh * 0.5f, rw, rh}, 6.0f, 6.0f},
+                    mine::paint::Brush::solid(orbit_colors[k]));
+                canvas.restore();
             }
         }
 
