@@ -194,7 +194,15 @@ D3D11Pipeline::D3D11Pipeline(ID3D11Device* device, const PipelineDesc& desc) {
 
     D3D11_RENDER_TARGET_BLEND_DESC& rt_blend = blend_desc.RenderTarget[0];
 
-    if (desc.enable_blend) {
+    // ClipWrite / ClipErase 模式：禁止颜色输出（仅操作模板缓冲）
+    const bool clip_only = (desc.stencil_mode == StencilMode::ClipWrite ||
+                            desc.stencil_mode == StencilMode::ClipErase);
+
+    if (clip_only) {
+        // 完全禁止颜色写入（写掩码 = 0）
+        rt_blend.BlendEnable           = FALSE;
+        rt_blend.RenderTargetWriteMask = 0; // 不写任何颜色通道
+    } else if (desc.enable_blend) {
         // 预乘 Alpha 混合：src=ONE, dst=INV_SRC_ALPHA
         // 颜色已预乘时使用此模式，避免双重预乘
         rt_blend.BlendEnable           = TRUE;
@@ -238,12 +246,78 @@ D3D11Pipeline::D3D11Pipeline(ID3D11Device* device, const PipelineDesc& desc) {
     }
 
     // ── 6. 深度/模板状态 ───────────────────────────────────────────────────
+    //
+    // 支持三种模板操作模式（对应 StencilMode 枚举）：
+    //
+    //   None（默认）：
+    //     模板完全禁用，普通绘制，不受裁剪影响。
+    //
+    //   ClipWrite（压入裁剪层）：
+    //     测试：Equal(ref)  → 仅在满足祖先裁剪的像素上写入
+    //     写入：IncrSat     → 模板值递增（0→1, 1→2 …）
+    //     颜色输出：关闭（混合状态写掩码 = 0）
+    //
+    //   ClipTest（正常绘制 + 裁剪测试）：
+    //     测试：Equal(ref)  → 仅在当前活跃裁剪区域内通过
+    //     写入：Keep        → 不修改模板缓冲
+    //     颜色输出：正常
+    //
+    //   ClipErase（弹出裁剪层）：
+    //     测试：Equal(ref)  → 仅在上一次 ClipWrite 写入过的像素上操作
+    //     写入：DecrSat     → 模板值递减（2→1, 1→0 …）
+    //     颜色输出：关闭（混合状态写掩码 = 0）
 
     D3D11_DEPTH_STENCIL_DESC ds_desc{};
     ds_desc.DepthEnable    = desc.enable_depth ? TRUE : FALSE;
     ds_desc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
     ds_desc.DepthFunc      = D3D11_COMPARISON_LESS;
-    ds_desc.StencilEnable  = FALSE; // M0 不使用模板
+
+    switch (desc.stencil_mode) {
+    case StencilMode::None:
+    default:
+        // 模板完全禁用
+        ds_desc.StencilEnable = FALSE;
+        break;
+
+    case StencilMode::ClipWrite:
+        // 压入裁剪层：Equal 测试，IncrSat 写入，两面（2D 不剔除）
+        ds_desc.StencilEnable    = TRUE;
+        ds_desc.StencilReadMask  = 0xFF;
+        ds_desc.StencilWriteMask = 0xFF;
+        // 正面（CullMode=None 时前后面用同一组操作）
+        ds_desc.FrontFace.StencilFunc        = D3D11_COMPARISON_EQUAL;
+        ds_desc.FrontFace.StencilPassOp      = D3D11_STENCIL_OP_INCR_SAT;
+        ds_desc.FrontFace.StencilFailOp      = D3D11_STENCIL_OP_KEEP;
+        ds_desc.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+        ds_desc.BackFace = ds_desc.FrontFace;
+        // 颜色写入由混合状态 RenderTargetWriteMask=0 控制（在混合状态创建时处理）
+        break;
+
+    case StencilMode::ClipTest:
+        // 正常绘制 + 裁剪测试：Equal 测试，不写模板
+        ds_desc.StencilEnable    = TRUE;
+        ds_desc.StencilReadMask  = 0xFF;
+        ds_desc.StencilWriteMask = 0x00; // 不写入模板
+        ds_desc.FrontFace.StencilFunc        = D3D11_COMPARISON_EQUAL;
+        ds_desc.FrontFace.StencilPassOp      = D3D11_STENCIL_OP_KEEP;
+        ds_desc.FrontFace.StencilFailOp      = D3D11_STENCIL_OP_KEEP;
+        ds_desc.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+        ds_desc.BackFace = ds_desc.FrontFace;
+        break;
+
+    case StencilMode::ClipErase:
+        // 弹出裁剪层：Equal 测试，DecrSat 写入
+        ds_desc.StencilEnable    = TRUE;
+        ds_desc.StencilReadMask  = 0xFF;
+        ds_desc.StencilWriteMask = 0xFF;
+        ds_desc.FrontFace.StencilFunc        = D3D11_COMPARISON_EQUAL;
+        ds_desc.FrontFace.StencilPassOp      = D3D11_STENCIL_OP_DECR_SAT;
+        ds_desc.FrontFace.StencilFailOp      = D3D11_STENCIL_OP_KEEP;
+        ds_desc.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+        ds_desc.BackFace = ds_desc.FrontFace;
+        // 颜色写入由混合状态 RenderTargetWriteMask=0 控制
+        break;
+    }
 
     hr = device->CreateDepthStencilState(&ds_desc, &depth_stencil_);
     if (FAILED(hr)) {

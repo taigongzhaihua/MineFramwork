@@ -48,8 +48,9 @@ public:
         float     depth_value   = 1.0f,
         uint8_t   stencil_value = 0)                                override;
 
-    void set_viewport(const Viewport&    viewport) override;
-    void set_scissor (const ScissorRect& rect)     override;
+    void set_viewport   (const Viewport&    viewport) override;
+    void set_scissor    (const ScissorRect& rect)     override;
+    void set_stencil_ref(uint8_t            ref)      override;
 
     void set_pipeline    (IPipeline* pipeline)               override;
     void set_constant_buffer(uint32_t slot, IBuffer* buffer) override;
@@ -86,6 +87,10 @@ private:
     ComPtr<ID3D11SamplerState>   linear_sampler_;
     /// 是否正在录制（防止重复 begin/end）
     bool                         recording_{false};
+    /// 当前模板参考值（动态更新，set_pipeline 时传入 OMSetDepthStencilState）
+    uint8_t                      cur_stencil_ref_{0};
+    /// 当前绑定的深度/模板状态对象（随 set_pipeline 更新，set_stencil_ref 时重应用）
+    ID3D11DepthStencilState*     cur_depth_stencil_state_{nullptr};
 };
 
 } // namespace mine::gfx::d3d11

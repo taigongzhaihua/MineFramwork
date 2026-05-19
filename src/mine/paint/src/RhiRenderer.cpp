@@ -1084,7 +1084,6 @@ struct BlurVertex {
     float x, y;  ///< NDC 坐标（[-1,1]）
     float u, v;  ///< 源纹理 UV（[0,1]）
 };
-
 /// 模糊常量缓冲（b1 槽，每个模糊通道更新一次）
 struct alignas(16) BlurCB {
     float texel_step_x;  ///< 采样步进 X（水平通道 = blur_step/tex_w，垂直通道 = 0）
@@ -1104,6 +1103,108 @@ struct alignas(16) PolygonVertsCB {
     float pad[3];      ///< 填充至 16 字节
     float verts[64][4]; ///< 各顶点本地坐标（[k][0]=local_x, [k][1]=local_y, [k][2..3]=0）
 };
+
+// ── 裁剪写入像素着色器（SDF clip() 内置函数方案）─────────────────────────────
+//
+// 与普通 SDF PS 使用相同的顶点格式和顶点着色器（k_sdf_vertex_shader_hlsl）。
+// 与普通 SDF PS 的差异：
+//   1. 计算 SDF 距离 d
+//   2. 调用 clip(-d) 丢弃形状外部像素（SDF 外正内负：d > 0 时 -d < 0 → clip 丢弃）
+//   3. 不输出颜色（被 ClipWrite/ClipErase 管线的 RenderTargetWriteMask=0 屏蔽）
+//
+// 支持的 kind 值：
+//   0 = 矩形，1 = 均匀圆角矩形，2 = 四角独立圆角矩形，10 = 多边形
+//   其他 kind 退化为矩形处理
+static constexpr const char k_sdf_clip_pixel_shader_hlsl[] = R"hlsl(
+// 多边形顶点常量缓冲（b1 槽，仅多边形裁剪时绑定）
+cbuffer PolygonVertsCB : register(b1) {
+    int   poly_vert_count;
+    float _poly_pad0;
+    float _poly_pad1;
+    float _poly_pad2;
+    float4 poly_verts[64];
+};
+
+// 矩形 SDF（外正内负）
+float clip_box_sdf(float2 p, float2 b) {
+    float2 q = abs(p) - b;
+    return length(max(q, 0.0f)) + min(max(q.x, q.y), 0.0f);
+}
+
+// 均匀圆角矩形 SDF（r = 统一圆角半径）
+float clip_rounded_box_sdf(float2 p, float2 b, float r) {
+    float2 q = abs(p) - b + r;
+    return length(max(q, 0.0f)) + min(max(q.x, q.y), 0.0f) - r;
+}
+
+// 四角独立圆角矩形 SDF（r = (右下, 右上, 左下, 左上)）
+float clip_complex_rounded_box_sdf(float2 p, float2 b, float4 r) {
+    r.xy = (p.x > 0.0f) ? r.xy : r.zw;
+    r.x  = (p.y > 0.0f) ? r.x  : r.y;
+    float2 q = abs(p) - b + r.x;
+    return length(max(q, 0.0f)) + min(max(q.x, q.y), 0.0f) - r.x;
+}
+
+// 多边形 SDF（IQ 绕数法，支持凸多边形和凹多边形）
+float clip_sdPolygon(float2 p) {
+    int n = poly_vert_count;
+    float d = dot(p - poly_verts[0].xy, p - poly_verts[0].xy);
+    float s = 1.0f;
+    [loop]
+    for (int i = 0, j = n - 1; i < n; j = i, i++) {
+        float2 vi = poly_verts[i].xy;
+        float2 vj = poly_verts[j].xy;
+        float2 e  = vj - vi;
+        float2 w  = p - vi;
+        float2 b2 = w - e * clamp(dot(w, e) / dot(e, e), 0.0f, 1.0f);
+        d = min(d, dot(b2, b2));
+        bool c0 = (p.y >= vi.y);
+        bool c1 = (p.y <  vj.y);
+        bool c2 = (e.x * w.y > e.y * w.x);
+        if ((c0 && c1 && c2) || (!c0 && !c1 && !c2)) s = -s;
+    }
+    return s * sqrt(d);
+}
+
+struct SdfClipPSIn {
+    float4 pos     : SV_Position;
+    float4 color   : COLOR;
+    float2 local   : TEXCOORD0;
+    float4 params0 : TEXCOORD1;  // (kind, half_w, half_h, p0)
+    float4 params1 : TEXCOORD2;  // (p1, p2, p3, stroke_w)
+    float4 extra   : TEXCOORD3;
+};
+
+float4 main(SdfClipPSIn i) : SV_Target {
+    int    kind   = (int)(i.params0.x + 0.5f);
+    float  half_w = i.params0.y;
+    float  half_h = i.params0.z;
+    float  p0     = i.params0.w;
+    float  p1     = i.params1.x;
+    float  p2     = i.params1.y;
+    float  p3     = i.params1.z;
+    float2 p      = i.local;
+    float2 b      = float2(half_w, half_h);
+
+    float d;
+    if (kind == 1) {
+        d = clip_rounded_box_sdf(p, b, p0);
+    } else if (kind == 2) {
+        d = clip_complex_rounded_box_sdf(p, b, float4(p0, p1, p2, p3));
+    } else if (kind == 10) {
+        d = clip_sdPolygon(p);
+    } else {
+        // 默认：矩形（kind == 0 或其他未支持类型）
+        d = clip_box_sdf(p, b);
+    }
+
+    // 丢弃形状外部像素（d > 0 = 外部，-d < 0 → clip 丢弃）
+    clip(-d);
+
+    // 颜色输出被 RenderTargetWriteMask=0 屏蔽，返回值无实际影响
+    return float4(0.0f, 0.0f, 0.0f, 0.0f);
+}
+)hlsl";
 
 // ── 折线描边展开辅助函数（StrokePath 备用，当前未调用）───────────────────────
 
@@ -1511,6 +1612,31 @@ private:
     bool create_blur_pipeline();
 
     /**
+     * @brief 创建裁剪相关管线（SDF ClipWrite/ClipErase/ClipTest 以及对应变体）。
+     *
+     * 裁剪系统使用模板缓冲实现：
+     *   - sdf_clip_write_pipeline_  : SDF 几何 + ClipWrite 模板（压入裁剪层）
+     *   - sdf_clip_erase_pipeline_  : SDF 几何 + ClipErase 模板（弹出裁剪层）
+     *   - sdf_clip_test_pipeline_   : SDF 几何 + ClipTest 模板（裁剪状态下普通 SDF 绘制）
+     *   - text_clip_test_pipeline_  : 文字 + ClipTest 模板（裁剪状态下文字绘制）
+     *   - solid_clip_test_pipeline_ : 折线 + ClipTest 模板（裁剪状态下折线绘制）
+     *
+     * @return true = 所有管线创建成功
+     */
+    bool create_clip_pipelines();
+
+    /**
+     * @brief 确保裁剪模板纹理已创建且尺寸匹配目标渲染纹理。
+     *
+     * 模板纹理格式为 D24_UNorm_S8_UInt（24 位深度 + 8 位模板），同时绑定 DepthStencil。
+     * 首次调用或目标尺寸变化时（懒创建）才实际创建 GPU 纹理。
+     *
+     * @param target  主渲染目标纹理（用于获取需要的尺寸）
+     * @return true = 模板纹理可用，false = 创建失败（将禁用裁剪功能）
+     */
+    bool ensure_stencil_texture(gfx::ITexture* target);
+
+    /**
      * @brief 确保亚克力 scratch 纹理已创建且尺寸匹配目标渲染纹理。
      *
      * 两个 scratch 纹理均为 RGBA8_UNorm 格式，同时绑定 ShaderResource 和 RenderTarget。
@@ -1573,6 +1699,14 @@ private:
     core::OwnedPtr<gfx::ITexture>        blur_scratch_a_;        ///< 亚克力模糊 scratch 纹理 A（捕获/结果）
     core::OwnedPtr<gfx::ITexture>        blur_scratch_b_;        ///< 亚克力模糊 scratch 纹理 B（中间结果）
     core::OwnedPtr<GlyphAtlas>           glyph_atlas_;           ///< 字形 GPU 图集管理器
+
+    // ── 裁剪系统（模板缓冲方案）────────────────────────────────────────────────
+    core::OwnedPtr<gfx::ITexture>        clip_stencil_;              ///< D24_S8 深度模板纹理（懒创建）
+    core::OwnedPtr<gfx::IPipeline>       sdf_clip_write_pipeline_;   ///< SDF + ClipWrite（压入裁剪层）
+    core::OwnedPtr<gfx::IPipeline>       sdf_clip_erase_pipeline_;   ///< SDF + ClipErase（弹出裁剪层）
+    core::OwnedPtr<gfx::IPipeline>       sdf_clip_test_pipeline_;    ///< SDF + ClipTest（裁剪状态 SDF 绘制）
+    core::OwnedPtr<gfx::IPipeline>       text_clip_test_pipeline_;   ///< 文字 + ClipTest（裁剪状态文字绘制）
+    core::OwnedPtr<gfx::IPipeline>       solid_clip_test_pipeline_;  ///< 折线 + ClipTest（裁剪状态折线绘制）
 };
 
 // ── 构造 ──────────────────────────────────────────────────────────────────────
@@ -1601,6 +1735,9 @@ RhiRenderer::RhiRenderer(gfx::IDevice* device)
 
     // 创建高斯模糊管线（亚克力背景模糊用，全屏四边形，方向由 BlurCB 控制）
     if (!create_blur_pipeline()) return;
+
+    // 创建裁剪系统管线（模板缓冲：ClipWrite / ClipErase / ClipTest 变体）
+    if (!create_clip_pipelines()) return;
 
     // 创建字形图集管理器（1024×1024 R8 灰度图集）
     glyph_atlas_ = core::OwnedPtr<GlyphAtlas>(
@@ -1799,6 +1936,235 @@ bool RhiRenderer::create_blur_pipeline() {
 
     blur_pipeline_ = device_->create_pipeline(desc);
     return blur_pipeline_ != nullptr;
+}
+
+bool RhiRenderer::create_clip_pipelines() {
+    // ── SDF 顶点元素描述（与 create_sdf_pipeline 完全相同，供各管线共用）───
+
+    // 辅助：填充 SDF 管线顶点布局（6 个顶点元素，80 字节 stride）
+    auto fill_sdf_layout = [](gfx::PipelineDesc& d) {
+        // POSITION (float2) — offset 0
+        d.vertex_elements[0].semantic       = gfx::VertexSemantic::Position;
+        d.vertex_elements[0].semantic_index = 0;
+        d.vertex_elements[0].format         = gfx::VertexElementFormat::Float2;
+        d.vertex_elements[0].slot           = 0;
+        d.vertex_elements[0].offset         = 0;
+        // COLOR (float4) — offset 8
+        d.vertex_elements[1].semantic       = gfx::VertexSemantic::Color;
+        d.vertex_elements[1].semantic_index = 0;
+        d.vertex_elements[1].format         = gfx::VertexElementFormat::Float4;
+        d.vertex_elements[1].slot           = 0;
+        d.vertex_elements[1].offset         = 8;
+        // TEXCOORD0 (float2) — offset 24
+        d.vertex_elements[2].semantic       = gfx::VertexSemantic::TexCoord;
+        d.vertex_elements[2].semantic_index = 0;
+        d.vertex_elements[2].format         = gfx::VertexElementFormat::Float2;
+        d.vertex_elements[2].slot           = 0;
+        d.vertex_elements[2].offset         = 24;
+        // TEXCOORD1 (float4) — offset 32
+        d.vertex_elements[3].semantic       = gfx::VertexSemantic::TexCoord;
+        d.vertex_elements[3].semantic_index = 1;
+        d.vertex_elements[3].format         = gfx::VertexElementFormat::Float4;
+        d.vertex_elements[3].slot           = 0;
+        d.vertex_elements[3].offset         = 32;
+        // TEXCOORD2 (float4) — offset 48
+        d.vertex_elements[4].semantic       = gfx::VertexSemantic::TexCoord;
+        d.vertex_elements[4].semantic_index = 2;
+        d.vertex_elements[4].format         = gfx::VertexElementFormat::Float4;
+        d.vertex_elements[4].slot           = 0;
+        d.vertex_elements[4].offset         = 48;
+        // TEXCOORD3 (float4) — offset 64
+        d.vertex_elements[5].semantic       = gfx::VertexSemantic::TexCoord;
+        d.vertex_elements[5].semantic_index = 3;
+        d.vertex_elements[5].format         = gfx::VertexElementFormat::Float4;
+        d.vertex_elements[5].slot           = 0;
+        d.vertex_elements[5].offset         = 64;
+        d.vertex_element_count = 6;
+        d.vertex_stride        = sizeof(SdfVertex);  // 80 字节
+    };
+
+    // ── 1. SDF ClipWrite 管线（压入裁剪层：IncrSat 写入模板，禁止颜色输出）──
+
+    {
+        gfx::PipelineDesc desc{};
+        desc.vertex_shader.data        = k_sdf_vertex_shader_hlsl;
+        desc.vertex_shader.size        = sizeof(k_sdf_vertex_shader_hlsl) - 1;
+        desc.vertex_shader.language    = gfx::ShaderLanguage::HLSL;
+        desc.vertex_shader.entry_point = "main";
+        desc.vertex_shader.is_source   = true;
+
+        desc.pixel_shader.data        = k_sdf_clip_pixel_shader_hlsl;
+        desc.pixel_shader.size        = sizeof(k_sdf_clip_pixel_shader_hlsl) - 1;
+        desc.pixel_shader.language    = gfx::ShaderLanguage::HLSL;
+        desc.pixel_shader.entry_point = "main";
+        desc.pixel_shader.is_source   = true;
+
+        fill_sdf_layout(desc);
+        desc.enable_blend    = false;
+        desc.enable_depth    = false;
+        desc.stencil_mode    = gfx::StencilMode::ClipWrite;
+
+        sdf_clip_write_pipeline_ = device_->create_pipeline(desc);
+        if (!sdf_clip_write_pipeline_) return false;
+    }
+
+    // ── 2. SDF ClipErase 管线（弹出裁剪层：DecrSat 写入模板，禁止颜色输出）─
+
+    {
+        gfx::PipelineDesc desc{};
+        desc.vertex_shader.data        = k_sdf_vertex_shader_hlsl;
+        desc.vertex_shader.size        = sizeof(k_sdf_vertex_shader_hlsl) - 1;
+        desc.vertex_shader.language    = gfx::ShaderLanguage::HLSL;
+        desc.vertex_shader.entry_point = "main";
+        desc.vertex_shader.is_source   = true;
+
+        desc.pixel_shader.data        = k_sdf_clip_pixel_shader_hlsl;
+        desc.pixel_shader.size        = sizeof(k_sdf_clip_pixel_shader_hlsl) - 1;
+        desc.pixel_shader.language    = gfx::ShaderLanguage::HLSL;
+        desc.pixel_shader.entry_point = "main";
+        desc.pixel_shader.is_source   = true;
+
+        fill_sdf_layout(desc);
+        desc.enable_blend    = false;
+        desc.enable_depth    = false;
+        desc.stencil_mode    = gfx::StencilMode::ClipErase;
+
+        sdf_clip_erase_pipeline_ = device_->create_pipeline(desc);
+        if (!sdf_clip_erase_pipeline_) return false;
+    }
+
+    // ── 3. SDF ClipTest 管线（裁剪状态下普通 SDF 绘制：Equal 测试，Keep）────
+
+    {
+        gfx::PipelineDesc desc{};
+        desc.vertex_shader.data        = k_sdf_vertex_shader_hlsl;
+        desc.vertex_shader.size        = sizeof(k_sdf_vertex_shader_hlsl) - 1;
+        desc.vertex_shader.language    = gfx::ShaderLanguage::HLSL;
+        desc.vertex_shader.entry_point = "main";
+        desc.vertex_shader.is_source   = true;
+
+        desc.pixel_shader.data        = k_sdf_pixel_shader_hlsl;
+        desc.pixel_shader.size        = sizeof(k_sdf_pixel_shader_hlsl) - 1;
+        desc.pixel_shader.language    = gfx::ShaderLanguage::HLSL;
+        desc.pixel_shader.entry_point = "main";
+        desc.pixel_shader.is_source   = true;
+
+        fill_sdf_layout(desc);
+        desc.enable_blend    = true;   // 预乘 Alpha 混合（正常颜色输出）
+        desc.enable_depth    = false;
+        desc.stencil_mode    = gfx::StencilMode::ClipTest;
+
+        sdf_clip_test_pipeline_ = device_->create_pipeline(desc);
+        if (!sdf_clip_test_pipeline_) return false;
+    }
+
+    // ── 4. 文字 ClipTest 管线（裁剪状态下文字渲染）───────────────────────────
+
+    {
+        gfx::PipelineDesc desc{};
+        desc.vertex_shader.data        = k_text_vertex_shader_hlsl;
+        desc.vertex_shader.size        = sizeof(k_text_vertex_shader_hlsl) - 1;
+        desc.vertex_shader.language    = gfx::ShaderLanguage::HLSL;
+        desc.vertex_shader.entry_point = "main";
+        desc.vertex_shader.is_source   = true;
+
+        desc.pixel_shader.data        = k_text_pixel_shader_hlsl;
+        desc.pixel_shader.size        = sizeof(k_text_pixel_shader_hlsl) - 1;
+        desc.pixel_shader.language    = gfx::ShaderLanguage::HLSL;
+        desc.pixel_shader.entry_point = "main";
+        desc.pixel_shader.is_source   = true;
+
+        // POSITION (float2) — offset 0
+        desc.vertex_elements[0].semantic       = gfx::VertexSemantic::Position;
+        desc.vertex_elements[0].semantic_index = 0;
+        desc.vertex_elements[0].format         = gfx::VertexElementFormat::Float2;
+        desc.vertex_elements[0].slot           = 0;
+        desc.vertex_elements[0].offset         = 0;
+        // TEXCOORD0 (float2) — offset 8
+        desc.vertex_elements[1].semantic       = gfx::VertexSemantic::TexCoord;
+        desc.vertex_elements[1].semantic_index = 0;
+        desc.vertex_elements[1].format         = gfx::VertexElementFormat::Float2;
+        desc.vertex_elements[1].slot           = 0;
+        desc.vertex_elements[1].offset         = offsetof(TextVertex, u);
+        // COLOR (float4) — offset 16
+        desc.vertex_elements[2].semantic       = gfx::VertexSemantic::Color;
+        desc.vertex_elements[2].semantic_index = 0;
+        desc.vertex_elements[2].format         = gfx::VertexElementFormat::Float4;
+        desc.vertex_elements[2].slot           = 0;
+        desc.vertex_elements[2].offset         = offsetof(TextVertex, r);
+
+        desc.vertex_element_count = 3;
+        desc.vertex_stride        = sizeof(TextVertex);
+        desc.enable_blend         = true;
+        desc.enable_depth         = false;
+        desc.stencil_mode         = gfx::StencilMode::ClipTest;
+
+        text_clip_test_pipeline_ = device_->create_pipeline(desc);
+        if (!text_clip_test_pipeline_) return false;
+    }
+
+    // ── 5. 折线 ClipTest 管线（裁剪状态下折线描边绘制）──────────────────────
+
+    {
+        gfx::PipelineDesc desc{};
+        desc.vertex_shader.data        = k_vertex_shader_hlsl;
+        desc.vertex_shader.size        = sizeof(k_vertex_shader_hlsl) - 1;
+        desc.vertex_shader.language    = gfx::ShaderLanguage::HLSL;
+        desc.vertex_shader.entry_point = "main";
+        desc.vertex_shader.is_source   = true;
+
+        desc.pixel_shader.data        = k_pixel_shader_hlsl;
+        desc.pixel_shader.size        = sizeof(k_pixel_shader_hlsl) - 1;
+        desc.pixel_shader.language    = gfx::ShaderLanguage::HLSL;
+        desc.pixel_shader.entry_point = "main";
+        desc.pixel_shader.is_source   = true;
+
+        desc.vertex_elements[0].semantic       = gfx::VertexSemantic::Position;
+        desc.vertex_elements[0].semantic_index = 0;
+        desc.vertex_elements[0].format         = gfx::VertexElementFormat::Float2;
+        desc.vertex_elements[0].slot           = 0;
+        desc.vertex_elements[0].offset         = 0;
+        desc.vertex_elements[1].semantic       = gfx::VertexSemantic::Color;
+        desc.vertex_elements[1].semantic_index = 0;
+        desc.vertex_elements[1].format         = gfx::VertexElementFormat::Float4;
+        desc.vertex_elements[1].slot           = 0;
+        desc.vertex_elements[1].offset         = sizeof(float) * 2;
+
+        desc.vertex_element_count = 2;
+        desc.vertex_stride        = sizeof(PaintVertex);
+        desc.enable_blend         = true;
+        desc.enable_depth         = false;
+        desc.stencil_mode         = gfx::StencilMode::ClipTest;
+
+        solid_clip_test_pipeline_ = device_->create_pipeline(desc);
+        if (!solid_clip_test_pipeline_) return false;
+    }
+
+    return true;
+}
+
+bool RhiRenderer::ensure_stencil_texture(gfx::ITexture* target) {
+    const uint32_t w = target->width();
+    const uint32_t h = target->height();
+
+    // 若尺寸未变且已存在，直接复用
+    if (clip_stencil_ &&
+        clip_stencil_->width()  == w &&
+        clip_stencil_->height() == h) {
+        return true;
+    }
+
+    // 创建 D24_UNorm_S8_UInt 深度模板纹理（DepthStencil 绑定）
+    gfx::TextureDesc ds_desc{};
+    ds_desc.width      = w;
+    ds_desc.height     = h;
+    ds_desc.format     = gfx::PixelFormat::D24_UNorm_S8_UInt;
+    ds_desc.bind_flags = gfx::TextureBindFlags::DepthStencil;
+    ds_desc.mip_levels = 1;
+    ds_desc.array_size = 1;
+
+    clip_stencil_ = device_->create_texture(ds_desc);
+    return clip_stencil_ != nullptr;
 }
 
 // ── 帧生命周期 ────────────────────────────────────────────────────────────────
@@ -2124,9 +2490,20 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
     auto viewport_cb = device_->create_buffer(cb_desc, &cb_data);
     if (!viewport_cb) return;
 
-    // ── 3. 设置全局渲染状态（渲染目标 + 视口）────────────────────────────
+    // ── 3. 设置全局渲染状态（渲染目标 + 视口 + 模板缓冲）────────────────────
 
-    cmd_list_->set_render_target(target, nullptr);
+    // 确保裁剪模板纹理就绪（懒创建，尺寸与渲染目标一致）
+    const bool stencil_ok = ensure_stencil_texture(target);
+
+    // 设置主渲染目标（若模板纹理可用则同时绑定，否则无模板）
+    cmd_list_->set_render_target(
+        target,
+        stencil_ok ? clip_stencil_.get() : nullptr);
+
+    // 若模板纹理可用，清除模板值为 0（每帧开始时重置所有裁剪状态）
+    if (stencil_ok) {
+        cmd_list_->clear_depth_stencil(clip_stencil_.get(), 1.0f, 0);
+    }
 
     gfx::Viewport viewport{};
     viewport.x         = 0.0f;
@@ -2137,9 +2514,133 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
     viewport.max_depth = 1.0f;
     cmd_list_->set_viewport(viewport);
 
-    // ── 4. 逐命令处理（每命令单独 DrawCall，保证绘制顺序）───────────────
+    // ── 4. 裁剪状态跟踪变量 ─────────────────────────────────────────────────
+
+    // clip_depth：当前活跃裁剪层深度（0 = 无裁剪，1 = 一层裁剪，依此类推）
+    // clip_stack：已压入的 ClipPush* DrawCmd 列表（ClipPop 时弹出并重绘同一形状）
+    uint32_t clip_depth = 0;
+    containers::Vector<DrawCmd> clip_stack;
+
+    // 辅助函数：根据给定的 ClipPush* DrawCmd 上传 PolygonVertsCB 并设置多边形裁剪参数
+    // 仅当命令为 ClipPushPolygon 时需要绑定 b1 槽；其他类型返回 nullptr
+    auto make_clip_polygon_cb = [&](const DrawCmd& clip_cmd) -> core::OwnedPtr<gfx::IBuffer> {
+        if (clip_cmd.kind != DrawCmdKind::ClipPushPolygon) return nullptr;
+        if (clip_cmd.path_index >= static_cast<uint32_t>(dl.paths().size())) return nullptr;
+
+        const Path& poly_path = dl.paths()[clip_cmd.path_index];
+        containers::Vector<math::Vec2> poly_verts;
+        for (const auto& pc : poly_path.cmds()) {
+            if (pc.kind == PathCmdKind::MoveTo || pc.kind == PathCmdKind::LineTo) {
+                poly_verts.push_back(pc.pt[0]);
+            }
+        }
+        const int poly_n = static_cast<int>(poly_verts.size());
+        if (poly_n < 3 || poly_n > 64) return nullptr;
+
+        const float cx = clip_cmd.pt_a.x;
+        const float cy = clip_cmd.pt_a.y;
+
+        PolygonVertsCB poly_cb{};
+        poly_cb.vert_count = poly_n;
+        poly_cb.pad[0] = poly_cb.pad[1] = poly_cb.pad[2] = 0.0f;
+        for (int k = 0; k < poly_n; ++k) {
+            poly_cb.verts[k][0] = poly_verts[k].x - cx;
+            poly_cb.verts[k][1] = poly_verts[k].y - cy;
+            poly_cb.verts[k][2] = 0.0f;
+            poly_cb.verts[k][3] = 0.0f;
+        }
+
+        gfx::BufferDesc cb_desc{};
+        cb_desc.size       = sizeof(PolygonVertsCB);
+        cb_desc.stride     = 0;
+        cb_desc.bind_flags = gfx::BufferBindFlags::Constant;
+        return device_->create_buffer(cb_desc, &poly_cb);
+    };
+
+    // 辅助函数：为裁剪命令（ClipPushRect/RoundedRect/ComplexRoundedRect/Polygon）
+    // 生成 SDF 包围盒顶点缓冲。
+    auto make_clip_vb = [&](const DrawCmd& clip_cmd) -> core::OwnedPtr<gfx::IBuffer> {
+        containers::Vector<SdfVertex> verts;
+
+        switch (clip_cmd.kind) {
+        case DrawCmdKind::ClipPushRect: {
+            const float cx = clip_cmd.rect.x + clip_cmd.rect.width  * 0.5f;
+            const float cy = clip_cmd.rect.y + clip_cmd.rect.height * 0.5f;
+            const float hw = clip_cmd.rect.width  * 0.5f;
+            const float hh = clip_cmd.rect.height * 0.5f;
+            push_sdf_quad_vertices(verts, cx, cy, hw, hh, 1.0f,
+                0.0f, 0.0f, 0.0f, 1.0f,  // 颜色占位（ColorWriteMask=0 不输出）
+                0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+            break;
+        }
+        case DrawCmdKind::ClipPushRoundedRect: {
+            const float cx = clip_cmd.rrect.rect.x + clip_cmd.rrect.rect.width  * 0.5f;
+            const float cy = clip_cmd.rrect.rect.y + clip_cmd.rrect.rect.height * 0.5f;
+            const float hw = clip_cmd.rrect.rect.width  * 0.5f;
+            const float hh = clip_cmd.rrect.rect.height * 0.5f;
+            const float rad = std::min({clip_cmd.rrect.radius_x, clip_cmd.rrect.radius_y, hw, hh});
+            push_sdf_quad_vertices(verts, cx, cy, hw, hh, 1.0f,
+                0.0f, 0.0f, 0.0f, 1.0f,
+                1.0f, rad, 0.0f, 0.0f, 0.0f, 0.0f);
+            break;
+        }
+        case DrawCmdKind::ClipPushComplexRoundedRect: {
+            const float cx = clip_cmd.complex_rrect.rect.x + clip_cmd.complex_rrect.rect.width  * 0.5f;
+            const float cy = clip_cmd.complex_rrect.rect.y + clip_cmd.complex_rrect.rect.height * 0.5f;
+            const float hw = clip_cmd.complex_rrect.rect.width  * 0.5f;
+            const float hh = clip_cmd.complex_rrect.rect.height * 0.5f;
+            const auto& radii = clip_cmd.complex_rrect.radii;
+            const float r_br = std::min(std::min(radii.bottom_right.x, radii.bottom_right.y), std::min(hw, hh));
+            const float r_tr = std::min(std::min(radii.top_right.x,    radii.top_right.y),    std::min(hw, hh));
+            const float r_bl = std::min(std::min(radii.bottom_left.x,  radii.bottom_left.y),  std::min(hw, hh));
+            const float r_tl = std::min(std::min(radii.top_left.x,     radii.top_left.y),     std::min(hw, hh));
+            push_sdf_quad_vertices(verts, cx, cy, hw, hh, 1.0f,
+                0.0f, 0.0f, 0.0f, 1.0f,
+                2.0f, r_br, r_tr, r_bl, r_tl, 0.0f);
+            break;
+        }
+        case DrawCmdKind::ClipPushPolygon: {
+            const float cx = clip_cmd.pt_a.x;
+            const float cy = clip_cmd.pt_a.y;
+            const float hw = clip_cmd.pt_b.x;
+            const float hh = clip_cmd.pt_b.y;
+            push_sdf_quad_vertices(verts, cx, cy, hw, hh, 1.0f,
+                0.0f, 0.0f, 0.0f, 1.0f,
+                10.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+            break;
+        }
+        default:
+            return nullptr;
+        }
+
+        if (verts.empty()) return nullptr;
+
+        gfx::BufferDesc vb{};
+        vb.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
+        vb.stride     = sizeof(SdfVertex);
+        vb.bind_flags = gfx::BufferBindFlags::Vertex;
+        return device_->create_buffer(vb, verts.data());
+    };
+
+    // ── 5. 逐命令处理（每命令单独 DrawCall，保证绘制顺序）───────────────
 
     for (const DrawCmd& cmd : cmds) {
+
+        // ── 裁剪状态辅助：预选管线，ClipPush*/ClipPop 分支自行覆盖 ──────────
+        //
+        // 当 clip_depth > 0 且模板纹理可用时：
+        //   - 预先调用 set_stencil_ref(clip_depth)，使后续 draw() 以正确参考值通过等式测试
+        //   - SDF 形状切换到 sdf_clip_test_pipeline_（Equal 测试，Keep，正常颜色输出）
+        //   - 文字切换到 text_clip_test_pipeline_（同上）
+        // ClipPush* / ClipPop 分支会覆盖 stencil_ref 并使用专用管线，不受此影响。
+        const bool in_clip = (clip_depth > 0 && stencil_ok);
+        if (in_clip) {
+            cmd_list_->set_stencil_ref(static_cast<uint8_t>(clip_depth));
+        }
+        gfx::IPipeline* const active_sdf_pl  =
+            in_clip ? sdf_clip_test_pipeline_.get() : sdf_pipeline_.get();
+        gfx::IPipeline* const active_text_pl =
+            in_clip ? text_clip_test_pipeline_.get() : text_pipeline_.get();
 
         // ── SDF 填充命令 ─────────────────────────────────────────────────
         // 填充命令支持：纯色（SolidColor）、线性渐变、径向渐变、亚克力画刷
@@ -2174,7 +2675,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             bcb.bind_flags = gfx::BufferBindFlags::Constant;
             auto brush_cb_buf = device_->create_buffer(bcb, &brush_cb_data);
 
-            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_pipeline(active_sdf_pl);
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
             if (brush_cb_buf) {
                 cmd_list_->set_constant_buffer(2, brush_cb_buf.get());
@@ -2213,7 +2714,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             auto buf = device_->create_buffer(vb, verts.data());
             if (!buf) continue;
 
-            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_pipeline(active_sdf_pl);
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
             {
                 const BrushDataCB brush_cb_data = make_brush_cb(cmd.brush, cx, cy, hw, hh);
@@ -2258,7 +2759,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             auto buf = device_->create_buffer(vb, verts.data());
             if (!buf) continue;
 
-            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_pipeline(active_sdf_pl);
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
             {
                 const BrushDataCB brush_cb_data = make_brush_cb(cmd.brush, cx, cy, hw, hh);
@@ -2299,7 +2800,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             auto buf = device_->create_buffer(vb, verts.data());
             if (!buf) continue;
 
-            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_pipeline(active_sdf_pl);
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
             {
                 const BrushDataCB brush_cb_data = make_brush_cb(cmd.brush, cx, cy, hw, hh);
@@ -2344,7 +2845,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             auto buf = device_->create_buffer(vb, verts.data());
             if (!buf) continue;
 
-            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_pipeline(active_sdf_pl);
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
             cmd_list_->set_vertex_buffer(0, buf.get(), 0);
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
@@ -2377,7 +2878,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             auto buf = device_->create_buffer(vb, verts.data());
             if (!buf) continue;
 
-            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_pipeline(active_sdf_pl);
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
             cmd_list_->set_vertex_buffer(0, buf.get(), 0);
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
@@ -2416,7 +2917,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             auto buf2 = device_->create_buffer(vb, verts.data());
             if (!buf2) continue;
 
-            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_pipeline(active_sdf_pl);
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
             cmd_list_->set_vertex_buffer(0, buf2.get(), 0);
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
@@ -2446,7 +2947,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             auto buf = device_->create_buffer(vb, verts.data());
             if (!buf) continue;
 
-            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_pipeline(active_sdf_pl);
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
             cmd_list_->set_vertex_buffer(0, buf.get(), 0);
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
@@ -2479,7 +2980,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             auto buf = device_->create_buffer(vb, verts.data());
             if (!buf) continue;
 
-            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_pipeline(active_sdf_pl);
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
             cmd_list_->set_vertex_buffer(0, buf.get(), 0);
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
@@ -2508,7 +3009,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             auto buf = device_->create_buffer(vb, verts.data());
             if (!buf) continue;
 
-            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_pipeline(active_sdf_pl);
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
             cmd_list_->set_vertex_buffer(0, buf.get(), 0);
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
@@ -2571,7 +3072,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             auto buf6 = device_->create_buffer(vb6, verts.data());
             if (!buf6) continue;
 
-            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_pipeline(active_sdf_pl);
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
             cmd_list_->set_vertex_buffer(0, buf6.get(), 0);
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
@@ -2633,7 +3134,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             auto buf7 = device_->create_buffer(vb7, verts.data());
             if (!buf7) continue;
 
-            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_pipeline(active_sdf_pl);
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
             cmd_list_->set_vertex_buffer(0, buf7.get(), 0);
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
@@ -2723,7 +3224,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             auto buf8 = device_->create_buffer(vb8, verts.data());
             if (!buf8) continue;
 
-            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_pipeline(active_sdf_pl);
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
             cmd_list_->set_vertex_buffer(0, buf8.get(), 0);
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
@@ -2816,13 +3317,73 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             auto buf9 = device_->create_buffer(vb9, verts.data());
             if (!buf9) continue;
 
-            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_pipeline(active_sdf_pl);
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
             cmd_list_->set_vertex_buffer(0, buf9.get(), 0);
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
         }
 
         // StrokePath、ClipPushRect 等高级命令留至后续里程碑实现
+
+        // ── 裁剪状态命令（ClipPush* / ClipPop）──────────────────────────────
+
+        else if (cmd.kind == DrawCmdKind::ClipPushRect         ||
+                 cmd.kind == DrawCmdKind::ClipPushRoundedRect   ||
+                 cmd.kind == DrawCmdKind::ClipPushComplexRoundedRect ||
+                 cmd.kind == DrawCmdKind::ClipPushPolygon)
+        {
+            // 裁剪功能需要模板纹理支持；若模板纹理不可用则静默跳过
+            if (!stencil_ok) continue;
+
+            // 生成形状 SDF 包围盒顶点缓冲
+            auto clip_vb = make_clip_vb(cmd);
+            if (!clip_vb) continue;
+
+            // 多边形裁剪需要额外的顶点常量缓冲（b1 槽）
+            auto polygon_cb_buf = make_clip_polygon_cb(cmd);
+
+            // 设置模板参考值为当前裁剪深度（Equal(clip_depth) → 匹配"在所有祖先裁剪区内"的像素）
+            cmd_list_->set_stencil_ref(static_cast<uint8_t>(clip_depth));
+            // 使用 ClipWrite 管线（IncrSat 写入，禁止颜色输出）
+            cmd_list_->set_pipeline(sdf_clip_write_pipeline_.get());
+            cmd_list_->set_constant_buffer(0, viewport_cb.get());
+            if (polygon_cb_buf) {
+                cmd_list_->set_constant_buffer(1, polygon_cb_buf.get());
+            }
+            cmd_list_->set_vertex_buffer(0, clip_vb.get(), 0);
+            cmd_list_->draw(6, 1, 0, 0);  // SDF quad = 6 顶点
+
+            // 压入裁剪栈，增加裁剪深度
+            clip_stack.push_back(cmd);
+            clip_depth++;
+        }
+
+        else if (cmd.kind == DrawCmdKind::ClipPop) {
+            // 裁剪栈为空时忽略（与 save/restore 不匹配的 ClipPop 防御）
+            if (!stencil_ok || clip_stack.empty() || clip_depth == 0) continue;
+
+            // 弹出最近一次压入的裁剪命令
+            DrawCmd popped = clip_stack.back();
+            clip_stack.pop_back();
+            clip_depth--;
+
+            // 生成与压入时相同的 SDF 几何体
+            auto clip_vb = make_clip_vb(popped);
+            if (!clip_vb) continue;
+
+            auto polygon_cb_buf = make_clip_polygon_cb(popped);
+
+            // 设置模板参考值为 clip_depth+1（即被压入时的深度值，Equal(ref) → 精确撤销本层写入）
+            cmd_list_->set_stencil_ref(static_cast<uint8_t>(clip_depth + 1));
+            // 使用 ClipErase 管线（DecrSat 写入，禁止颜色输出）
+            cmd_list_->set_pipeline(sdf_clip_erase_pipeline_.get());
+            cmd_list_->set_constant_buffer(0, viewport_cb.get());
+            if (polygon_cb_buf) {
+                cmd_list_->set_constant_buffer(1, polygon_cb_buf.get());
+            }
+            cmd_list_->set_vertex_buffer(0, clip_vb.get(), 0);
+            cmd_list_->draw(6, 1, 0, 0);
+        }
 
         // ── FillPolygon / StrokePolygon（SDF 多边形）─────────────────────────
 
@@ -2888,7 +3449,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             auto poly_cb_buf = device_->create_buffer(cb_poly, &poly_cb);
             if (!poly_cb_buf) continue;
 
-            cmd_list_->set_pipeline(sdf_pipeline_.get());
+            cmd_list_->set_pipeline(active_sdf_pl);
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
             cmd_list_->set_constant_buffer(1, poly_cb_buf.get());  // 多边形顶点（b1）
             cmd_list_->set_vertex_buffer(0, poly_vb.get(), 0);
@@ -3049,7 +3610,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             auto text_vb = device_->create_buffer(vb, text_verts.data());
             if (!text_vb) continue;
 
-            cmd_list_->set_pipeline(text_pipeline_.get());
+            cmd_list_->set_pipeline(active_text_pl);
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
             cmd_list_->set_shader_resource(0, glyph_atlas_->texture());
             cmd_list_->set_vertex_buffer(0, text_vb.get(), 0);

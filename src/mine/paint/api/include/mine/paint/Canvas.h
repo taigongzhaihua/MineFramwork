@@ -95,6 +95,45 @@ public:
      */
     void clip_rect(math::Rect rect);
 
+    /**
+     * @brief 以均匀圆角矩形裁剪后续绘制内容。
+     *
+     * 支持 X/Y 独立的均匀圆角半径，四角相同。
+     * 可与 clip_rect / clip_polygon 嵌套使用，通过 save()/restore() 撤销。
+     *
+     * @param rrect 圆角矩形（rect + radius_x + radius_y）
+     */
+    void clip_rounded_rect(math::RoundedRect rrect);
+
+    /**
+     * @brief 以四角各自独立椭圆圆角矩形裁剪后续绘制内容。
+     *
+     * 每个角可独立设置 X/Y 圆角半径。
+     * 可与其他 clip_* 嵌套使用，通过 save()/restore() 撤销。
+     *
+     * @param rrect 复杂圆角矩形（rect + 四组独立 corner radii）
+     */
+    void clip_complex_rounded_rect(math::ComplexRoundedRect rrect);
+
+    /**
+     * @brief 以多边形裁剪后续绘制内容。
+     *
+     * 多边形通过顶点列表指定，至少需要 3 个顶点。内部转换为
+     * SDF 多边形并以模板缓冲实现精确像素级裁剪。
+     * 可与其他 clip_* 嵌套使用，通过 save()/restore() 撤销。
+     *
+     * @param vertices  多边形顶点列表（按顺序，不必须闭合）
+     */
+    void clip_polygon(core::Span<const math::Vec2> vertices);
+
+    /**
+     * @brief 弹出最近一次压入的裁剪区域。
+     *
+     * 与 clip_rect / clip_rounded_rect / clip_complex_rounded_rect /
+     * clip_polygon 配套调用。也可通过 save()/restore() 自动撤销。
+     */
+    void clip_pop();
+
     // ── 填充命令 ────────────────────────────────────────────────────────
 
     /// 填充矩形。

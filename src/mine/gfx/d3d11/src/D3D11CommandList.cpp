@@ -153,6 +153,19 @@ void D3D11CommandList::set_scissor(const ScissorRect& rect) {
     deferred_ctx_->RSSetScissorRects(1, &scissor);
 }
 
+void D3D11CommandList::set_stencil_ref(uint8_t ref) {
+    if (!deferred_ctx_ || !recording_) {
+        return;
+    }
+    cur_stencil_ref_ = ref;
+    // 若已绑定深度/模板状态对象，立即重新应用（使新的 ref 值生效）
+    if (cur_depth_stencil_state_ != nullptr) {
+        deferred_ctx_->OMSetDepthStencilState(
+            cur_depth_stencil_state_,
+            static_cast<UINT>(ref));
+    }
+}
+
 // ── 绘制相关（M0 阶段仅支持基础绑定，完整绘制在 M0.3 实现）─────────────────
 
 void D3D11CommandList::set_pipeline(IPipeline* pipeline) {
@@ -175,8 +188,11 @@ void D3D11CommandList::set_pipeline(IPipeline* pipeline) {
     deferred_ctx_->OMSetBlendState(d3d_pipeline->blend_state(), nullptr, 0xFFFFFFFF);
     // 绑定光栅化状态
     deferred_ctx_->RSSetState(d3d_pipeline->rasterizer_state());
-    // 绑定深度/模板状态（模板参考值 0）
-    deferred_ctx_->OMSetDepthStencilState(d3d_pipeline->depth_stencil_state(), 0);
+    // 绑定深度/模板状态，同时传入当前模板参考值（cur_stencil_ref_）
+    cur_depth_stencil_state_ = d3d_pipeline->depth_stencil_state();
+    deferred_ctx_->OMSetDepthStencilState(
+        cur_depth_stencil_state_,
+        static_cast<UINT>(cur_stencil_ref_));
 }
 
 void D3D11CommandList::set_constant_buffer(uint32_t slot, IBuffer* buffer) {

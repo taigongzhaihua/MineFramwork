@@ -5,6 +5,25 @@
 ## [Unreleased]
 
 ### Added
+- **paint（裁剪系统）**：新增基于 D3D11 模板缓冲（Stencil Buffer）的 SDF 嵌套裁剪系统：
+  - `Canvas::clip_rect(Rect)`：压入矩形裁剪区域
+  - `Canvas::clip_rounded_rect(RoundedRect)`：压入均匀圆角矩形裁剪区域
+  - `Canvas::clip_complex_rounded_rect(ComplexRoundedRect)`：压入四角独立圆角矩形裁剪区域
+  - `Canvas::clip_polygon(Span<const Vec2>)`：压入任意多边形裁剪区域（凸/凹均支持，最多 64 顶点）
+  - `Canvas::clip_pop()`：弹出最近一次压入的裁剪区域
+  - 支持嵌套裁剪（基于 IncrSat/DecrSat 模板操作，最大嵌套深度 255）
+  - 新增 `k_sdf_clip_pixel_shader_hlsl`（SDF clip(-d) 裁剪像素着色器）
+  - 新增 5 个裁剪管线变体（`sdf_clip_write`、`sdf_clip_erase`、`sdf_clip_test`、`text_clip_test`、`solid_clip_test`）
+  - `render()` 绘制循环自动按 `clip_depth` 切换到对应 ClipTest 管线变体，对所有形状/文字命令生效
+
+- **gfx.rhi / gfx.d3d11（接口扩展）**：
+  - `StencilMode` 枚举（None / ClipWrite / ClipTest / ClipErase）及 `PipelineDesc.stencil_mode` 字段
+  - `ICommandList::set_stencil_ref(uint8_t ref)` 接口（D3D11 后端已实现）
+  - `D3D11Pipeline` 支持四种深度/模板状态的完整创建路径
+
+- **samples（样例更新）**：
+  - `00-hello-rect`：增加 2 行新演示（行14-15）：矩形裁剪/圆角矩形裁剪/四角独立圆角裁剪/三角形多边形裁剪
+
 - **paint（渐变与亚克力画刷）**：新增多种画刷类型（M0 阶段）：
   - `BrushKind::LinearGradient`：线性渐变画刷，起点/终点使用归一化坐标 [0,1]，最多 4 个色标
   - `BrushKind::RadialGradient`：径向渐变画刷，支持 `inner_radius` 实现环形渐变效果

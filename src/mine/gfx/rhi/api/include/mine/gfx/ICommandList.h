@@ -72,6 +72,16 @@ public:
     /// 设置裁剪矩形
     virtual void set_scissor(const ScissorRect& rect) = 0;
 
+    /**
+     * @brief 动态设置模板参考值。
+     *
+     * 在调用 set_pipeline() 之后或之前均可调用，最终在下一次 draw() 时生效。
+     * 通常在 ClipPush（ref=当前裁剪深度）和 ClipErase（ref=当前裁剪深度+1）时设置。
+     *
+     * @param ref  模板参考值（0–255）
+     */
+    virtual void set_stencil_ref(uint8_t ref) = 0;
+
     // ── 绘制（M0 阶段仅声明接口，后续补充实现）────────────────────────────
 
     /**

@@ -53,6 +53,55 @@ void Canvas::clip_rect(math::Rect rect) {
     push(cmd);
 }
 
+void Canvas::clip_rounded_rect(math::RoundedRect rrect) {
+    DrawCmd cmd;
+    cmd.kind  = DrawCmdKind::ClipPushRoundedRect;
+    cmd.rrect = rrect;
+    push(cmd);
+}
+
+void Canvas::clip_complex_rounded_rect(math::ComplexRoundedRect rrect) {
+    DrawCmd cmd;
+    cmd.kind          = DrawCmdKind::ClipPushComplexRoundedRect;
+    cmd.complex_rrect = rrect;
+    push(cmd);
+}
+
+void Canvas::clip_polygon(core::Span<const math::Vec2> vertices) {
+    if (vertices.size() < 3) return;  // 少于 3 个顶点不构成多边形
+
+    // 计算 AABB（供渲染器确定 SDF 包围盒）
+    float min_x = vertices[0].x, min_y = vertices[0].y;
+    float max_x = vertices[0].x, max_y = vertices[0].y;
+    for (size_t i = 1; i < vertices.size(); ++i) {
+        if (vertices[i].x < min_x) min_x = vertices[i].x;
+        if (vertices[i].y < min_y) min_y = vertices[i].y;
+        if (vertices[i].x > max_x) max_x = vertices[i].x;
+        if (vertices[i].y > max_y) max_y = vertices[i].y;
+    }
+
+    // 将多边形顶点存为 Path（MoveTo + LineTo × N-1 + Close）
+    PathBuilder pb;
+    pb.move_to(vertices[0]);
+    for (size_t i = 1; i < vertices.size(); ++i) {
+        pb.line_to(vertices[i]);
+    }
+    pb.close();
+
+    DrawCmd cmd;
+    cmd.kind       = DrawCmdKind::ClipPushPolygon;
+    cmd.pt_a       = {(min_x + max_x) * 0.5f, (min_y + max_y) * 0.5f};  // AABB 中心
+    cmd.pt_b       = {(max_x - min_x) * 0.5f, (max_y - min_y) * 0.5f};  // AABB 半尺寸
+    cmd.path_index = intern_path(pb.build());
+    push(cmd);
+}
+
+void Canvas::clip_pop() {
+    DrawCmd cmd;
+    cmd.kind = DrawCmdKind::ClipPop;
+    push(cmd);
+}
+
 // ── 填充命令 ──────────────────────────────────────────────────────────────────
 
 void Canvas::fill_rect(math::Rect rect, const Brush& brush) {

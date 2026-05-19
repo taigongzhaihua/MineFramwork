@@ -1,8 +1,8 @@
 /**
  * @file main.cpp
- * @brief 00-hello-rect 示例：mine.paint Canvas SDF 填充 + 描边命令综合演示。
+ * @brief 00-hello-rect 示例：mine.paint Canvas SDF 填充 + 描边 + 裁剪命令综合演示。
  *
- * 演示内容（2×13 网格布局，左列填充/右列描边）：
+ * 演示内容（2×15 网格布局，左列填充/右列描边）：
  *   行1 左：FillRect                      — 纯色填充矩形（绿色）
  *   行1 右：StrokeRect                    — 矩形描边（绿色，线宽 4px）
  *   行2 左：FillRoundedRect               — 均匀圆角矩形填充（蓝色，radius=20px）
@@ -29,6 +29,10 @@
  *   行12右：RadialGradient FillRect        — 径向渐变矩形（黄→红，中心向外）
  *   行13左：AcrylicBrush FillRoundedRect   — 亚克力圆角矩形（蓝色色调，30px 模糊）
  *   行13右：AcrylicBrush FillEllipse       — 亚克力椭圆（橙色色调，20px 模糊）
+ *   行14左：clip_rect + FillEllipse         — 矩形裁剪演示（截断椭圆）
+ *   行14右：clip_rounded_rect + FillRect    — 均匀圆角矩形裁剪演示
+ *   行15左：clip_complex_rounded_rect       — 四角独立圆角矩形裁剪演示
+ *   行15右：clip_polygon + FillRect         — 三角形多边形裁剪演示
  */
 
 #include <mine/platform/PlatformAbi.h>
@@ -112,7 +116,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         const float outer_pad = 20.0f;
         const float gap       = 10.0f;
         const float cw        = (W - outer_pad * 2.0f - gap) * 0.5f;
-        const float ch        = (H - outer_pad * 2.0f - gap * 12.0f) / 13.0f;
+        const float ch        = (H - outer_pad * 2.0f - gap * 14.0f) / 15.0f;
 
         const float col0 = outer_pad;
         const float col1 = outer_pad + cw + gap;
@@ -131,6 +135,8 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         const float row10 = outer_pad + (ch + gap) * 10.0f;
         const float row11 = outer_pad + (ch + gap) * 11.0f;
         const float row12 = outer_pad + (ch + gap) * 12.0f;
+        const float row13 = outer_pad + (ch + gap) * 13.0f;
+        const float row14 = outer_pad + (ch + gap) * 14.0f;
 
         const float ip = 14.0f;
         const float sw = cw - ip * 2.0f;
@@ -596,8 +602,111 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                 brush);
         }
 
+        // ── 行14 左：clip_rect + FillEllipse（矩形裁剪演示）──────────────────
+        // 压入矩形裁剪区（格子上半 60%），填充完整椭圆后弹出裁剪，
+        // 展示 clip_rect 将椭圆下部截断的效果。
+        {
+            const float x = col0, y = row13, w = cw, h = ch;
+            const float ip = 4.0f;
+            // 裁剪区域：格子上半 60% 高度（截去下 40%）
+            mine::math::Rect clip{x + ip, y + ip, w - ip * 2.0f, h * 0.6f - ip};
+            canvas.clip_rect(clip);
+            // 填充超出裁剪区的大椭圆（下部被矩形截断）
+            canvas.fill_ellipse(
+                mine::math::Vec2{x + w * 0.5f, y + h * 0.5f},
+                mine::math::Vec2{w * 0.45f, h * 0.45f},
+                mine::paint::Brush::solid(mine::math::Color{0.2f, 0.8f, 0.4f, 1.0f}));  // 绿色
+            canvas.clip_pop();
+            // 裁剪区轮廓（半透明白色，标注裁剪边界）
+            canvas.stroke_rect(clip,
+                mine::paint::Brush::solid(mine::math::Color{1.0f, 1.0f, 1.0f, 0.4f}),
+                mine::paint::Pen{1.0f});
+        }
+
+        // ── 行14 右：clip_rounded_rect + FillRect（均匀圆角矩形裁剪演示）─────
+        // 压入均匀圆角矩形裁剪区，再填充金色矩形（四角被圆角截断），
+        // 内部叠加蓝色小圆演示在裁剪区内继续绘制。
+        {
+            const float x = col1, y = row13, w = cw, h = ch;
+            const float ip = 4.0f;
+            const float radius = h * 0.3f;  // 30% 高度作为圆角半径
+            mine::math::RoundedRect clip_rrect{
+                mine::math::Rect{x + ip, y + ip, w - ip * 2.0f, h - ip * 2.0f},
+                radius, radius};
+            canvas.clip_rounded_rect(clip_rrect);
+            canvas.fill_rect(
+                mine::math::Rect{x + ip, y + ip, w - ip * 2.0f, h - ip * 2.0f},
+                mine::paint::Brush::solid(mine::math::Color{0.95f, 0.75f, 0.2f, 1.0f}));  // 金色
+            canvas.fill_ellipse(
+                mine::math::Vec2{x + w * 0.5f, y + h * 0.5f},
+                mine::math::Vec2{w * 0.25f, h * 0.25f},
+                mine::paint::Brush::solid(mine::math::Color{0.2f, 0.2f, 0.9f, 0.9f}));   // 蓝色
+            canvas.clip_pop();
+            canvas.stroke_rounded_rect(clip_rrect,
+                mine::paint::Brush::solid(mine::math::Color{1.0f, 1.0f, 1.0f, 0.4f}),
+                mine::paint::Pen{1.0f});
+        }
+
+        // ── 行15 左：clip_complex_rounded_rect（四角独立圆角矩形裁剪演示）─────
+        // 四角设置不同圆角（左上/右下大，右上/左下小），裁剪青→紫线性渐变矩形，
+        // 展示 clip_complex_rounded_rect 的复杂形状裁剪能力。
+        {
+            const float x = col0, y = row14, w = cw, h = ch;
+            const float ip = 4.0f;
+            mine::math::ComplexRoundedRect clip_crr{};
+            clip_crr.rect = mine::math::Rect{x + ip, y + ip, w - ip * 2.0f, h - ip * 2.0f};
+            clip_crr.radii.top_left.x     = clip_crr.radii.top_left.y     = h * 0.4f;
+            clip_crr.radii.top_right.x    = clip_crr.radii.top_right.y    = h * 0.1f;
+            clip_crr.radii.bottom_left.x  = clip_crr.radii.bottom_left.y  = h * 0.1f;
+            clip_crr.radii.bottom_right.x = clip_crr.radii.bottom_right.y = h * 0.4f;
+            canvas.clip_complex_rounded_rect(clip_crr);
+            mine::paint::GradientStop lgs[] = {
+                {0.0f, mine::math::Color{0.1f, 0.9f, 0.9f, 1.0f}},
+                {1.0f, mine::math::Color{0.7f, 0.1f, 0.9f, 1.0f}},
+            };
+            canvas.fill_rect(clip_crr.rect,
+                mine::paint::Brush::linear_gradient(
+                    mine::math::Vec2{0.0f, 0.5f},
+                    mine::math::Vec2{1.0f, 0.5f},
+                    mine::core::Span<mine::paint::GradientStop>(lgs, 2)));
+            canvas.clip_pop();
+            canvas.stroke_complex_rounded_rect(clip_crr,
+                mine::paint::Brush::solid(mine::math::Color{1.0f, 1.0f, 1.0f, 0.4f}),
+                mine::paint::Pen{});
+        }
+
+        // ── 行15 右：clip_polygon（等边三角形裁剪演示）───────────────────────
+        // 以等边三角形作为裁剪区域，填充橙红色矩形后仅三角形内部可见。
+        {
+            const float x = col1, y = row14, w = cw, h = ch;
+            const float ip = 8.0f;
+            const float cx = x + w * 0.5f;
+            const float cy = y + h * 0.5f;
+            const float r  = std::min(w, h) * 0.5f - ip;
+            // 等边三角形三顶点（顶点朝上）
+            mine::math::Vec2 tri_verts[3] = {
+                {cx,              cy - r},
+                {cx + r * 0.866f, cy + r * 0.5f},
+                {cx - r * 0.866f, cy + r * 0.5f},
+            };
+            canvas.clip_polygon(mine::core::Span<const mine::math::Vec2>(tri_verts, 3));
+            canvas.fill_rect(
+                mine::math::Rect{x + ip, y + ip, w - ip * 2.0f, h - ip * 2.0f},
+                mine::paint::Brush::solid(mine::math::Color{0.95f, 0.35f, 0.2f, 1.0f}));  // 橙红色
+            canvas.clip_pop();
+            // 三角形轮廓（半透明白色边框）
+            for (int k = 0; k < 3; ++k) {
+                const mine::math::Vec2& va = tri_verts[k];
+                const mine::math::Vec2& vb = tri_verts[(k + 1) % 3];
+                canvas.stroke_line(va, vb,
+                    mine::paint::Brush::solid(mine::math::Color{1.0f, 1.0f, 1.0f, 0.4f}),
+                    mine::paint::Pen{1.5f, mine::paint::LineJoin::Miter,
+                                 mine::paint::LineCap::Round, mine::paint::LineCap::Round});
+            }
+        }
+
         // ── 文字渲染演示（顶部边距区域）──────────────────────────────────────
-        // 在 10 行网格上方的 20px 留白区域绘制标题文字，展示 FreeType DrawText 命令
+        // 在 15 行网格上方的 20px 留白区域绘制标题文字
         if (font_face) {
             canvas.draw_text(
                 mine::core::StringView{"MineFramework - SDF Shapes + FreeType Text Rendering"},

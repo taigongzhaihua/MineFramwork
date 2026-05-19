@@ -203,6 +203,26 @@ struct VertexElement {
     uint32_t            offset{0};                          ///< 元素在顶点结构内的字节偏移
 };
 
+// ── 模板操作模式（用于裁剪路径）──────────────────────────────────────────────
+
+/**
+ * @brief 模板缓冲操作模式，用于形状裁剪。
+ *
+ * 裁剪工作原理（嵌套裁剪栈）：
+ *   1. 初始状态：模板缓冲全部清零
+ *   2. ClipPush：以 Equal(ref=clip_depth) 条件测试，IncrSat 写入，禁止颜色输出
+ *      只有满足"已在所有祖先裁剪区域内"的像素才被增量
+ *   3. 正常绘制：以 Equal(ref=clip_depth+1) 测试通过（仅在当前活跃裁剪区域内绘制）
+ *   4. ClipErase：以 Equal(ref=clip_depth+1) 条件测试，DecrSat 写入，禁止颜色输出
+ *      精确撤销之前的 ClipPush 增量
+ */
+enum class StencilMode : uint8_t {
+    None,       ///< 禁用模板（默认，普通绘制不受裁剪影响）
+    ClipWrite,  ///< 压入裁剪层：Equal 测试 → IncrSat 写入，禁止颜色输出
+    ClipTest,   ///< 测试裁剪层：Equal 测试 → 允许颜色输出（不写模板）
+    ClipErase,  ///< 弹出裁剪层：Equal 测试 → DecrSat 写入，禁止颜色输出
+};
+
 /// 图形管线创建描述符（M0 最小集，支持 2D 纯色渲染）
 struct PipelineDesc {
     ShaderDesc   vertex_shader;                  ///< 顶点着色器
@@ -212,6 +232,7 @@ struct PipelineDesc {
     uint32_t     vertex_stride{0};               ///< 单个顶点字节大小
     bool         enable_blend{false};            ///< 是否启用 Alpha 混合（预乘 Alpha 模式）
     bool         enable_depth{false};            ///< 是否启用深度测试（2D 渲染通常关闭）
+    StencilMode  stencil_mode{StencilMode::None};///< 模板操作模式（用于形状裁剪）
 };
 
 } // namespace mine::gfx

@@ -55,8 +55,11 @@ enum class DrawCmdKind : uint8_t {
     StrokePath,          ///< 描边任意路径（通过 path_index 引用）
 
     // ── 状态命令 ────────────────────────────────────────────────────────
-    ClipPushRect,      ///< 压入矩形裁剪区域（与当前裁剪区域取交集）
-    ClipPop,           ///< 弹出最近一次裁剪状态
+    ClipPushRect,               ///< 压入矩形裁剪区域（rect 字段）
+    ClipPushRoundedRect,        ///< 压入均匀圆角矩形裁剪区域（rrect 字段）
+    ClipPushComplexRoundedRect, ///< 压入四角独立圆角矩形裁剪区域（complex_rrect 字段）
+    ClipPushPolygon,            ///< 压入多边形裁剪区域（path_index 引用顶点；pt_a=AABB中心，pt_b=AABB半尺寸）
+    ClipPop,                    ///< 弹出最近一次裁剪状态
     TransformPush,     ///< 压入变换矩阵（与当前变换级联）
     TransformPop,      ///< 弹出最近一次变换状态
 
@@ -103,6 +106,10 @@ enum class DrawCmdKind : uint8_t {
  *                     | pt_d(P3终点)  |       |     |
  *  StrokePath         |               | ✓     | ✓   | ✓
  *  ClipPushRect       | rect          |       |     |
+ *  ClipPushRoundedRect| rrect         |       |     |
+ *  ClipPushComplexRoundedRect | complex_rrect |  |   |
+ *  ClipPushPolygon    | pt_a(AABB中心)|       |     | ✓
+ *                     | pt_b(AABB半尺寸)|     |     |
  *  ClipPop            |               |       |     |
  *  TransformPush      | transform     |       |     |
  *  TransformPop       |               |       |     |
