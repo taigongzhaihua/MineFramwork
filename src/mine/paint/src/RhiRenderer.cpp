@@ -169,6 +169,22 @@ cbuffer BrushDataCB : register(b2) {
     float4 stop_offsets;     // 色标偏移量（x=off0, y=off1, z=off2, w=off3）
 };
 
+// 裁剪 SDF 常量缓冲（b3 槽，每次裁剪状态变化时更新）
+// 最多 4 层嵌套裁剪，每层含内联顶点数据（多边形裁剪用）
+struct ClipSdfLayer {
+    float4 bounds;          // (cx, cy, half_w, half_h)：裁剪形状的中心和半尺寸（逻辑像素）
+    float4 kind_p0_p1_p2;  // (kind, p0, p1, p2)：形状类型及圆角参数
+    float4 p3_nv_pad;       // (p3, poly_vert_count_f, _, _)：左上圆角/多边形顶点数/填充
+    float4 poly_verts[16];  // 多边形顶点（xy=相对裁剪区域中心的本地坐标，zw=0）
+};
+cbuffer ClipSdfCB : register(b3) {
+    int   clip_count;   // 当前活跃裁剪层数（0=无裁剪）
+    float _cpad0;
+    float _cpad1;
+    float _cpad2;
+    ClipSdfLayer clip_layers[4];  // 最多 4 层嵌套裁剪
+};
+
 // 亚克力模糊背景纹理（t0 槽，仅亚克力 DrawCall 绑定时有效）
 Texture2D    acrylic_backdrop : register(t0);
 SamplerState acrylic_sampler  : register(s0);  // 线性双线性采样器
@@ -318,6 +334,70 @@ struct SdfPSIn {
     float4 params1 : TEXCOORD2;  // (p1, p2, p3, stroke_w)
     float4 extra   : TEXCOORD3;  // 扩展参数（圆角四边独立描边：x=r_tl, y=r_tr, z=r_br, w=r_bl）
 };
+)hlsl"
+// ── 字符串拆分（MSVC 原始字符串长度限制），以下为裁剪 SDF 辅助函数 ──────────
+R"hlsl(
+// ── 裁剪 SDF 辅助函数 ──────────────────────────────────────────────────────────
+
+// 内联多边形 SDF（使用 ClipSdfCB 层内顶点，以裁剪 AABB 中心为原点）
+// li = 裁剪层索引，nv = 多边形顶点数
+float sdClipPolygon(float2 p, int li, int nv) {
+    float d2 = dot(p - clip_layers[li].poly_verts[0].xy,
+                   p - clip_layers[li].poly_verts[0].xy);
+    float s = 1.0f;
+    [loop]
+    for (int vi = 0, vj = nv - 1; vi < nv; vj = vi, vi++) {
+        float2 vvi = clip_layers[li].poly_verts[vi].xy;
+        float2 vvj = clip_layers[li].poly_verts[vj].xy;
+        float2 e = vvj - vvi;
+        float2 w = p - vvi;
+        float2 b2 = w - e * clamp(dot(w, e) / dot(e, e), 0.0f, 1.0f);
+        d2 = min(d2, dot(b2, b2));
+        bool c0 = (p.y >= vvi.y);
+        bool c1 = (p.y <  vvj.y);
+        bool c2 = (e.x * w.y > e.y * w.x);
+        if ((c0 && c1 && c2) || (!c0 && !c1 && !c2)) s = -s;
+    }
+    return s * sqrt(d2);
+}
+
+// 评估所有裁剪层的综合覆盖率（0=完全裁剪，1=完全可见，[0,1]=抗锯齿过渡）
+// sv_pos：像素着色器 SV_Position.xy（物理像素坐标）
+float evaluate_clip_coverage(float2 sv_pos) {
+    if (clip_count <= 0) return 1.0f;
+    // 物理像素坐标 → 逻辑像素坐标（使用视口缩放比）
+    float2 lp = sv_pos * viewport_size / phys_viewport_size;
+    float coverage = 1.0f;
+    [loop]
+    for (int ci = 0; ci < clip_count; ci++) {
+        float2 cp  = lp - clip_layers[ci].bounds.xy;  // 相对裁剪中心的偏移
+        float  chw = clip_layers[ci].bounds.z;
+        float  chh = clip_layers[ci].bounds.w;
+        int    ck  = (int)(clip_layers[ci].kind_p0_p1_p2.x + 0.5f);
+        float  dc;
+        if (ck == 1) {
+            // 均匀圆角矩形
+            dc = rounded_box_sdf(cp, float2(chw, chh), clip_layers[ci].kind_p0_p1_p2.y);
+        } else if (ck == 2) {
+            // 四角独立圆角矩形（p0=r_br, p1=r_tr, p2=r_bl, p3=r_tl）
+            float r0 = clip_layers[ci].kind_p0_p1_p2.y;
+            float r1 = clip_layers[ci].kind_p0_p1_p2.z;
+            float r2 = clip_layers[ci].kind_p0_p1_p2.w;
+            float r3 = clip_layers[ci].p3_nv_pad.x;
+            dc = complex_rounded_box_sdf(cp, float2(chw, chh), float4(r0, r1, r2, r3));
+        } else if (ck == 10) {
+            // 多边形
+            int nv = clamp((int)(clip_layers[ci].p3_nv_pad.y + 0.5f), 3, 16);
+            dc = sdClipPolygon(cp, ci, nv);
+        } else {
+            // 矩形（ck == 0）
+            dc = box_sdf(cp, float2(chw, chh));
+        }
+        float fw_c = max(fwidth(dc), 0.5f);
+        coverage *= 1.0f - smoothstep(-fw_c, fw_c, dc);
+    }
+    return coverage;
+}
 
 float4 main(SdfPSIn i) : SV_Target {
     // 解包 SDF 参数
@@ -369,6 +449,7 @@ float4 main(SdfPSIn i) : SV_Target {
         float a_stroke = max(max(a_top, a_bottom), max(a_left, a_right));
         float al = a_outer * a_stroke;
         float4 c2 = i.color;
+        al *= evaluate_clip_coverage(i.pos.xy);
         return float4(c2.rgb * c2.a * al, c2.a * al);
     } else if (kind == 5) {
         // 四边不等宽 + 四角独立圆角内侧描边
@@ -432,6 +513,7 @@ float4 main(SdfPSIn i) : SV_Target {
         // 外轮廓内 且 内轮廓外 → 描边带
         float al = a_outer * (1.0f - a_inner);
         float4 c3 = i.color;
+        al *= evaluate_clip_coverage(i.pos.xy);
         return float4(c3.rgb * c3.a * al, c3.a * al);
     } else if (kind == 6) {
         // ── 线段 SDF 描边（天然抗锯齿，含独立起止端点样式）──────────────
@@ -501,6 +583,7 @@ float4 main(SdfPSIn i) : SV_Target {
         float fw6 = max(fwidth(d6), 0.5f);
         float al6 = 1.0f - smoothstep(-fw6, fw6, d6);
         float4 cs = i.color;
+        al6 *= evaluate_clip_coverage(i.pos.xy);
         return float4(cs.rgb * cs.a * al6, cs.a * al6);
     }
 )hlsl"
@@ -575,6 +658,7 @@ R"hlsl(
         float fw7 = max(fwidth(d7), 0.5f);
         float al7 = 1.0f - smoothstep(-fw7, fw7, d7);
         float4 cs7 = i.color;
+        al7 *= evaluate_clip_coverage(i.pos.xy);
         return float4(cs7.rgb * cs7.a * al7, cs7.a * al7);
     } else if (kind == 8) {
         // ── 二次贝塞尔曲线描边 SDF（IQ 解析法，支持 Flat/Round cap）────
@@ -668,6 +752,7 @@ R"hlsl(
         float fw8 = max(fwidth(d8), 0.5f);
         float al8 = 1.0f - smoothstep(-fw8, fw8, d8);
         float4 cs8 = i.color;
+        al8 *= evaluate_clip_coverage(i.pos.xy);
         return float4(cs8.rgb * cs8.a * al8, cs8.a * al8);
     } else if (kind == 9) {
         // ── 三次贝塞尔曲线描边 SDF（四区间候选 + Newton 精化）──
@@ -782,6 +867,7 @@ R"hlsl(
         float fw9 = max(fwidth(d9), 0.5f);
         float al9 = 1.0f - smoothstep(-fw9, fw9, d9);
         float4 cs9 = i.color;
+        al9 *= evaluate_clip_coverage(i.pos.xy);
         return float4(cs9.rgb * cs9.a * al9, cs9.a * al9);
     }
 )hlsl"
@@ -809,6 +895,7 @@ R"hlsl(
         }
         float4 cpoly = i.color;
         float  apre  = cpoly.a * apoly;
+        apre *= evaluate_clip_coverage(i.pos.xy);
         return float4(cpoly.rgb * apre, apre);
     } else {
         // 椭圆（half_w = X 半径, half_h = Y 半径）
@@ -870,6 +957,7 @@ R"hlsl(
     }
 
     // 预乘 Alpha 输出（匹配预乘混合模式 ONE / INV_SRC_ALPHA）
+    alpha *= evaluate_clip_coverage(i.pos.xy);
     float  a = c.a * alpha;
     return float4(c.rgb * a, a);
 }
@@ -943,6 +1031,47 @@ struct alignas(16) BrushDataCB {
     // 总大小：4+4+4+4+16+16+64+16 = 128 字节 ✓
 };
 static_assert(sizeof(BrushDataCB) == 128, "BrushDataCB 大小必须为 128 字节");
+
+// ── 裁剪 SDF 常量缓冲结构体（b3 槽，与 HLSL ClipSdfCB 内存布局完全一致）─────
+
+/// 最大嵌套裁剪层数（对应 HLSL ClipSdfCB.clip_layers 数组大小）
+static constexpr int k_max_clip_layers     = 4;
+/// 每层多边形顶点上限（对应 HLSL ClipSdfLayer.poly_verts 数组大小）
+static constexpr int k_max_clip_poly_verts = 16;
+
+/**
+ * @brief 裁剪 SDF 单层结构体（304 字节，16 字节对齐）。
+ *
+ * 与 HLSL ClipSdfLayer 内存布局完全一致：
+ *   float4 bounds          — (cx, cy, half_w, half_h) 逻辑像素坐标中心和半尺寸
+ *   float4 kind_p0_p1_p2   — (kind, p0, p1, p2) 形状类型（0=rect,1=rr,2=crr,10=poly）及参数
+ *   float4 p3_nv_pad        — (p3, poly_vert_count_f, _, _) 左上圆角/多边形顶点数
+ *   float4 poly_verts[16]  — 多边形顶点（xy=local 坐标，zw=0）
+ */
+struct alignas(16) ClipSdfLayer {
+    float cx, cy, half_w, half_h;                       ///< 裁剪形状中心和半尺寸（逻辑像素）
+    float kind, p0, p1, p2;                             ///< 形状类型及圆角参数
+    float p3, poly_vert_count_f, _pad0, _pad1;          ///< r_tl / 多边形顶点数 / 填充
+    float poly_verts[k_max_clip_poly_verts][4];          ///< 多边形顶点（xy=local，zw=0）
+    // 总大小：3 × 16 + 16 × 16 = 48 + 256 = 304 字节
+};
+static_assert(sizeof(ClipSdfLayer) == 304, "ClipSdfLayer 大小必须为 304 字节");
+
+/**
+ * @brief 裁剪 SDF 常量缓冲（1232 字节，16 字节对齐）。
+ *
+ * 与 HLSL ClipSdfCB 内存布局完全一致：
+ *   int   clip_count        — 当前活跃裁剪层数
+ *   float _pad0/1/2         — 填充
+ *   ClipSdfLayer layers[4]  — 最多 4 层嵌套裁剪
+ */
+struct alignas(16) ClipSdfCB {
+    int   clip_count;         ///< 当前活跃裁剪层数（0=无裁剪）
+    float _pad0, _pad1, _pad2;
+    ClipSdfLayer layers[k_max_clip_layers];
+    // 总大小：16 + 4 × 304 = 16 + 1216 = 1232 字节
+};
+static_assert(sizeof(ClipSdfCB) == 1232, "ClipSdfCB 大小必须为 1232 字节");
 
 // ── 文字渲染 HLSL 着色器 ──────────────────────────────────────────────────────
 
@@ -2490,20 +2619,10 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
     auto viewport_cb = device_->create_buffer(cb_desc, &cb_data);
     if (!viewport_cb) return;
 
-    // ── 3. 设置全局渲染状态（渲染目标 + 视口 + 模板缓冲）────────────────────
+    // ── 3. 设置全局渲染状态（渲染目标 + 视口）────────────────────────────────
 
-    // 确保裁剪模板纹理就绪（懒创建，尺寸与渲染目标一致）
-    const bool stencil_ok = ensure_stencil_texture(target);
-
-    // 设置主渲染目标（若模板纹理可用则同时绑定，否则无模板）
-    cmd_list_->set_render_target(
-        target,
-        stencil_ok ? clip_stencil_.get() : nullptr);
-
-    // 若模板纹理可用，清除模板值为 0（每帧开始时重置所有裁剪状态）
-    if (stencil_ok) {
-        cmd_list_->clear_depth_stencil(clip_stencil_.get(), 1.0f, 0);
-    }
+    // 直接绑定渲染目标（无模板）：SDF 软裁剪通过 ClipSdfCB（b3 槽）在像素着色器中实现
+    cmd_list_->set_render_target(target, nullptr);
 
     gfx::Viewport viewport{};
     viewport.x         = 0.0f;
@@ -2514,113 +2633,24 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
     viewport.max_depth = 1.0f;
     cmd_list_->set_viewport(viewport);
 
-    // ── 4. 裁剪状态跟踪变量 ─────────────────────────────────────────────────
+    // ── 4. 裁剪 SDF 常量缓冲（b3 槽）初始化 ─────────────────────────────────
+    //
+    // clip_sdf_data 维护 CPU 端裁剪层状态；ClipPush*/ClipPop 命令更新其内容并重建 GPU 缓冲。
+    // 初始状态 clip_count=0（无裁剪），pixel shader 中 evaluate_clip_coverage 直接返回 1.0。
+    ClipSdfCB clip_sdf_data{};
+    clip_sdf_data.clip_count = 0;
 
-    // clip_depth：当前活跃裁剪层深度（0 = 无裁剪，1 = 一层裁剪，依此类推）
-    // clip_stack：已压入的 ClipPush* DrawCmd 列表（ClipPop 时弹出并重绘同一形状）
-    uint32_t clip_depth = 0;
-    containers::Vector<DrawCmd> clip_stack;
-
-    // 辅助函数：根据给定的 ClipPush* DrawCmd 上传 PolygonVertsCB 并设置多边形裁剪参数
-    // 仅当命令为 ClipPushPolygon 时需要绑定 b1 槽；其他类型返回 nullptr
-    auto make_clip_polygon_cb = [&](const DrawCmd& clip_cmd) -> core::OwnedPtr<gfx::IBuffer> {
-        if (clip_cmd.kind != DrawCmdKind::ClipPushPolygon) return nullptr;
-        if (clip_cmd.path_index >= static_cast<uint32_t>(dl.paths().size())) return nullptr;
-
-        const Path& poly_path = dl.paths()[clip_cmd.path_index];
-        containers::Vector<math::Vec2> poly_verts;
-        for (const auto& pc : poly_path.cmds()) {
-            if (pc.kind == PathCmdKind::MoveTo || pc.kind == PathCmdKind::LineTo) {
-                poly_verts.push_back(pc.pt[0]);
-            }
-        }
-        const int poly_n = static_cast<int>(poly_verts.size());
-        if (poly_n < 3 || poly_n > 64) return nullptr;
-
-        const float cx = clip_cmd.pt_a.x;
-        const float cy = clip_cmd.pt_a.y;
-
-        PolygonVertsCB poly_cb{};
-        poly_cb.vert_count = poly_n;
-        poly_cb.pad[0] = poly_cb.pad[1] = poly_cb.pad[2] = 0.0f;
-        for (int k = 0; k < poly_n; ++k) {
-            poly_cb.verts[k][0] = poly_verts[k].x - cx;
-            poly_cb.verts[k][1] = poly_verts[k].y - cy;
-            poly_cb.verts[k][2] = 0.0f;
-            poly_cb.verts[k][3] = 0.0f;
-        }
-
-        gfx::BufferDesc cb_desc{};
-        cb_desc.size       = sizeof(PolygonVertsCB);
-        cb_desc.stride     = 0;
-        cb_desc.bind_flags = gfx::BufferBindFlags::Constant;
-        return device_->create_buffer(cb_desc, &poly_cb);
+    auto rebuild_clip_sdf_cb = [&]() -> core::OwnedPtr<gfx::IBuffer> {
+        gfx::BufferDesc clip_cb_desc{};
+        clip_cb_desc.size       = sizeof(ClipSdfCB);
+        clip_cb_desc.stride     = 0;
+        clip_cb_desc.bind_flags = gfx::BufferBindFlags::Constant;
+        return device_->create_buffer(clip_cb_desc, &clip_sdf_data);
     };
 
-    // 辅助函数：为裁剪命令（ClipPushRect/RoundedRect/ComplexRoundedRect/Polygon）
-    // 生成 SDF 包围盒顶点缓冲。
-    auto make_clip_vb = [&](const DrawCmd& clip_cmd) -> core::OwnedPtr<gfx::IBuffer> {
-        containers::Vector<SdfVertex> verts;
-
-        switch (clip_cmd.kind) {
-        case DrawCmdKind::ClipPushRect: {
-            const float cx = clip_cmd.rect.x + clip_cmd.rect.width  * 0.5f;
-            const float cy = clip_cmd.rect.y + clip_cmd.rect.height * 0.5f;
-            const float hw = clip_cmd.rect.width  * 0.5f;
-            const float hh = clip_cmd.rect.height * 0.5f;
-            push_sdf_quad_vertices(verts, cx, cy, hw, hh, 1.0f,
-                0.0f, 0.0f, 0.0f, 1.0f,  // 颜色占位（ColorWriteMask=0 不输出）
-                0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-            break;
-        }
-        case DrawCmdKind::ClipPushRoundedRect: {
-            const float cx = clip_cmd.rrect.rect.x + clip_cmd.rrect.rect.width  * 0.5f;
-            const float cy = clip_cmd.rrect.rect.y + clip_cmd.rrect.rect.height * 0.5f;
-            const float hw = clip_cmd.rrect.rect.width  * 0.5f;
-            const float hh = clip_cmd.rrect.rect.height * 0.5f;
-            const float rad = std::min({clip_cmd.rrect.radius_x, clip_cmd.rrect.radius_y, hw, hh});
-            push_sdf_quad_vertices(verts, cx, cy, hw, hh, 1.0f,
-                0.0f, 0.0f, 0.0f, 1.0f,
-                1.0f, rad, 0.0f, 0.0f, 0.0f, 0.0f);
-            break;
-        }
-        case DrawCmdKind::ClipPushComplexRoundedRect: {
-            const float cx = clip_cmd.complex_rrect.rect.x + clip_cmd.complex_rrect.rect.width  * 0.5f;
-            const float cy = clip_cmd.complex_rrect.rect.y + clip_cmd.complex_rrect.rect.height * 0.5f;
-            const float hw = clip_cmd.complex_rrect.rect.width  * 0.5f;
-            const float hh = clip_cmd.complex_rrect.rect.height * 0.5f;
-            const auto& radii = clip_cmd.complex_rrect.radii;
-            const float r_br = std::min(std::min(radii.bottom_right.x, radii.bottom_right.y), std::min(hw, hh));
-            const float r_tr = std::min(std::min(radii.top_right.x,    radii.top_right.y),    std::min(hw, hh));
-            const float r_bl = std::min(std::min(radii.bottom_left.x,  radii.bottom_left.y),  std::min(hw, hh));
-            const float r_tl = std::min(std::min(radii.top_left.x,     radii.top_left.y),     std::min(hw, hh));
-            push_sdf_quad_vertices(verts, cx, cy, hw, hh, 1.0f,
-                0.0f, 0.0f, 0.0f, 1.0f,
-                2.0f, r_br, r_tr, r_bl, r_tl, 0.0f);
-            break;
-        }
-        case DrawCmdKind::ClipPushPolygon: {
-            const float cx = clip_cmd.pt_a.x;
-            const float cy = clip_cmd.pt_a.y;
-            const float hw = clip_cmd.pt_b.x;
-            const float hh = clip_cmd.pt_b.y;
-            push_sdf_quad_vertices(verts, cx, cy, hw, hh, 1.0f,
-                0.0f, 0.0f, 0.0f, 1.0f,
-                10.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-            break;
-        }
-        default:
-            return nullptr;
-        }
-
-        if (verts.empty()) return nullptr;
-
-        gfx::BufferDesc vb{};
-        vb.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
-        vb.stride     = sizeof(SdfVertex);
-        vb.bind_flags = gfx::BufferBindFlags::Vertex;
-        return device_->create_buffer(vb, verts.data());
-    };
+    // 创建初始 ClipSdfCB（clip_count=0）并绑定至 b3；后续 ClipPush/Pop 更新后重绑
+    auto clip_sdf_cb = rebuild_clip_sdf_cb();
+    if (clip_sdf_cb) cmd_list_->set_constant_buffer(3, clip_sdf_cb.get());
 
     // ── 变换状态（save/restore/translate/scale/rotate 使用）─────────────
 
@@ -2679,21 +2709,10 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             continue;
         }
 
-        // ── 裁剪状态辅助：预选管线，ClipPush*/ClipPop 分支自行覆盖 ──────────
-        //
-        // 当 clip_depth > 0 且模板纹理可用时：
-        //   - 预先调用 set_stencil_ref(clip_depth)，使后续 draw() 以正确参考值通过等式测试
-        //   - SDF 形状切换到 sdf_clip_test_pipeline_（Equal 测试，Keep，正常颜色输出）
-        //   - 文字切换到 text_clip_test_pipeline_（同上）
-        // ClipPush* / ClipPop 分支会覆盖 stencil_ref 并使用专用管线，不受此影响。
-        const bool in_clip = (clip_depth > 0 && stencil_ok);
-        if (in_clip) {
-            cmd_list_->set_stencil_ref(static_cast<uint8_t>(clip_depth));
-        }
-        gfx::IPipeline* const active_sdf_pl  =
-            in_clip ? sdf_clip_test_pipeline_.get() : sdf_pipeline_.get();
-        gfx::IPipeline* const active_text_pl =
-            in_clip ? text_clip_test_pipeline_.get() : text_pipeline_.get();
+        // ── 裁剪状态辅助：SDF 软裁剪通过 ClipSdfCB（b3 槽）在像素着色器中实现 ──
+        // 始终使用主管线；裁剪效果由 evaluate_clip_coverage() 在每个像素处计算。
+        gfx::IPipeline* const active_sdf_pl  = sdf_pipeline_.get();
+        gfx::IPipeline* const active_text_pl = text_pipeline_.get();
 
         // ── SDF 填充命令 ─────────────────────────────────────────────────
         // 填充命令支持：纯色（SolidColor）、线性渐变、径向渐变、亚克力画刷
@@ -3393,63 +3412,96 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
         // StrokePath、ClipPushRect 等高级命令留至后续里程碑实现
 
         // ── 裁剪状态命令（ClipPush* / ClipPop）──────────────────────────────
+        //
+        // 不再使用模板缓冲 + ClipWrite/ClipErase 管线；改为直接填写 ClipSdfCB（b3 槽），
+        // 由主 SDF 像素着色器的 evaluate_clip_coverage() 在每像素处进行平滑 SDF 评估，
+        // 消除了原 stencil 方案中裁剪边缘的锯齿问题。
 
         else if (cmd.kind == DrawCmdKind::ClipPushRect         ||
                  cmd.kind == DrawCmdKind::ClipPushRoundedRect   ||
                  cmd.kind == DrawCmdKind::ClipPushComplexRoundedRect ||
                  cmd.kind == DrawCmdKind::ClipPushPolygon)
         {
-            // 裁剪功能需要模板纹理支持；若模板纹理不可用则静默跳过
-            if (!stencil_ok) continue;
+            // 超出最大层数则静默跳过（不影响已有裁剪状态）
+            if (clip_sdf_data.clip_count >= k_max_clip_layers) continue;
 
-            // 生成形状 SDF 包围盒顶点缓冲
-            auto clip_vb = make_clip_vb(cmd);
-            if (!clip_vb) continue;
+            // 填写新的裁剪层数据
+            ClipSdfLayer& layer = clip_sdf_data.layers[clip_sdf_data.clip_count];
+            memset(&layer, 0, sizeof(ClipSdfLayer));
 
-            // 多边形裁剪需要额外的顶点常量缓冲（b1 槽）
-            auto polygon_cb_buf = make_clip_polygon_cb(cmd);
-
-            // 设置模板参考值为当前裁剪深度（Equal(clip_depth) → 匹配"在所有祖先裁剪区内"的像素）
-            cmd_list_->set_stencil_ref(static_cast<uint8_t>(clip_depth));
-            // 使用 ClipWrite 管线（IncrSat 写入，禁止颜色输出）
-            cmd_list_->set_pipeline(sdf_clip_write_pipeline_.get());
-            cmd_list_->set_constant_buffer(0, viewport_cb.get());
-            if (polygon_cb_buf) {
-                cmd_list_->set_constant_buffer(1, polygon_cb_buf.get());
+            if (cmd.kind == DrawCmdKind::ClipPushRect) {
+                layer.cx     = cmd.rect.x + cmd.rect.width  * 0.5f;
+                layer.cy     = cmd.rect.y + cmd.rect.height * 0.5f;
+                layer.half_w = cmd.rect.width  * 0.5f;
+                layer.half_h = cmd.rect.height * 0.5f;
+                layer.kind   = 0.0f;  // 矩形
             }
-            cmd_list_->set_vertex_buffer(0, clip_vb.get(), 0);
-            cmd_list_->draw(6, 1, 0, 0);  // SDF quad = 6 顶点
+            else if (cmd.kind == DrawCmdKind::ClipPushRoundedRect) {
+                layer.cx     = cmd.rrect.rect.x + cmd.rrect.rect.width  * 0.5f;
+                layer.cy     = cmd.rrect.rect.y + cmd.rrect.rect.height * 0.5f;
+                layer.half_w = cmd.rrect.rect.width  * 0.5f;
+                layer.half_h = cmd.rrect.rect.height * 0.5f;
+                layer.kind   = 1.0f;  // 均匀圆角矩形
+                layer.p0     = std::min({cmd.rrect.radius_x, cmd.rrect.radius_y,
+                                         layer.half_w, layer.half_h});
+            }
+            else if (cmd.kind == DrawCmdKind::ClipPushComplexRoundedRect) {
+                const float hw = cmd.complex_rrect.rect.width  * 0.5f;
+                const float hh = cmd.complex_rrect.rect.height * 0.5f;
+                layer.cx     = cmd.complex_rrect.rect.x + hw;
+                layer.cy     = cmd.complex_rrect.rect.y + hh;
+                layer.half_w = hw;
+                layer.half_h = hh;
+                layer.kind   = 2.0f;  // 四角独立圆角矩形
+                const auto& radii = cmd.complex_rrect.radii;
+                layer.p0 = std::min(std::min(radii.bottom_right.x, radii.bottom_right.y), std::min(hw, hh));  // r_br
+                layer.p1 = std::min(std::min(radii.top_right.x,    radii.top_right.y),    std::min(hw, hh));  // r_tr
+                layer.p2 = std::min(std::min(radii.bottom_left.x,  radii.bottom_left.y),  std::min(hw, hh));  // r_bl
+                layer.p3 = std::min(std::min(radii.top_left.x,     radii.top_left.y),     std::min(hw, hh));  // r_tl
+            }
+            else if (cmd.kind == DrawCmdKind::ClipPushPolygon) {
+                // 提取多边形顶点，转换为相对 AABB 中心的本地坐标
+                if (cmd.path_index >= static_cast<uint32_t>(dl.paths().size())) continue;
+                const Path& poly_path = dl.paths()[cmd.path_index];
+                containers::Vector<math::Vec2> poly_verts;
+                for (const auto& pc : poly_path.cmds()) {
+                    if (pc.kind == PathCmdKind::MoveTo || pc.kind == PathCmdKind::LineTo) {
+                        poly_verts.push_back(pc.pt[0]);
+                    }
+                }
+                const int poly_n = static_cast<int>(poly_verts.size());
+                if (poly_n < 3 || poly_n > k_max_clip_poly_verts) continue;
 
-            // 压入裁剪栈，增加裁剪深度
-            clip_stack.push_back(cmd);
-            clip_depth++;
+                layer.cx     = cmd.pt_a.x;
+                layer.cy     = cmd.pt_a.y;
+                layer.half_w = cmd.pt_b.x;
+                layer.half_h = cmd.pt_b.y;
+                layer.kind   = 10.0f;  // 多边形
+                layer.poly_vert_count_f = static_cast<float>(poly_n);
+                for (int k = 0; k < poly_n; ++k) {
+                    layer.poly_verts[k][0] = poly_verts[k].x - cmd.pt_a.x;
+                    layer.poly_verts[k][1] = poly_verts[k].y - cmd.pt_a.y;
+                    layer.poly_verts[k][2] = 0.0f;
+                    layer.poly_verts[k][3] = 0.0f;
+                }
+            }
+
+            clip_sdf_data.clip_count++;
+
+            // 重建 GPU 端 ClipSdfCB 并绑定至 b3 槽
+            clip_sdf_cb = rebuild_clip_sdf_cb();
+            if (clip_sdf_cb) cmd_list_->set_constant_buffer(3, clip_sdf_cb.get());
         }
 
         else if (cmd.kind == DrawCmdKind::ClipPop) {
-            // 裁剪栈为空时忽略（与 save/restore 不匹配的 ClipPop 防御）
-            if (!stencil_ok || clip_stack.empty() || clip_depth == 0) continue;
+            // 裁剪栈为空时忽略
+            if (clip_sdf_data.clip_count <= 0) continue;
 
-            // 弹出最近一次压入的裁剪命令
-            DrawCmd popped = clip_stack.back();
-            clip_stack.pop_back();
-            clip_depth--;
+            clip_sdf_data.clip_count--;
 
-            // 生成与压入时相同的 SDF 几何体
-            auto clip_vb = make_clip_vb(popped);
-            if (!clip_vb) continue;
-
-            auto polygon_cb_buf = make_clip_polygon_cb(popped);
-
-            // 设置模板参考值为 clip_depth+1（即被压入时的深度值，Equal(ref) → 精确撤销本层写入）
-            cmd_list_->set_stencil_ref(static_cast<uint8_t>(clip_depth + 1));
-            // 使用 ClipErase 管线（DecrSat 写入，禁止颜色输出）
-            cmd_list_->set_pipeline(sdf_clip_erase_pipeline_.get());
-            cmd_list_->set_constant_buffer(0, viewport_cb.get());
-            if (polygon_cb_buf) {
-                cmd_list_->set_constant_buffer(1, polygon_cb_buf.get());
-            }
-            cmd_list_->set_vertex_buffer(0, clip_vb.get(), 0);
-            cmd_list_->draw(6, 1, 0, 0);
+            // 重建 GPU 端 ClipSdfCB 并绑定至 b3 槽
+            clip_sdf_cb = rebuild_clip_sdf_cb();
+            if (clip_sdf_cb) cmd_list_->set_constant_buffer(3, clip_sdf_cb.get());
         }
 
         // ── FillPolygon / StrokePolygon（SDF 多边形）─────────────────────────

@@ -29,6 +29,14 @@
     - 行18左：`translate` 纯平移演示 — 原始位置半透明轮廓 + 平移后填充矩形对比
     - 行18右：`translate` 步进演示 — 五个矩形以固定步进递进平移，颜色蓝渐变橙
 
+- **paint（裁剪系统升级）**：将 Stencil 二值裁剪替换为 ClipSdfCB SDF 软裁剪，消除裁剪边缘锯齿：
+  - 移除 stencil 渲染目标绑定及 `clear_depth_stencil` 调用，改为直接绑定颜色渲染目标（无深度/模板附件）
+  - 新增 `ClipSdfLayer`（304 字节）/ `ClipSdfCB`（1232 字节）C++ 结构体，最多 4 层嵌套裁剪、每层最多 16 多边形顶点
+  - 主 SDF 像素着色器（b3 槽）内新增 `evaluate_clip_coverage()` + `sdClipPolygon()`，所有 `return` 分支均乘以覆盖率，实现 `smoothstep` 亚像素级抗锯齿裁剪
+  - `ClipPush*/ClipPop` 命令处理器改为直接填写 `ClipSdfCB.layers[]` 并重建 GPU 端 b3 常量缓冲，无需再绘制裁剪几何体到模板缓冲
+  - 移除 `make_clip_vb` / `make_clip_polygon_cb` 辅助 lambda（stencil 路径专用，已废弃）
+  - 管线选择简化：始终使用 `sdf_pipeline_` / `text_pipeline_` 主管线，不再按裁剪深度切换到 `*_clip_test_pipeline_`
+
 - **paint（裁剪系统）**：新增基于 D3D11 模板缓冲（Stencil Buffer）的 SDF 嵌套裁剪系统：
   - `Canvas::clip_rect(Rect)`：压入矩形裁剪区域
   - `Canvas::clip_rounded_rect(RoundedRect)`：压入均匀圆角矩形裁剪区域
