@@ -103,8 +103,8 @@ float4 main(PSIn input) : SV_Target {
 /// SDF 顶点着色器：坐标变换，透传 SDF 参数
 static constexpr const char k_sdf_vertex_shader_hlsl[] = R"hlsl(
 cbuffer ViewportCB : register(b0) {
-    float2 viewport_size;
-    float2 _padding;
+    float2 viewport_size;       // 逻辑像素尺寸（NDC 变换用）
+    float2 phys_viewport_size;  // 物理像素尺寸（像素着色器使用）
 };
 
 struct SdfVSIn {
@@ -142,8 +142,58 @@ SdfVSOut main(SdfVSIn i) {
 )hlsl";
 
 /// SDF 像素着色器：根据形状类型计算有向距离场，实现亚像素抗锯齿
-static constexpr const char k_sdf_pixel_shader_hlsl[] = R"hlsl(
-// ── SDF 函数（外正内负，IQ 标准约定）─────────────────────────────────────────
+/// 注：此着色器源码因 MSVC 单字符串常量不超过 16380 字节的限制，被拆分为多段相邻字符串常量。
+static constexpr const char k_sdf_pixel_shader_hlsl[] =
+// ── 段 1：常量缓冲声明、纹理绑定、渐变辅助函数 ────────────────────────────
+R"hlsl(
+// 视口常量缓冲（b0 槽，与顶点着色器共享）
+cbuffer ViewportCB : register(b0) {
+    float2 viewport_size;       // 逻辑像素尺寸（NDC 变换用）
+    float2 phys_viewport_size;  // 物理像素尺寸（SV_Position → UV 用）
+};
+
+// 画刷数据常量缓冲（b2 槽，每个 DrawCall 更新一次）
+// 总大小：128 字节（8 × float4，16 字节对齐）
+cbuffer BrushDataCB : register(b2) {
+    uint   brush_kind;       // 画刷类型：0=纯色，1=线性渐变，2=径向渐变，3=亚克力
+    uint   stop_count;       // 渐变色标数量 [2..4]（brush_kind=1/2 时有效）
+    float  _brush_pad0;
+    float  _brush_pad1;
+    //   linear:  xy=起点 local 坐标（像素，相对形状中心），zw=渐变方向向量 local
+    //   radial:  xy=圆心 local 坐标（像素），z=外径（像素），w=内径（像素）
+    //   acrylic: xyzw=色调颜色（rgba，线性空间）
+    float4 grad_params;
+    //   acrylic: x=色调混合比例 [0,1]，y=饱和度增益（1.0=原始）
+    float4 grad_extra;
+    float4 stop_colors[4];   // 渐变色标颜色（rgba，线性空间，最多 4 个）
+    float4 stop_offsets;     // 色标偏移量（x=off0, y=off1, z=off2, w=off3）
+};
+
+// 亚克力模糊背景纹理（t0 槽，仅亚克力 DrawCall 绑定时有效）
+Texture2D    acrylic_backdrop : register(t0);
+SamplerState acrylic_sampler  : register(s0);  // 线性双线性采样器
+
+// 根据归一化参数 t [0,1] 在色标数组中插值，返回 rgba 颜色
+float4 sample_gradient(float t) {
+    t = saturate(t);
+    float o0 = stop_offsets.x;
+    float o1 = stop_offsets.y;
+    float o2 = stop_offsets.z;
+    float o3 = stop_offsets.w;
+    float t01 = saturate((t - o0) / max(o1 - o0, 1e-6f));
+    float t12 = saturate((t - o1) / max(o2 - o1, 1e-6f));
+    float t23 = saturate((t - o2) / max(o3 - o2, 1e-6f));
+    float4 c01 = lerp(stop_colors[0], stop_colors[1], t01);
+    float4 c12 = lerp(stop_colors[1], stop_colors[2], t12);
+    float4 c23 = lerp(stop_colors[2], stop_colors[3], t23);
+    float4 c = c01;
+    if (stop_count >= 3u && t > o1) c = c12;
+    if (stop_count >= 4u && t > o2) c = c23;
+    return c;
+}
+)hlsl"
+// ── 段 2：SDF 函数（外正内负，IQ 标准约定）─────────────────────────────────
+R"hlsl(
 
 // 矩形 SDF：p=本地坐标，b=半尺寸
 float box_sdf(float2 p, float2 b) {
@@ -783,8 +833,43 @@ R"hlsl(
         alpha = a_outer * a_inner;
     }
 
+    // ── 画刷颜色计算（根据 brush_kind 决定颜色来源）──────────────────────────
+    float4 c;
+    if (brush_kind == 1u) {
+        // 线性渐变：t = 像素本地坐标在渐变轴上的投影（归一化）
+        float2 grad_start = grad_params.xy;
+        float2 grad_dir   = grad_params.zw;  // 终点 - 起点（local 坐标，像素）
+        float  len_sq     = dot(grad_dir, grad_dir);
+        float  t_lin      = (len_sq > 1e-8f)
+            ? dot(p - grad_start, grad_dir) / len_sq
+            : 0.0f;
+        c = sample_gradient(t_lin);
+    } else if (brush_kind == 2u) {
+        // 径向渐变：t = (像素到圆心距离 - 内径) / (外径 - 内径)
+        float2 center  = grad_params.xy;
+        float  outer_r = grad_params.z;
+        float  inner_r = grad_params.w;
+        float  dist    = length(p - center);
+        float  range   = outer_r - inner_r;
+        float  t_rad   = (range > 1e-6f) ? (dist - inner_r) / range : 0.0f;
+        c = sample_gradient(t_rad);
+    } else if (brush_kind == 3u) {
+        // 亚克力：采样模糊背景纹理，叠加饱和度调整和色调
+        float2 backdrop_uv = i.pos.xy / phys_viewport_size;
+        float4 backdrop    = acrylic_backdrop.Sample(acrylic_sampler, backdrop_uv);
+        // 饱和度调整（基于亮度保留法）
+        float  luma = dot(backdrop.rgb, float3(0.2126f, 0.7152f, 0.0722f));
+        backdrop.rgb = lerp(float3(luma, luma, luma), backdrop.rgb, grad_extra.y);
+        // 色调叠加（线性混合）
+        float4 tint   = grad_params;               // rgba 色调颜色
+        float  tint_a = grad_extra.x * tint.a;    // 实际混合比例
+        c = float4(lerp(backdrop.rgb, tint.rgb, tint_a), 1.0f);
+    } else {
+        // 纯色（brush_kind == 0）：使用顶点插值颜色
+        c = i.color;
+    }
+
     // 预乘 Alpha 输出（匹配预乘混合模式 ONE / INV_SRC_ALPHA）
-    float4 c = i.color;
     float  a = c.a * alpha;
     return float4(c.rgb * a, a);
 }
@@ -830,11 +915,34 @@ struct SdfVertex {
 
 /// 视口常量缓冲布局（必须为 16 字节倍数，D3D11 硬性要求）
 struct ViewportCB {
-    float width;
-    float height;
-    float pad0{0.0f};
-    float pad1{0.0f};
+    float width;        ///< 逻辑宽度（physical/dpi_scale，用于 NDC 变换）
+    float height;       ///< 逻辑高度
+    float phys_width;   ///< 物理宽度（用于 SV_Position → UV 转换，亚克力采样用）
+    float phys_height;  ///< 物理高度
 };
+
+/**
+ * @brief 画刷数据常量缓冲（b2 槽，每 DrawCall 更新一次）。
+ *
+ * 总大小：128 字节（8 × float4，16 字节对齐）
+ * 与 HLSL BrushDataCB 内存布局完全一致。
+ */
+struct alignas(16) BrushDataCB {
+    uint32_t brush_kind;         ///< 画刷类型：0=纯色，1=线性渐变，2=径向渐变，3=亚克力
+    uint32_t stop_count;         ///< 渐变色标数量 [2..4]
+    float    _pad0{0.0f};
+    float    _pad1{0.0f};
+    // grad_params（16 字节）
+    float    grad_params[4];     ///< 渐变参数（见 HLSL BrushDataCB 注释）
+    // grad_extra（16 字节）
+    float    grad_extra[4];      ///< 附加参数（亚克力：x=色调混合比例，y=饱和度增益）
+    // stop_colors[4]（64 字节）
+    float    stop_colors[4][4];  ///< 色标颜色（rgba，线性空间）
+    // stop_offsets（16 字节）
+    float    stop_offsets[4];    ///< 色标偏移量（x=off0, y=off1, z=off2, w=off3）
+    // 总大小：4+4+4+4+16+16+64+16 = 128 字节 ✓
+};
+static_assert(sizeof(BrushDataCB) == 128, "BrushDataCB 大小必须为 128 字节");
 
 // ── 文字渲染 HLSL 着色器 ──────────────────────────────────────────────────────
 
@@ -903,6 +1011,86 @@ struct TextVertex {
     float x, y;        ///< 屏幕像素坐标
     float u, v;        ///< 字形图集 UV（归一化 [0,1]）
     float r, g, b, a;  ///< 线性 RGBA 颜色
+};
+
+// ── 高斯模糊着色器（亚克力背景模糊用）────────────────────────────────────────
+
+/// 模糊通道顶点着色器：直接透传 NDC 坐标，无需视口转换
+static constexpr const char k_blur_vertex_shader_hlsl[] = R"hlsl(
+struct BlurVSIn {
+    float2 pos : POSITION;   // NDC 坐标（[-1,1]×[-1,1]）
+    float2 uv  : TEXCOORD0;  // 源纹理 UV（[0,1]×[0,1]）
+};
+
+struct BlurVSOut {
+    float4 pos : SV_Position;
+    float2 uv  : TEXCOORD0;
+};
+
+BlurVSOut main(BlurVSIn i) {
+    BlurVSOut o;
+    o.pos = float4(i.pos, 0.0f, 1.0f);  // 直接传入 NDC，无需视口变换
+    o.uv  = i.uv;
+    return o;
+}
+)hlsl";
+
+/// 高斯模糊像素着色器（分离式，方向由 texel_step 常量缓冲控制）
+/// 使用 9-tap 高斯核（σ ≈ 2.5），权重归一化 = 1.0
+/// 采样间距 = texel_step × [-4, -3, ..., 3, 4]（方向由 xy 分量决定）
+static constexpr const char k_blur_pixel_shader_hlsl[] = R"hlsl(
+// 模糊步进常量缓冲（b1 槽）
+cbuffer BlurCB : register(b1) {
+    float2 texel_step;   // 采样步进：(step/tex_w, 0) 水平 或 (0, step/tex_h) 垂直
+    float  _blur_pad0;
+    float  _blur_pad1;
+};
+
+Texture2D    blur_src     : register(t0);
+SamplerState blur_sampler : register(s0);
+
+// 9-tap 高斯核权重（σ ≈ 2.5，总和 = 1.0）
+static const float k_gauss_weights[9] = {
+    0.0162162162f, 0.0540540541f, 0.1216216216f,
+    0.1945945946f, 0.2270270270f, 0.1945945946f,
+    0.1216216216f, 0.0540540541f, 0.0162162162f
+};
+
+struct BlurPSIn {
+    float4 pos : SV_Position;
+    float2 uv  : TEXCOORD0;
+};
+
+float4 main(BlurPSIn i) : SV_Target {
+    float4 color = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    [unroll]
+    for (int k = -4; k <= 4; ++k) {
+        float2 sample_uv = i.uv + texel_step * float(k);
+        color += blur_src.Sample(blur_sampler, sample_uv) * k_gauss_weights[k + 4];
+    }
+    return color;
+}
+)hlsl";
+
+// ── 模糊通道顶点格式 ──────────────────────────────────────────────────────────
+
+/**
+ * @brief 模糊通道顶点（16 字节）。
+ *
+ * 用于全屏四边形的 H/V 高斯模糊通道。
+ * pos 使用 NDC 坐标（直接传入，顶点着色器不做视口变换）。
+ */
+struct BlurVertex {
+    float x, y;  ///< NDC 坐标（[-1,1]）
+    float u, v;  ///< 源纹理 UV（[0,1]）
+};
+
+/// 模糊常量缓冲（b1 槽，每个模糊通道更新一次）
+struct alignas(16) BlurCB {
+    float texel_step_x;  ///< 采样步进 X（水平通道 = blur_step/tex_w，垂直通道 = 0）
+    float texel_step_y;  ///< 采样步进 Y（水平通道 = 0，垂直通道 = blur_step/tex_h）
+    float _pad0{0.0f};
+    float _pad1{0.0f};
 };
 
 /// 多边形顶点常量缓冲（b1 槽，仅多边形 DrawCall 绑定）
@@ -1287,10 +1475,11 @@ void GlyphAtlas::flush(gfx::IDevice* device) {
  *
  * 所有 GPU 调用都通过 mine.gfx.rhi 抽象层进行，不直接使用具体图形 API。
  *
- * 包含三条渲染管线：
+ * 包含的渲染管线：
  *   - solid_pipeline_：用于折线描边展开（StrokePath），POSITION + COLOR 顶点
- *   - sdf_pipeline_  ：用于 SDF 形状（矩形/圆角/椭圆），SdfVertex 顶点
+ *   - sdf_pipeline_  ：用于 SDF 形状（矩形/圆角/椭圆），SdfVertex 顶点（含 BrushDataCB 渐变支持）
  *   - text_pipeline_ ：用于文字渲染（字形图集四边形），TextVertex 顶点
+ *   - blur_pipeline_ ：用于亚克力背景高斯模糊（全屏四边形，BlurVertex），方向由 BlurCB 控制
  */
 class RhiRenderer final : public IRenderer {
 public:
@@ -1318,6 +1507,20 @@ private:
     /// 创建文字渲染管线（TextVertex，字形图集采样）
     bool create_text_pipeline();
 
+    /// 创建高斯模糊管线（BlurVertex，全屏四边形，用于亚克力背景模糊）
+    bool create_blur_pipeline();
+
+    /**
+     * @brief 确保亚克力 scratch 纹理已创建且尺寸匹配目标渲染纹理。
+     *
+     * 两个 scratch 纹理均为 RGBA8_UNorm 格式，同时绑定 ShaderResource 和 RenderTarget。
+     * 首次调用或目标尺寸变化时（懒创建）才实际创建 GPU 纹理。
+     *
+     * @param target  主渲染目标纹理（用于获取需要的尺寸和格式）
+     * @return true = scratch 纹理可用，false = 创建失败
+     */
+    bool ensure_scratch_textures(gfx::ITexture* target);
+
     /**
      * @brief 生成 SDF 形状包围盒的 6 个顶点（2 个三角形），追加到 vertices。
      *
@@ -1341,6 +1544,22 @@ private:
         float stroke_w,
         float e0 = 0.0f, float e1 = 0.0f, float e2 = 0.0f, float e3 = 0.0f);
 
+    /**
+     * @brief 构建画刷数据常量缓冲（BrushDataCB）。
+     *
+     * 将 Brush 中存储的画刷数据（归一化坐标）转换为 HLSL 着色器使用的 local 坐标（像素）。
+     *
+     * @param brush   画刷对象
+     * @param cx,cy   形状中心（屏幕像素坐标）
+     * @param half_w  形状包围盒半宽（像素）
+     * @param half_h  形状包围盒半高（像素）
+     * @return 填充好的 BrushDataCB 结构体
+     */
+    static BrushDataCB make_brush_cb(
+        const Brush& brush,
+        float cx, float cy,
+        float half_w, float half_h) noexcept;
+
     bool  valid_{false};
     float dpi_scale_{1.0f};  ///< 物理像素 / 逻辑像素缩放因子，默认 1（不缩放）
 
@@ -1350,6 +1569,9 @@ private:
     core::OwnedPtr<gfx::IPipeline>       solid_pipeline_;        ///< 折线描边管线（POSITION+COLOR）
     core::OwnedPtr<gfx::IPipeline>       sdf_pipeline_;          ///< SDF 形状管线（SdfVertex）
     core::OwnedPtr<gfx::IPipeline>       text_pipeline_;         ///< 文字渲染管线（TextVertex）
+    core::OwnedPtr<gfx::IPipeline>       blur_pipeline_;         ///< 高斯模糊管线（BlurVertex，亚克力用）
+    core::OwnedPtr<gfx::ITexture>        blur_scratch_a_;        ///< 亚克力模糊 scratch 纹理 A（捕获/结果）
+    core::OwnedPtr<gfx::ITexture>        blur_scratch_b_;        ///< 亚克力模糊 scratch 纹理 B（中间结果）
     core::OwnedPtr<GlyphAtlas>           glyph_atlas_;           ///< 字形 GPU 图集管理器
 };
 
@@ -1376,6 +1598,9 @@ RhiRenderer::RhiRenderer(gfx::IDevice* device)
 
     // 创建文字渲染管线（字形图集四边形采样）
     if (!create_text_pipeline()) return;
+
+    // 创建高斯模糊管线（亚克力背景模糊用，全屏四边形，方向由 BlurCB 控制）
+    if (!create_blur_pipeline()) return;
 
     // 创建字形图集管理器（1024×1024 R8 灰度图集）
     glyph_atlas_ = core::OwnedPtr<GlyphAtlas>(
@@ -1537,6 +1762,45 @@ bool RhiRenderer::create_text_pipeline() {
     return text_pipeline_ != nullptr;
 }
 
+bool RhiRenderer::create_blur_pipeline() {
+    // 顶点布局：BlurVertex（16 字节）：POSITION(float2) + TEXCOORD0(float2)
+    gfx::PipelineDesc desc{};
+
+    desc.vertex_shader.data        = k_blur_vertex_shader_hlsl;
+    desc.vertex_shader.size        = sizeof(k_blur_vertex_shader_hlsl) - 1;
+    desc.vertex_shader.language    = gfx::ShaderLanguage::HLSL;
+    desc.vertex_shader.entry_point = "main";
+    desc.vertex_shader.is_source   = true;
+
+    desc.pixel_shader.data        = k_blur_pixel_shader_hlsl;
+    desc.pixel_shader.size        = sizeof(k_blur_pixel_shader_hlsl) - 1;
+    desc.pixel_shader.language    = gfx::ShaderLanguage::HLSL;
+    desc.pixel_shader.entry_point = "main";
+    desc.pixel_shader.is_source   = true;
+
+    // POSITION (float2) — offset 0：NDC 坐标
+    desc.vertex_elements[0].semantic       = gfx::VertexSemantic::Position;
+    desc.vertex_elements[0].semantic_index = 0;
+    desc.vertex_elements[0].format         = gfx::VertexElementFormat::Float2;
+    desc.vertex_elements[0].slot           = 0;
+    desc.vertex_elements[0].offset         = 0;
+
+    // TEXCOORD0 (float2) — offset 8：源纹理 UV
+    desc.vertex_elements[1].semantic       = gfx::VertexSemantic::TexCoord;
+    desc.vertex_elements[1].semantic_index = 0;
+    desc.vertex_elements[1].format         = gfx::VertexElementFormat::Float2;
+    desc.vertex_elements[1].slot           = 0;
+    desc.vertex_elements[1].offset         = offsetof(BlurVertex, u);
+
+    desc.vertex_element_count = 2;
+    desc.vertex_stride        = sizeof(BlurVertex);  // 16 字节
+    desc.enable_blend         = false;               // 模糊通道不需要混合（覆写 scratch 纹理）
+    desc.enable_depth         = false;
+
+    blur_pipeline_ = device_->create_pipeline(desc);
+    return blur_pipeline_ != nullptr;
+}
+
 // ── 帧生命周期 ────────────────────────────────────────────────────────────────
 
 void RhiRenderer::begin_frame() {
@@ -1590,6 +1854,130 @@ void RhiRenderer::push_sdf_quad_vertices(
     vertices.push_back(make(x1, y2));
 }
 
+// ── 亚克力辅助函数 ────────────────────────────────────────────────────────────
+
+bool RhiRenderer::ensure_scratch_textures(gfx::ITexture* target) {
+    const uint32_t w = target->width();
+    const uint32_t h = target->height();
+
+    // 若尺寸未变且已存在，直接复用
+    if (blur_scratch_a_ &&
+        blur_scratch_a_->width()  == w &&
+        blur_scratch_a_->height() == h) {
+        return true;
+    }
+
+    // 创建两个 scratch 纹理（同时绑定 ShaderResource + RenderTarget）
+    gfx::TextureDesc tex_desc{};
+    tex_desc.width      = w;
+    tex_desc.height     = h;
+    tex_desc.format     = gfx::PixelFormat::RGBA8_UNorm;
+    tex_desc.bind_flags = gfx::TextureBindFlags::ShaderResource
+                        | gfx::TextureBindFlags::RenderTarget;
+    tex_desc.mip_levels = 1;
+    tex_desc.array_size = 1;
+
+    blur_scratch_a_ = device_->create_texture(tex_desc);
+    if (!blur_scratch_a_) return false;
+
+    blur_scratch_b_ = device_->create_texture(tex_desc);
+    if (!blur_scratch_b_) {
+        blur_scratch_a_.reset();
+        return false;
+    }
+    return true;
+}
+
+BrushDataCB RhiRenderer::make_brush_cb(
+    const Brush& brush,
+    float /*cx*/, float /*cy*/,
+    float half_w, float half_h) noexcept
+{
+    BrushDataCB cb{};
+
+    switch (brush.kind()) {
+    case BrushKind::SolidColor:
+        cb.brush_kind = 0;
+        break;
+
+    case BrushKind::LinearGradient: {
+        const auto& lg = brush.linear_gradient_data();
+        cb.brush_kind = 1;
+        cb.stop_count = lg.stop_count;
+        // 归一化坐标 → local 坐标（像素，相对形状中心）
+        //   local_x = (norm_x - 0.5) × 2 × half_w
+        //   local_y = (norm_y - 0.5) × 2 × half_h
+        const float sx = (lg.start.x - 0.5f) * 2.0f * half_w;
+        const float sy = (lg.start.y - 0.5f) * 2.0f * half_h;
+        const float ex = (lg.end.x   - 0.5f) * 2.0f * half_w;
+        const float ey = (lg.end.y   - 0.5f) * 2.0f * half_h;
+        cb.grad_params[0] = sx;
+        cb.grad_params[1] = sy;
+        cb.grad_params[2] = ex - sx;  // 方向向量 x
+        cb.grad_params[3] = ey - sy;  // 方向向量 y
+        // 色标数据
+        for (uint32_t i = 0; i < lg.stop_count && i < kMaxGradientStops; ++i) {
+            cb.stop_colors[i][0] = lg.stops[i].color.r;
+            cb.stop_colors[i][1] = lg.stops[i].color.g;
+            cb.stop_colors[i][2] = lg.stops[i].color.b;
+            cb.stop_colors[i][3] = lg.stops[i].color.a;
+        }
+        cb.stop_offsets[0] = (lg.stop_count > 0) ? lg.stops[0].offset : 0.0f;
+        cb.stop_offsets[1] = (lg.stop_count > 1) ? lg.stops[1].offset : 1.0f;
+        cb.stop_offsets[2] = (lg.stop_count > 2) ? lg.stops[2].offset : 1.0f;
+        cb.stop_offsets[3] = (lg.stop_count > 3) ? lg.stops[3].offset : 1.0f;
+        break;
+    }
+
+    case BrushKind::RadialGradient: {
+        const auto& rg = brush.radial_gradient_data();
+        cb.brush_kind = 2;
+        cb.stop_count = rg.stop_count;
+        // 圆心归一化坐标 → local 坐标
+        const float cx2 = (rg.center.x - 0.5f) * 2.0f * half_w;
+        const float cy2 = (rg.center.y - 0.5f) * 2.0f * half_h;
+        // 半径：使用较短的半边作为基准（1.0 = 较短边的一半）
+        const float half_short = (half_w < half_h) ? half_w : half_h;
+        cb.grad_params[0] = cx2;
+        cb.grad_params[1] = cy2;
+        cb.grad_params[2] = rg.outer_radius * half_short;  // 外径（像素）
+        cb.grad_params[3] = rg.inner_radius * half_short;  // 内径（像素）
+        // 色标数据
+        for (uint32_t i = 0; i < rg.stop_count && i < kMaxGradientStops; ++i) {
+            cb.stop_colors[i][0] = rg.stops[i].color.r;
+            cb.stop_colors[i][1] = rg.stops[i].color.g;
+            cb.stop_colors[i][2] = rg.stops[i].color.b;
+            cb.stop_colors[i][3] = rg.stops[i].color.a;
+        }
+        cb.stop_offsets[0] = (rg.stop_count > 0) ? rg.stops[0].offset : 0.0f;
+        cb.stop_offsets[1] = (rg.stop_count > 1) ? rg.stops[1].offset : 1.0f;
+        cb.stop_offsets[2] = (rg.stop_count > 2) ? rg.stops[2].offset : 1.0f;
+        cb.stop_offsets[3] = (rg.stop_count > 3) ? rg.stops[3].offset : 1.0f;
+        break;
+    }
+
+    case BrushKind::AcrylicBrush: {
+        const auto& ac = brush.acrylic_data();
+        cb.brush_kind      = 3;
+        // grad_params = 色调颜色 rgba
+        cb.grad_params[0]  = ac.tint_color.r;
+        cb.grad_params[1]  = ac.tint_color.g;
+        cb.grad_params[2]  = ac.tint_color.b;
+        cb.grad_params[3]  = ac.tint_color.a;
+        // grad_extra.x = 色调混合比例，grad_extra.y = 饱和度增益
+        cb.grad_extra[0]   = ac.tint_opacity;
+        cb.grad_extra[1]   = ac.saturation;
+        break;
+    }
+
+    default:
+        cb.brush_kind = 0;
+        break;
+    }
+
+    return cb;
+}
+
 // ── 渲染 ──────────────────────────────────────────────────────────────────────
 
 void RhiRenderer::set_dpi_scale(float scale) {
@@ -1602,14 +1990,130 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
     const auto& cmds = dl.cmds();
     if (cmds.empty()) return;
 
-    // ── 1. 创建视口常量缓冲（所有 DrawCall 共享，每帧创建一次）──────────
+    // ── 1. 亚克力前处理：捕获背景并应用高斯模糊 ─────────────────────────
+    //
+    // 在任何绘制操作之前检测是否有亚克力命令。若有，则：
+    //   a. GPU-to-GPU 拷贝当前渲染目标（即上一帧已渲染的内容）到 scratch_a
+    //   b. 水平高斯模糊：scratch_a → scratch_b
+    //   c. 垂直高斯模糊：scratch_b → scratch_a
+    // 亚克力元素在后续绘制中从 scratch_a 采样模糊背景。
+    //
+    // 注：copy_texture 在立即上下文中立即执行；模糊通道通过 cmd_list_ 录制，
+    //     在 end_frame() 提交后统一执行，顺序保证正确。
+    float acrylic_blur_amount = 30.0f;  // 使用第一个亚克力命令的模糊量
+    bool  has_acrylic         = false;
+    for (const DrawCmd& cmd : cmds) {
+        if (cmd.brush.kind() == BrushKind::AcrylicBrush) {
+            acrylic_blur_amount = cmd.brush.acrylic_data().blur_amount;
+            has_acrylic = true;
+            break;
+        }
+    }
+
+    if (has_acrylic && ensure_scratch_textures(target)) {
+        // a. GPU-to-GPU 拷贝（立即上下文），捕获上一帧内容到 scratch_a
+        device_->copy_texture(blur_scratch_a_.get(), target);
+
+        const float phys_w = static_cast<float>(target->width());
+        const float phys_h = static_cast<float>(target->height());
+        // 采样步进：每 tap 跨越 blur_amount/8 像素（9-tap 覆盖 ±4 个采样点）
+        const float blur_step = acrylic_blur_amount / 8.0f;
+
+        // b. 水平模糊通道：scratch_a → scratch_b
+        {
+            BlurCB blur_cb{};
+            blur_cb.texel_step_x = blur_step / phys_w;
+            blur_cb.texel_step_y = 0.0f;
+
+            gfx::BufferDesc blur_cb_desc{};
+            blur_cb_desc.size       = sizeof(BlurCB);
+            blur_cb_desc.stride     = 0;
+            blur_cb_desc.bind_flags = gfx::BufferBindFlags::Constant;
+            auto blur_cb_buf = device_->create_buffer(blur_cb_desc, &blur_cb);
+
+            // 全屏四边形（NDC 坐标，UV [0,1]）
+            BlurVertex quad[6] = {
+                {-1.0f,  1.0f, 0.0f, 0.0f},
+                { 1.0f,  1.0f, 1.0f, 0.0f},
+                {-1.0f, -1.0f, 0.0f, 1.0f},
+                { 1.0f,  1.0f, 1.0f, 0.0f},
+                { 1.0f, -1.0f, 1.0f, 1.0f},
+                {-1.0f, -1.0f, 0.0f, 1.0f},
+            };
+            gfx::BufferDesc vb_desc{};
+            vb_desc.size       = sizeof(quad);
+            vb_desc.stride     = sizeof(BlurVertex);
+            vb_desc.bind_flags = gfx::BufferBindFlags::Vertex;
+            auto blur_vb = device_->create_buffer(vb_desc, quad);
+
+            if (blur_cb_buf && blur_vb) {
+                gfx::Viewport blur_vp{};
+                blur_vp.width     = phys_w;
+                blur_vp.height    = phys_h;
+                blur_vp.max_depth = 1.0f;
+
+                cmd_list_->set_render_target(blur_scratch_b_.get(), nullptr);
+                cmd_list_->set_viewport(blur_vp);
+                cmd_list_->set_pipeline(blur_pipeline_.get());
+                cmd_list_->set_constant_buffer(1, blur_cb_buf.get());
+                cmd_list_->set_shader_resource(0, blur_scratch_a_.get());
+                cmd_list_->set_vertex_buffer(0, blur_vb.get(), 0);
+                cmd_list_->draw(6, 1, 0, 0);
+            }
+        }
+
+        // c. 垂直模糊通道：scratch_b → scratch_a
+        {
+            BlurCB blur_cb{};
+            blur_cb.texel_step_x = 0.0f;
+            blur_cb.texel_step_y = blur_step / phys_h;
+
+            gfx::BufferDesc blur_cb_desc{};
+            blur_cb_desc.size       = sizeof(BlurCB);
+            blur_cb_desc.stride     = 0;
+            blur_cb_desc.bind_flags = gfx::BufferBindFlags::Constant;
+            auto blur_cb_buf = device_->create_buffer(blur_cb_desc, &blur_cb);
+
+            BlurVertex quad[6] = {
+                {-1.0f,  1.0f, 0.0f, 0.0f},
+                { 1.0f,  1.0f, 1.0f, 0.0f},
+                {-1.0f, -1.0f, 0.0f, 1.0f},
+                { 1.0f,  1.0f, 1.0f, 0.0f},
+                { 1.0f, -1.0f, 1.0f, 1.0f},
+                {-1.0f, -1.0f, 0.0f, 1.0f},
+            };
+            gfx::BufferDesc vb_desc{};
+            vb_desc.size       = sizeof(quad);
+            vb_desc.stride     = sizeof(BlurVertex);
+            vb_desc.bind_flags = gfx::BufferBindFlags::Vertex;
+            auto blur_vb = device_->create_buffer(vb_desc, quad);
+
+            if (blur_cb_buf && blur_vb) {
+                gfx::Viewport blur_vp{};
+                blur_vp.width     = phys_w;
+                blur_vp.height    = phys_h;
+                blur_vp.max_depth = 1.0f;
+
+                cmd_list_->set_render_target(blur_scratch_a_.get(), nullptr);
+                cmd_list_->set_viewport(blur_vp);
+                cmd_list_->set_pipeline(blur_pipeline_.get());
+                cmd_list_->set_constant_buffer(1, blur_cb_buf.get());
+                cmd_list_->set_shader_resource(0, blur_scratch_b_.get());
+                cmd_list_->set_vertex_buffer(0, blur_vb.get(), 0);
+                cmd_list_->draw(6, 1, 0, 0);
+            }
+        }
+    }
+
+    // ── 2. 创建视口常量缓冲（所有 DrawCall 共享，每帧创建一次）──────────
     //
     // 使用逻辑像素大小（物理大小 / dpi_scale），使逻辑坐标到 NDC 的映射
     // 始终正确；光栅化视口仍使用物理大小，fwidth() 在物理像素精度下工作。
     const ViewportCB cb_data{
         static_cast<float>(target->width())  / dpi_scale_,
         static_cast<float>(target->height()) / dpi_scale_,
-        0.0f, 0.0f
+        static_cast<float>(target->width()),   // 物理宽度（亚克力 UV 采样用）
+        static_cast<float>(target->height())   // 物理高度
     };
 
     gfx::BufferDesc cb_desc{};
@@ -1620,7 +2124,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
     auto viewport_cb = device_->create_buffer(cb_desc, &cb_data);
     if (!viewport_cb) return;
 
-    // ── 2. 设置全局渲染状态（渲染目标 + 视口）────────────────────────────
+    // ── 3. 设置全局渲染状态（渲染目标 + 视口）────────────────────────────
 
     cmd_list_->set_render_target(target, nullptr);
 
@@ -1633,19 +2137,23 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
     viewport.max_depth = 1.0f;
     cmd_list_->set_viewport(viewport);
 
-    // ── 3. 逐命令处理（每命令单独 DrawCall，保证绘制顺序）───────────────
+    // ── 4. 逐命令处理（每命令单独 DrawCall，保证绘制顺序）───────────────
 
     for (const DrawCmd& cmd : cmds) {
 
         // ── SDF 填充命令 ─────────────────────────────────────────────────
+        // 填充命令支持：纯色（SolidColor）、线性渐变、径向渐变、亚克力画刷
+        // 颜色来源由 BrushDataCB.brush_kind 在 GPU 端决定；顶点颜色仅用于纯色路径
 
         if (cmd.kind == DrawCmdKind::FillRect) {
-            if (cmd.brush.kind() != BrushKind::SolidColor) continue;
-            const math::Color c = cmd.brush.color();
             const float cx = cmd.rect.x + cmd.rect.width  * 0.5f;
             const float cy = cmd.rect.y + cmd.rect.height * 0.5f;
             const float hw = cmd.rect.width  * 0.5f;
             const float hh = cmd.rect.height * 0.5f;
+            // 纯色时从画刷取颜色写入顶点；渐变/亚克力时顶点颜色由 GPU 端 BrushDataCB 决定（此处传透明占位）
+            const math::Color c = (cmd.brush.kind() == BrushKind::SolidColor)
+                ? cmd.brush.color()
+                : math::Color{0.0f, 0.0f, 0.0f, 0.0f};
 
             containers::Vector<SdfVertex> verts;
             // 矩形（kind=0），填充（stroke_w=0），1px AA 余量
@@ -1659,18 +2167,35 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             auto buf = device_->create_buffer(vb, verts.data());
             if (!buf) continue;
 
+            // 构建并绑定画刷数据常量缓冲（b2 槽）
+            const BrushDataCB brush_cb_data = make_brush_cb(cmd.brush, cx, cy, hw, hh);
+            gfx::BufferDesc bcb{};
+            bcb.size       = sizeof(BrushDataCB);
+            bcb.bind_flags = gfx::BufferBindFlags::Constant;
+            auto brush_cb_buf = device_->create_buffer(bcb, &brush_cb_data);
+
             cmd_list_->set_pipeline(sdf_pipeline_.get());
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
+            if (brush_cb_buf) {
+                cmd_list_->set_constant_buffer(2, brush_cb_buf.get());
+            }
+            // 亚克力：绑定模糊背景纹理（t0 槽），其他画刷解绑
+            if (cmd.brush.kind() == BrushKind::AcrylicBrush && blur_scratch_a_) {
+                cmd_list_->set_shader_resource(0, blur_scratch_a_.get());
+            } else {
+                cmd_list_->set_shader_resource(0, nullptr);
+            }
             cmd_list_->set_vertex_buffer(0, buf.get(), 0);
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
         }
         else if (cmd.kind == DrawCmdKind::FillRoundedRect) {
-            if (cmd.brush.kind() != BrushKind::SolidColor) continue;
-            const math::Color c = cmd.brush.color();
             const float cx = cmd.rrect.rect.x + cmd.rrect.rect.width  * 0.5f;
             const float cy = cmd.rrect.rect.y + cmd.rrect.rect.height * 0.5f;
             const float hw = cmd.rrect.rect.width  * 0.5f;
             const float hh = cmd.rrect.rect.height * 0.5f;
+            const math::Color c = (cmd.brush.kind() == BrushKind::SolidColor)
+                ? cmd.brush.color()
+                : math::Color{0.0f, 0.0f, 0.0f, 0.0f};
             // 均匀圆角（各向同性：取 rx 和 ry 的最小值）
             const float rad = std::min(cmd.rrect.radius_x, cmd.rrect.radius_y);
             // 圆角半径不得超过半尺寸（CSS 规范钳制）
@@ -1690,16 +2215,30 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
 
             cmd_list_->set_pipeline(sdf_pipeline_.get());
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
+            {
+                const BrushDataCB brush_cb_data = make_brush_cb(cmd.brush, cx, cy, hw, hh);
+                gfx::BufferDesc bcb{};
+                bcb.size       = sizeof(BrushDataCB);
+                bcb.bind_flags = gfx::BufferBindFlags::Constant;
+                auto brush_cb_buf = device_->create_buffer(bcb, &brush_cb_data);
+                if (brush_cb_buf) cmd_list_->set_constant_buffer(2, brush_cb_buf.get());
+            }
+            if (cmd.brush.kind() == BrushKind::AcrylicBrush && blur_scratch_a_) {
+                cmd_list_->set_shader_resource(0, blur_scratch_a_.get());
+            } else {
+                cmd_list_->set_shader_resource(0, nullptr);
+            }
             cmd_list_->set_vertex_buffer(0, buf.get(), 0);
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
         }
         else if (cmd.kind == DrawCmdKind::FillComplexRoundedRect) {
-            if (cmd.brush.kind() != BrushKind::SolidColor) continue;
-            const math::Color c = cmd.brush.color();
             const float cx = cmd.complex_rrect.rect.x + cmd.complex_rrect.rect.width  * 0.5f;
             const float cy = cmd.complex_rrect.rect.y + cmd.complex_rrect.rect.height * 0.5f;
             const float hw = cmd.complex_rrect.rect.width  * 0.5f;
             const float hh = cmd.complex_rrect.rect.height * 0.5f;
+            const math::Color c = (cmd.brush.kind() == BrushKind::SolidColor)
+                ? cmd.brush.color()
+                : math::Color{0.0f, 0.0f, 0.0f, 0.0f};
             const auto& radii = cmd.complex_rrect.radii;
             // 各角各向同性化（取 rx/ry 最小值），再钳制到不超过半尺寸
             const float r_br = std::min(std::min(radii.bottom_right.x, radii.bottom_right.y), std::min(hw, hh));
@@ -1721,13 +2260,27 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
 
             cmd_list_->set_pipeline(sdf_pipeline_.get());
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
+            {
+                const BrushDataCB brush_cb_data = make_brush_cb(cmd.brush, cx, cy, hw, hh);
+                gfx::BufferDesc bcb{};
+                bcb.size       = sizeof(BrushDataCB);
+                bcb.bind_flags = gfx::BufferBindFlags::Constant;
+                auto brush_cb_buf = device_->create_buffer(bcb, &brush_cb_data);
+                if (brush_cb_buf) cmd_list_->set_constant_buffer(2, brush_cb_buf.get());
+            }
+            if (cmd.brush.kind() == BrushKind::AcrylicBrush && blur_scratch_a_) {
+                cmd_list_->set_shader_resource(0, blur_scratch_a_.get());
+            } else {
+                cmd_list_->set_shader_resource(0, nullptr);
+            }
             cmd_list_->set_vertex_buffer(0, buf.get(), 0);
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
         }
         else if (cmd.kind == DrawCmdKind::FillEllipse) {
-            if (cmd.brush.kind() != BrushKind::SolidColor) continue;
             if (cmd.pt_b.x <= 0.0f || cmd.pt_b.y <= 0.0f) continue;
-            const math::Color c = cmd.brush.color();
+            const math::Color c = (cmd.brush.kind() == BrushKind::SolidColor)
+                ? cmd.brush.color()
+                : math::Color{0.0f, 0.0f, 0.0f, 0.0f};
             // pt_a = 中心，pt_b = (rx, ry) 半径
             const float cx = cmd.pt_a.x;
             const float cy = cmd.pt_a.y;
@@ -1748,6 +2301,19 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
 
             cmd_list_->set_pipeline(sdf_pipeline_.get());
             cmd_list_->set_constant_buffer(0, viewport_cb.get());
+            {
+                const BrushDataCB brush_cb_data = make_brush_cb(cmd.brush, cx, cy, hw, hh);
+                gfx::BufferDesc bcb{};
+                bcb.size       = sizeof(BrushDataCB);
+                bcb.bind_flags = gfx::BufferBindFlags::Constant;
+                auto brush_cb_buf = device_->create_buffer(bcb, &brush_cb_data);
+                if (brush_cb_buf) cmd_list_->set_constant_buffer(2, brush_cb_buf.get());
+            }
+            if (cmd.brush.kind() == BrushKind::AcrylicBrush && blur_scratch_a_) {
+                cmd_list_->set_shader_resource(0, blur_scratch_a_.get());
+            } else {
+                cmd_list_->set_shader_resource(0, nullptr);
+            }
             cmd_list_->set_vertex_buffer(0, buf.get(), 0);
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
         }

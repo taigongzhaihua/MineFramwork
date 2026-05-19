@@ -2,15 +2,15 @@
  * @file main.cpp
  * @brief 00-hello-rect 示例：mine.paint Canvas SDF 填充 + 描边命令综合演示。
  *
- * 演示内容（2×9 网格布局，左列填充/右列描边）：
+ * 演示内容（2×13 网格布局，左列填充/右列描边）：
  *   行1 左：FillRect                      — 纯色填充矩形（绿色）
  *   行1 右：StrokeRect                    — 矩形描边（绿色，线宽 4px）
  *   行2 左：FillRoundedRect               — 均匀圆角矩形填充（蓝色，radius=20px）
  *   行2 右：StrokeRoundedRect             — 均匀圆角矩形描边（蓝色，线宽 4px）
  *   行3 左：FillComplexRoundedRect        — 四角独立圆角矩形填充（橙色）
  *   行3 右：StrokeComplexRoundedRect      — 四角独立圆角矩形描边（橙色，线宽 4px）
- *   行4 左：FillEllipse                   — 満源填充（紫色）
- *   行4 右：StrokeEllipse                 — 満源描边（紫色，线宽 4px）
+ *   行4 左：FillEllipse                   — 满源填充（紫色）
+ *   行4 右：StrokeEllipse                 — 满源描边（紫色，线宽 4px）
  *   行5 左：StrokeBorderedRoundedRect     — 四边不等宽 + 四角独立圆角内侧描边（红色）
  *   行5 右：StrokeBorderedRoundedRect     — 均匀圆角 + 仅上下边框（青色，上下员4 12px）
  *   行6 左：StrokeLine (Flat cap)          — 平端线段（双色渐变 SDF）
@@ -23,6 +23,12 @@
  *   行9 右：StrokeCubicBezier (Round cap)  — 三次贝塞尔大 S 形，圆形端点
  *   行10左：FillPolygon（凸多边形）         — SDF 填充正六边形（蓝色，IQ 绕数法）
  *   行10右：FillPolygon（凹多边形）         — SDF 填充五角星 + StrokePolygon 六边形描边
+ *   行11左：LinearGradient FillRect        — 线性渐变矩形（蓝→橙，从左到右）
+ *   行11右：RadialGradient FillEllipse     — 径向渐变椭圆（白→紫，从中心向外）
+ *   行12左：LinearGradient FillRoundedRect — 线性渐变圆角矩形（青→绿，从上到下）
+ *   行12右：RadialGradient FillRect        — 径向渐变矩形（黄→红，中心向外）
+ *   行13左：AcrylicBrush FillRoundedRect   — 亚克力圆角矩形（蓝色色调，30px 模糊）
+ *   行13右：AcrylicBrush FillEllipse       — 亚克力椭圆（橙色色调，20px 模糊）
  */
 
 #include <mine/platform/PlatformAbi.h>
@@ -102,25 +108,29 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
             mine::math::Rect{0.0f, 0.0f, W, H},
             mine::paint::Brush::solid(mine::math::Color{0.12f, 0.12f, 0.12f, 1.0f}));
 
-        // 2×10 网格参数（2列 × 10行）
+        // 2×13 网格参数（2列 × 13行）
         const float outer_pad = 20.0f;
         const float gap       = 10.0f;
         const float cw        = (W - outer_pad * 2.0f - gap) * 0.5f;
-        const float ch        = (H - outer_pad * 2.0f - gap * 9.0f) / 10.0f;
+        const float ch        = (H - outer_pad * 2.0f - gap * 12.0f) / 13.0f;
 
         const float col0 = outer_pad;
         const float col1 = outer_pad + cw + gap;
 
-        const float row0 = outer_pad;
-        const float row1 = outer_pad + ch + gap;
-        const float row2 = outer_pad + (ch + gap) * 2.0f;
-        const float row3 = outer_pad + (ch + gap) * 3.0f;
-        const float row4 = outer_pad + (ch + gap) * 4.0f;
-        const float row5 = outer_pad + (ch + gap) * 5.0f;
-        const float row6 = outer_pad + (ch + gap) * 6.0f;
-        const float row7 = outer_pad + (ch + gap) * 7.0f;
-        const float row8 = outer_pad + (ch + gap) * 8.0f;
-        const float row9 = outer_pad + (ch + gap) * 9.0f;
+        const float row0  = outer_pad;
+        const float row1  = outer_pad + ch + gap;
+        const float row2  = outer_pad + (ch + gap) * 2.0f;
+        const float row3  = outer_pad + (ch + gap) * 3.0f;
+        const float row4  = outer_pad + (ch + gap) * 4.0f;
+        const float row5  = outer_pad + (ch + gap) * 5.0f;
+        const float row6  = outer_pad + (ch + gap) * 6.0f;
+        const float row7  = outer_pad + (ch + gap) * 7.0f;
+        const float row8  = outer_pad + (ch + gap) * 8.0f;
+        const float row9  = outer_pad + (ch + gap) * 9.0f;
+        // 新增：渐变画刷和亚克力画刷演示行
+        const float row10 = outer_pad + (ch + gap) * 10.0f;
+        const float row11 = outer_pad + (ch + gap) * 11.0f;
+        const float row12 = outer_pad + (ch + gap) * 12.0f;
 
         const float ip = 14.0f;
         const float sw = cw - ip * 2.0f;
@@ -486,6 +496,104 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                 mine::core::Span<const mine::math::Vec2>{hex2, 6},
                 mine::paint::Brush::solid(col_cyan),
                 pen_poly);
+        }
+
+        // ── 行11 左：线性渐变 FillRect（蓝 → 橙，从左到右）──────────────────
+        {
+            mine::paint::GradientStop lg_stops[] = {
+                {0.0f, mine::math::Color{0.20f, 0.50f, 1.00f, 1.0f}},  // 蓝色
+                {1.0f, mine::math::Color{1.00f, 0.45f, 0.10f, 1.0f}},  // 橙色
+            };
+            auto brush = mine::paint::Brush::linear_gradient(
+                mine::math::Vec2{0.0f, 0.5f},   // 起点：左侧中点
+                mine::math::Vec2{1.0f, 0.5f},   // 终点：右侧中点
+                mine::core::Span<mine::paint::GradientStop>(lg_stops, 2));
+            canvas.fill_rect(
+                mine::math::Rect{col0 + ip, row10 + ip, sw, sh}, brush);
+        }
+
+        // ── 行11 右：径向渐变 FillEllipse（白 → 紫，从中心向外）────────────
+        {
+            mine::paint::GradientStop rg_stops[] = {
+                {0.0f, mine::math::Color{1.00f, 1.00f, 1.00f, 1.0f}},  // 白色中心
+                {1.0f, mine::math::Color{0.65f, 0.25f, 0.90f, 0.0f}},  // 紫色透明边缘
+            };
+            auto brush = mine::paint::Brush::radial_gradient(
+                mine::math::Vec2{0.5f, 0.5f},   // 圆心：中心
+                1.0f,                            // 外径：1.0（归一化，以较短半边为基准）
+                mine::core::Span<mine::paint::GradientStop>(rg_stops, 2));
+            // 为径向渐变提供深色背景
+            canvas.fill_ellipse(
+                mine::math::Vec2{col1 + ip + sw * 0.5f, row10 + ip + sh * 0.5f},
+                mine::math::Vec2{sw * 0.5f, sh * 0.5f},
+                mine::paint::Brush::solid(mine::math::Color{0.25f, 0.10f, 0.40f, 1.0f}));
+            canvas.fill_ellipse(
+                mine::math::Vec2{col1 + ip + sw * 0.5f, row10 + ip + sh * 0.5f},
+                mine::math::Vec2{sw * 0.5f, sh * 0.5f},
+                brush);
+        }
+
+        // ── 行12 左：线性渐变 FillRoundedRect（青 → 绿，从上到下）────────────
+        {
+            mine::paint::GradientStop lg_stops[] = {
+                {0.0f, mine::math::Color{0.15f, 0.80f, 0.85f, 1.0f}},  // 青色顶部
+                {1.0f, mine::math::Color{0.10f, 0.75f, 0.35f, 1.0f}},  // 绿色底部
+            };
+            auto brush = mine::paint::Brush::linear_gradient(
+                mine::math::Vec2{0.5f, 0.0f},   // 起点：顶部中心
+                mine::math::Vec2{0.5f, 1.0f},   // 终点：底部中心
+                mine::core::Span<mine::paint::GradientStop>(lg_stops, 2));
+            canvas.fill_rounded_rect(
+                mine::math::RoundedRect{
+                    mine::math::Rect{col0 + ip, row11 + ip, sw, sh},
+                    std::min(sw, sh) * 0.25f,  // 圆角半径
+                    std::min(sw, sh) * 0.25f},
+                brush);
+        }
+
+        // ── 行12 右：径向渐变 FillRect（黄 → 红 → 暗红，三色标）───────────────
+        {
+            mine::paint::GradientStop rg_stops[] = {
+                {0.00f, mine::math::Color{1.00f, 0.95f, 0.20f, 1.0f}},  // 黄色中心
+                {0.50f, mine::math::Color{0.95f, 0.40f, 0.10f, 1.0f}},  // 橙红中圈
+                {1.00f, mine::math::Color{0.50f, 0.05f, 0.05f, 1.0f}},  // 暗红边缘
+            };
+            auto brush = mine::paint::Brush::radial_gradient(
+                mine::math::Vec2{0.5f, 0.5f},   // 圆心：矩形中心
+                1.0f,                            // 外径
+                mine::core::Span<mine::paint::GradientStop>(rg_stops, 3));
+            canvas.fill_rect(
+                mine::math::Rect{col1 + ip, row11 + ip, sw, sh}, brush);
+        }
+
+        // ── 行13 左：AcrylicBrush FillRoundedRect（蓝色调，30px 模糊）────────
+        // 亚克力效果：捕获上一帧内容 → 高斯模糊 → 叠加蓝色色调
+        // 注：首帧背景为空（黑色），从第二帧起可见模糊内容
+        {
+            auto brush = mine::paint::Brush::acrylic(
+                mine::math::Color{0.30f, 0.50f, 1.00f, 0.85f},  // 蓝色色调
+                0.50f,   // 色调混合比例（0=完全不叠色调，1=完全色调覆盖）
+                30.0f,   // 模糊量（像素）
+                1.2f);   // 饱和度增益（>1 增强饱和度）
+            canvas.fill_rounded_rect(
+                mine::math::RoundedRect{
+                    mine::math::Rect{col0 + ip, row12 + ip, sw, sh},
+                    std::min(sw, sh) * 0.25f,
+                    std::min(sw, sh) * 0.25f},
+                brush);
+        }
+
+        // ── 行13 右：AcrylicBrush FillEllipse（橙色调，20px 模糊）────────────
+        {
+            auto brush = mine::paint::Brush::acrylic(
+                mine::math::Color{1.00f, 0.55f, 0.15f, 0.80f},  // 橙色色调
+                0.40f,   // 色调混合比例
+                20.0f,   // 模糊量（像素，较小模糊用于轻微磨砂效果）
+                0.9f);   // 饱和度增益（<1 轻微降饱和）
+            canvas.fill_ellipse(
+                mine::math::Vec2{col1 + ip + sw * 0.5f, row12 + ip + sh * 0.5f},
+                mine::math::Vec2{sw * 0.5f, sh * 0.5f},
+                brush);
         }
 
         // ── 文字渲染演示（顶部边距区域）──────────────────────────────────────

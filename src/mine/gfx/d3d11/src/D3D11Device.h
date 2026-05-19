@@ -60,6 +60,8 @@ public:
         const void*  data,
         uint32_t     row_pitch) override;
 
+    void copy_texture(ITexture* dst, ITexture* src) override;
+
     // ── 内部访问器 ────────────────────────────────────────────────────────
 
     /// 设备是否创建成功

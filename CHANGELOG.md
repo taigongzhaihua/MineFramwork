@@ -5,6 +5,38 @@
 ## [Unreleased]
 
 ### Added
+- **paint（渐变与亚克力画刷）**：新增多种画刷类型（M0 阶段）：
+  - `BrushKind::LinearGradient`：线性渐变画刷，起点/终点使用归一化坐标 [0,1]，最多 4 个色标
+  - `BrushKind::RadialGradient`：径向渐变画刷，支持 `inner_radius` 实现环形渐变效果
+  - `BrushKind::AcrylicBrush`：亚克力画刷（捕获上一帧内容 + 高斯模糊 + 饱和度调整 + 色调叠加）
+  - `GradientStop { float offset; math::Color color; }`：色标结构体
+  - `LinearGradientData` / `RadialGradientData` / `AcrylicData`：各类型画刷数据结构（POD，无动态分配）
+  - `Brush::linear_gradient(start, end, Span<GradientStop>)` 工厂方法
+  - `Brush::radial_gradient(center, outer_radius, Span<GradientStop>)` 工厂方法
+  - `Brush::radial_gradient_ring(center, inner_radius, outer_radius, Span<GradientStop>)` 工厂方法
+  - `Brush::acrylic(tint_color, tint_opacity, blur_amount, saturation)` 工厂方法
+  - `Brush` 类改为 union 内联存储（不超过 4 个色标，无堆分配），总大小约 104 字节
+
+- **gfx.rhi（接口扩展）**：
+  - `IDevice::copy_texture(dst, src)`：GPU-to-GPU 全量纹理拷贝接口（亚克力背景捕获用）
+
+- **gfx.d3d11（后端实现）**：
+  - `D3D11Device::copy_texture()`：使用 `ID3D11DeviceContext::CopyResource` 实现
+
+- **paint（SDF 渲染管线扩展）**：
+  - `BrushDataCB`（HLSL/C++ 双端，128 字节，b2 槽）：每 DrawCall 传递画刷类型及渐变参数
+  - SDF 像素着色器新增 `sample_gradient()` 辅助函数（支持 2-4 个色标的分段线性插值）
+  - SDF 像素着色器支持 `brush_kind` 分支：纯色/线性渐变/径向渐变/亚克力，适用于所有 fill 形状
+  - `ViewportCB` 增加 `phys_width/phys_height` 字段（取代原 padding），供亚克力着色器将 SV_Position 转为 UV
+  - 新增高斯模糊管线 `blur_pipeline_`（BlurVertex 16 字节，9-tap 分离式卷积，H/V 两趟复用同一管线）
+  - 新增 `ensure_scratch_textures()` 亚克力 scratch 纹理懒创建（尺寸变化时自动重建）
+  - 新增 `make_brush_cb()` 静态方法（归一化坐标 → local 像素坐标转换，生成 GPU 画刷参数缓冲）
+  - `render()` 新增亚克力前处理步骤（copy_texture + H 模糊 + V 模糊，在主绘制循环前执行）
+  - 所有 fill 形状命令（FillRect/FillRoundedRect/FillComplexRoundedRect/FillEllipse）现支持渐变和亚克力画刷
+
+- **samples（样例更新）**：
+  - `00-hello-rect`：增加 3 行新演示（行11-13）：线性渐变矩形/径向渐变椭圆/渐变圆角矩形/多色标径向渐变/亚克力圆角矩形/亚克力椭圆
+
 - **text（mine.text 模块）**：新增基于 FreeType 的字体光栅化模块（M0 阶段）：
   - `FontFace`：字体面封装类（FreeType `FT_Face`），支持 `load_from_file` / `load_from_memory` 工厂方法，`set_pixel_size` / `rasterize` / `ascender` / `descender` / `line_height` API
   - `GlyphMetrics` / `GlyphBitmap`：字形度量和位图结构体（bearing / advance / pitch）

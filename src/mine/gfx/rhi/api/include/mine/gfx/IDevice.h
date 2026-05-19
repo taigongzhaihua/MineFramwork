@@ -130,6 +130,17 @@ public:
         uint32_t     height,
         const void*  data,
         uint32_t     row_pitch) = 0;
+
+    /**
+     * @brief 将 GPU 纹理内容完整复制到另一个 GPU 纹理（GPU-to-GPU 拷贝）。
+     *
+     * 两个纹理必须具有相同的宽度、高度和格式。
+     * dst 必须不能同时绑定为着色器资源或渲染目标。
+     *
+     * @param dst  目标纹理（由 create_texture() 创建，必须具有足够的绑定标志）
+     * @param src  源纹理（通常为交换链后缓冲或渲染目标纹理）
+     */
+    virtual void copy_texture(ITexture* dst, ITexture* src) = 0;
 };
 
 } // namespace mine::gfx

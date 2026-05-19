@@ -263,4 +263,17 @@ void D3D11DeviceImpl::update_texture_region(
         0);         // depth_row_pitch（2D 纹理不使用）
 }
 
+void D3D11DeviceImpl::copy_texture(ITexture* dst, ITexture* src) {
+    if (!immediate_ctx_ || dst == nullptr || src == nullptr) return;
+
+    auto* d3d_dst = static_cast<D3D11Texture*>(dst);
+    auto* d3d_src = static_cast<D3D11Texture*>(src);
+    ID3D11Resource* res_dst = d3d_dst->texture();
+    ID3D11Resource* res_src = d3d_src->texture();
+    if (res_dst == nullptr || res_src == nullptr) return;
+
+    // GPU-to-GPU 全量拷贝（两者必须具有相同的大小和格式）
+    immediate_ctx_->CopyResource(res_dst, res_src);
+}
+
 } // namespace mine::gfx::d3d11
