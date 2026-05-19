@@ -19,11 +19,13 @@
   - 支持 `Transform2D::rotation_about(angle, pivot)` 绕任意点旋转
 
 - **samples（样例更新）**：
-  - `00-hello-rect`：增加 2 行新演示（行16-17）：
+  - `00-hello-rect`：增加 2 行新演示（行16-18）：
     - 行16左：`save/translate/rotate/restore` — 旋转 30° 的圆角矩形（含未旋转轮廓参考）
     - 行16右：`save/translate/scale/restore` — 放大 1.5 倍的椭圆（含正常大小轮廓参考）
     - 行17左：嵌套变换演示 — 外层旋转15° 绿色矩形 + 内层叠加旋转30°+缩放0.6的橙色矩形
     - 行17右：`rotation_about` 演示 — 五个彩色圆角矩形绕格子中心以72°间隔均匀分布
+    - 行18左：`translate` 纯平移演示 — 原始位置半透明轮廓 + 平移后填充矩形对比
+    - 行18右：`translate` 步进演示 — 五个矩形以固定步进递进平移，颜色蓝渐变橙
 
 - **paint（裁剪系统）**：新增基于 D3D11 模板缓冲（Stencil Buffer）的 SDF 嵌套裁剪系统：
   - `Canvas::clip_rect(Rect)`：压入矩形裁剪区域

@@ -2,7 +2,7 @@
  * @file main.cpp
  * @brief 00-hello-rect 示例：mine.paint Canvas SDF 填充 + 描边 + 裁剪 + 变换命令综合演示。
  *
- * 演示内容（2×17 网格布局，左列填充/右列描边）：
+ * 演示内容（2×18 网格布局，左列填充/右列描边）：
  *   行1 左：FillRect                      — 纯色填充矩形（绿色）
  *   行1 右：StrokeRect                    — 矩形描边（绿色，线宽 4px）
  *   行2 左：FillRoundedRect               — 均匀圆角矩形填充（蓝色，radius=20px）
@@ -37,6 +37,8 @@
  *   行16右：translate + scale               — 平移后缩放1.5倍的椭圆（save/restore）
  *   行17左：嵌套变换（外层旋转 + 内层旋转+缩放）— 叠加变换演示
  *   行17右：rotation_about                  — 五个小矩形绕中心点匀角分布旋转
+ *   行18左：translate（纯平移演示）         — 原始位置轮廓 + 平移后填充圆角矩形对比
+ *   行18右：translate 步进演示           — 5个矩形以固定偶量递进平移（对角线布局）
  */
 
 #include <mine/platform/PlatformAbi.h>
@@ -116,11 +118,11 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
             mine::math::Rect{0.0f, 0.0f, W, H},
             mine::paint::Brush::solid(mine::math::Color{0.12f, 0.12f, 0.12f, 1.0f}));
 
-        // 2×17 网格参数（2列 × 17行）
+        // 2×18 网格参数（2列 × 18行）
         const float outer_pad = 20.0f;
         const float gap       = 10.0f;
         const float cw        = (W - outer_pad * 2.0f - gap) * 0.5f;
-        const float ch        = (H - outer_pad * 2.0f - gap * 16.0f) / 17.0f;
+        const float ch        = (H - outer_pad * 2.0f - gap * 17.0f) / 18.0f;
 
         const float col0 = outer_pad;
         const float col1 = outer_pad + cw + gap;
@@ -144,6 +146,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // 新增：变换演示行（平移、旋转、缩放）
         const float row15 = outer_pad + (ch + gap) * 15.0f;
         const float row16 = outer_pad + (ch + gap) * 16.0f;
+        const float row17 = outer_pad + (ch + gap) * 17.0f;
 
         const float ip = 14.0f;
         const float sw = cw - ip * 2.0f;
@@ -835,6 +838,67 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                     mine::math::RoundedRect{
                         mine::math::Rect{cx + orbit_r - rw * 0.5f, cy - rh * 0.5f, rw, rh}, 6.0f, 6.0f},
                     mine::paint::Brush::solid(orbit_colors[k]));
+                canvas.restore();
+            }
+        }
+
+        // ── 行18 左：translate（纯平移演示）──────────────────────────────────
+        // 原始位置轮廓（半透明白色）+ save → translate(dx, dy) → 填充圆角矩形 → restore
+        // 直观展示 translate 将画布原点偏移后绘图的效果。
+        {
+            const float x = col0, y = row17;
+            const float rw = sw * 0.55f, rh = sh * 0.55f;
+            const float dx = sw * 0.20f, dy = sh * 0.18f;  // 平移量
+            // 参考矩形定位于格子内容区左上偏内位置
+            const float ref_x = x + ip + sw * 0.08f;
+            const float ref_y = y + ip + sh * 0.08f;
+
+            // 原始位置参考轮廓（半透明白色虚线感觉）
+            canvas.stroke_rounded_rect(
+                mine::math::RoundedRect{
+                    mine::math::Rect{ref_x, ref_y, rw, rh}, 10.0f, 10.0f},
+                mine::paint::Brush::solid(mine::math::Color{1.0f, 1.0f, 1.0f, 0.25f}),
+                mine::paint::Pen{1.5f});
+
+            // save → translate → 在相同相对坐标绘制填充矩形 → restore
+            canvas.save();
+            canvas.translate(mine::math::Vec2{dx, dy});
+            canvas.fill_rounded_rect(
+                mine::math::RoundedRect{
+                    mine::math::Rect{ref_x, ref_y, rw, rh}, 10.0f, 10.0f},
+                mine::paint::Brush::solid(mine::math::Color{0.25f, 0.72f, 0.90f, 0.90f}));
+            canvas.restore();
+        }
+
+        // ── 行18 右：translate 步进演示（对角线递进平移）──────────────────
+        // 5 个小圆角矩形，每个在前一个基础上向右下方固定步进平移，颜色从蓝渐变到橙。
+        // 展示多次独立 save/translate/draw/restore 的累积效果对比。
+        {
+            const float x = col1, y = row17;
+            constexpr int n = 5;
+            const float rw = sw * 0.28f, rh = sh * 0.28f;
+            // 步进量：让 n 个矩形均匀分布在格子内容区对角线上
+            const float step_x = (sw - rw) / (n - 1);
+            const float step_y = (sh - rh) / (n - 1);
+            const float start_x = x + ip;
+            const float start_y = y + ip;
+
+            for (int k = 0; k < n; ++k) {
+                const float t = static_cast<float>(k) / (n - 1);
+                // 颜色从蓝（左上）渐变到橙（右下）
+                const mine::math::Color c{
+                    0.15f + t * 0.80f,
+                    0.50f - t * 0.15f,
+                    0.92f - t * 0.62f,
+                    0.82f};
+                // 各矩形从 (0, 0) 开始，通过 translate 定位到对角线上
+                canvas.save();
+                canvas.translate(mine::math::Vec2{start_x + step_x * k,
+                                                  start_y + step_y * k});
+                canvas.fill_rounded_rect(
+                    mine::math::RoundedRect{
+                        mine::math::Rect{0.0f, 0.0f, rw, rh}, 8.0f, 8.0f},
+                    mine::paint::Brush::solid(c));
                 canvas.restore();
             }
         }
