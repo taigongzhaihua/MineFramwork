@@ -13,6 +13,9 @@
 // 开启 Per-Monitor DPI v2 支持
 #include <shellscalingapi.h>
 
+#include <algorithm>
+#include <cstring>
+
 #include "Win32Window.h"
 #include "Win32WindowClass.h"
 
@@ -20,8 +23,10 @@ namespace mine::platform::win32 {
 
 // ── 构造与销毁 ────────────────────────────────────────────────────────────────
 
-Win32Window::Win32Window(const WindowDesc& desc, WindowDestroyCallback on_destroy)
-    : on_destroy_(std::move(on_destroy)) {
+Win32Window::Win32Window(const WindowDesc& desc, WindowDestroyCallback on_destroy,
+                         Win32IMEService* ime_service)
+    : on_destroy_(std::move(on_destroy))
+    , ime_service_(ime_service) {
 
     // 注册窗口类（首次调用时注册）
     Win32WindowClass::ensure_registered(&Win32Window::window_proc);
@@ -383,6 +388,10 @@ LRESULT Win32Window::handle_message(
 
     // 获得焦点
     case WM_SETFOCUS: {
+        // 通知 IME 服务：当前活跃窗口更新
+        if (ime_service_) {
+            ime_service_->on_focus(hwnd);
+        }
         WindowEvent ev{};
         ev.kind = WindowEventKind::FocusGained;
         event_source_.fire(ev);
@@ -391,6 +400,10 @@ LRESULT Win32Window::handle_message(
 
     // 失去焦点
     case WM_KILLFOCUS: {
+        // 通知 IME 服务：清除活跃窗口
+        if (ime_service_) {
+            ime_service_->on_blur();
+        }
         WindowEvent ev{};
         ev.kind = WindowEventKind::FocusLost;
         event_source_.fire(ev);
@@ -428,6 +441,86 @@ LRESULT Win32Window::handle_message(
                      suggested->bottom - suggested->top,
                      SWP_NOZORDER | SWP_NOACTIVATE);
         return 0;
+    }
+
+    // ── IME 输入法消息 ──────────────────────────────────────────────────────
+
+    // IME 上下文激活/切换：交给系统默认处理（显示系统 IME UI）
+    case WM_IME_SETCONTEXT:
+        // lParam 控制系统 IME 子窗口（候选框、组合窗口等）的显示；
+        // 直接转发给 DefWindowProcW 使用系统默认 IME 界面。
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
+
+    // IME 组合输入开始（用户开始拼写，尚未确认）
+    case WM_IME_STARTCOMPOSITION: {
+        WindowEvent ev{};
+        ev.kind = WindowEventKind::ImeCompositionStarted;
+        event_source_.fire(ev);
+        // 传递给系统让 IME 继续显示默认组合窗口
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
+    }
+
+    // IME 组合字符串更新或确认提交
+    case WM_IME_COMPOSITION: {
+        HIMC himc = ImmGetContext(hwnd);
+        if (himc) {
+            // GCS_COMPSTR：当前预编辑（拼写中）字符串
+            if (lparam & GCS_COMPSTR) {
+                const LONG byte_len = ImmGetCompositionStringW(
+                    himc, GCS_COMPSTR, nullptr, 0);
+                if (byte_len > 0) {
+                    std::wstring comp_buf(
+                        static_cast<size_t>(byte_len) / sizeof(wchar_t), L'\0');
+                    ImmGetCompositionStringW(himc, GCS_COMPSTR,
+                        comp_buf.data(), static_cast<DWORD>(byte_len));
+                    const std::string utf8 = utf16_to_utf8(
+                        comp_buf.data(), static_cast<int>(comp_buf.size()));
+                    WindowEvent ev{};
+                    ev.kind = WindowEventKind::ImeCompositionChanged;
+                    const size_t copy_len = std::min(
+                        utf8.size(), sizeof(ev.ime_text_utf8) - 1);
+                    std::memcpy(ev.ime_text_utf8, utf8.data(), copy_len);
+                    ev.ime_text_utf8[copy_len] = '\0';
+                    ev.ime_text_length = static_cast<uint32_t>(copy_len);
+                    event_source_.fire(ev);
+                }
+            }
+
+            // GCS_RESULTSTR：用户最终确认提交的字符串
+            if (lparam & GCS_RESULTSTR) {
+                const LONG byte_len = ImmGetCompositionStringW(
+                    himc, GCS_RESULTSTR, nullptr, 0);
+                if (byte_len > 0) {
+                    std::wstring result_buf(
+                        static_cast<size_t>(byte_len) / sizeof(wchar_t), L'\0');
+                    ImmGetCompositionStringW(himc, GCS_RESULTSTR,
+                        result_buf.data(), static_cast<DWORD>(byte_len));
+                    const std::string utf8 = utf16_to_utf8(
+                        result_buf.data(), static_cast<int>(result_buf.size()));
+                    WindowEvent ev{};
+                    ev.kind = WindowEventKind::ImeCompositionCommitted;
+                    const size_t copy_len = std::min(
+                        utf8.size(), sizeof(ev.ime_text_utf8) - 1);
+                    std::memcpy(ev.ime_text_utf8, utf8.data(), copy_len);
+                    ev.ime_text_utf8[copy_len] = '\0';
+                    ev.ime_text_length = static_cast<uint32_t>(copy_len);
+                    event_source_.fire(ev);
+                }
+            }
+
+            ImmReleaseContext(hwnd, himc);
+        }
+        // 传递给系统，确保 IME 继续正常工作（更新组合字符显示）
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
+    }
+
+    // IME 组合输入结束（确认或取消）
+    case WM_IME_ENDCOMPOSITION: {
+        WindowEvent ev{};
+        ev.kind = WindowEventKind::ImeCompositionEnded;
+        event_source_.fire(ev);
+        // 传递给系统让 IME 清理组合窗口
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
     }
 
     default:

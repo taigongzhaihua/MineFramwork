@@ -5,6 +5,15 @@
 ## [Unreleased]
 
 ### Added
+- **platform（IME 输入法服务）**：实现 Win32 平台层完整 IME 支持（Windows IMM32 API）：
+  - `WindowEventKind` 新增四种 IME 事件类型：`ImeCompositionStarted`、`ImeCompositionChanged`、`ImeCompositionCommitted`、`ImeCompositionEnded`
+  - `WindowEvent` 新增 `ime_text_utf8[256]` 和 `ime_text_length` 字段，承载 UTF-8 编码的组合文字或提交文字
+  - `Win32IMEService` 从空存根升级为完整实现：通过 `ImmGetContext` / `ImmSetCandidateWindow` / `ImmSetCompositionWindow` 控制候选框位置，通过 `ImmAssociateContext` / `ImmAssociateContextEx` 启用/禁用 IME
+  - `Win32IMEService` 新增内部接口 `on_focus(HWND)` / `on_blur()`，在窗口焦点变化时维护活跃 HWND
+  - `Win32Window` 构造函数新增 `Win32IMEService*` 参数，在 `WM_SETFOCUS` / `WM_KILLFOCUS` 时同步通知 IME 服务
+  - `Win32Window::handle_message` 新增 `WM_IME_SETCONTEXT`、`WM_IME_STARTCOMPOSITION`、`WM_IME_COMPOSITION`（含 `GCS_COMPSTR` + `GCS_RESULTSTR` 分支）、`WM_IME_ENDCOMPOSITION` 消息处理
+  - `Win32ApplicationHostImpl::create_window` 向 `Win32Window` 传入 `&ime_service_`，完成焦点→IME 的通知链路
+
 - **paint（变换系统）**：实现 Canvas 2D 变换系统（平移、缩放、旋转）：
   - `DrawCmdKind::TransformSet`：新增非压栈变换命令（`transform()`/`translate()`/`rotate()`/`scale()` 使用）
   - `DrawCmdKind::TransformPush`：语义修正为仅保存当前变换快照（`save()` 使用，不级联变换）

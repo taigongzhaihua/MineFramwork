@@ -64,9 +64,10 @@ void Win32ApplicationHostImpl::quit(int exit_code) {
 core::OwnedPtr<IWindow> Win32ApplicationHostImpl::create_window(
     const WindowDesc& desc) {
 
-    // 通过统一分配器创建 Win32Window 对象
+    // 通过统一分配器创建 Win32Window 对象，传入 IME 服务指针以便焦点变化时通知
     Win32Window* raw = MINE_NEW(Win32Window, desc,
-        [this](Win32Window* w) { on_window_destroyed(w); });
+        [this](Win32Window* w) { on_window_destroyed(w); },
+        &ime_service_);
 
     if (!raw || raw->is_destroyed()) {
         // CreateWindowEx 失败：清理并返回空指针

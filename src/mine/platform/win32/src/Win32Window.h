@@ -9,6 +9,7 @@
 #include <mine/platform/WindowDesc.h>
 #include "Win32Helpers.h"
 #include "Win32WindowEventSource.h"
+#include "Win32IMEService.h"
 
 #include <functional>
 
@@ -36,8 +37,10 @@ public:
      * @brief 构造并创建 Win32 窗口。
      * @param desc          窗口创建参数
      * @param on_destroy    窗口被销毁时的回调（通知宿主）
+     * @param ime_service   IME 服务指针（可为 nullptr，焦点变化时通知）
      */
-    Win32Window(const WindowDesc& desc, WindowDestroyCallback on_destroy);
+    Win32Window(const WindowDesc& desc, WindowDestroyCallback on_destroy,
+                Win32IMEService* ime_service = nullptr);
 
     ~Win32Window() override;
 
@@ -99,6 +102,7 @@ private:
     WindowKind               kind_{WindowKind::Normal}; ///< 窗口类型（决定 show() 行为等）
     Win32WindowEventSource   event_source_;
     WindowDestroyCallback    on_destroy_;
+    Win32IMEService*         ime_service_{nullptr};     ///< IME 服务（弱引用，由宿主持有）
 };
 
 } // namespace mine::platform::win32
