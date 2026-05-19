@@ -18,8 +18,8 @@
  *   - StrokeCubicBezier：三次贝塞尔曲线 SDF 描边（数値迭代：17步采样+Newton精化），支持 Flat/Round cap（kind=9）
  *
  * 渲染架构：
- *   - 所有形状（含线段）均走 SDF 管线，SDF 参数编入顶点，逐像素精确 AA
- *   - StrokePath 等折线命令留至后续里程碑，届时使用 CPU 展开三角带（solid pipeline）
+ *   - 规则形状与曲线描边走 SDF 管线，SDF 参数编入顶点，逐像素精确 AA
+ *   - FillPath / StrokePath 在 CPU 端先扁平化 Path，再分别走多边形 SDF 填充与折线三角带描边
  *
  * SDF 顶点格式（SdfVertex，80 字节）：
  *   pos(2) + color(4) + local(2) + params0(4) + params1(4) + extra(4) float
@@ -48,6 +48,7 @@
 #include <mine/containers/Vector.h>
 #include <mine/math/Vec2.h>
 #include <mine/text/FontFace.h>
+#include <algorithm>
 #include <cmath>
 
 namespace mine::paint {
@@ -1335,7 +1336,172 @@ float4 main(SdfClipPSIn i) : SV_Target {
 }
 )hlsl";
 
-// ── 折线描边展开辅助函数（StrokePath 备用，当前未调用）───────────────────────
+// ── Path 扁平化辅助函数（FillPath / StrokePath）──────────────────────────────
+
+/// 扁平化后的单个子路径（MoveTo 起始，直到下一个 MoveTo 或 Close）。
+struct FlattenedSubpath {
+    containers::Vector<math::Vec2> points;  ///< 子路径顶点（按绘制顺序）
+    bool closed{false};                     ///< 是否为闭合子路径（遇到 Close）
+};
+
+/// 计算点到直线（ab）的距离（用于贝塞尔平坦度判定）。
+static float point_line_distance(math::Vec2 p, math::Vec2 a, math::Vec2 b) {
+    const math::Vec2 ab = b - a;
+    const float len = ab.length();
+    if (len <= 1e-6f) {
+        return (p - a).length();
+    }
+    return std::abs((p - a).cross(ab)) / len;
+}
+
+/// 二次贝塞尔扁平化（递归细分，直到平坦度满足阈值）。
+static void flatten_quad_recursive(
+    math::Vec2 p0, math::Vec2 p1, math::Vec2 p2,
+    float tolerance,
+    int depth,
+    containers::Vector<math::Vec2>& out_points)
+{
+    if (depth >= 10 || point_line_distance(p1, p0, p2) <= tolerance) {
+        out_points.push_back(p2);
+        return;
+    }
+
+    const math::Vec2 p01  = (p0 + p1) * 0.5f;
+    const math::Vec2 p12  = (p1 + p2) * 0.5f;
+    const math::Vec2 p012 = (p01 + p12) * 0.5f;
+
+    flatten_quad_recursive(p0, p01, p012, tolerance, depth + 1, out_points);
+    flatten_quad_recursive(p012, p12, p2, tolerance, depth + 1, out_points);
+}
+
+/// 三次贝塞尔扁平化（递归细分，直到平坦度满足阈值）。
+static void flatten_cubic_recursive(
+    math::Vec2 p0, math::Vec2 p1, math::Vec2 p2, math::Vec2 p3,
+    float tolerance,
+    int depth,
+    containers::Vector<math::Vec2>& out_points)
+{
+    const float d1 = point_line_distance(p1, p0, p3);
+    const float d2 = point_line_distance(p2, p0, p3);
+    if (depth >= 10 || std::max(d1, d2) <= tolerance) {
+        out_points.push_back(p3);
+        return;
+    }
+
+    const math::Vec2 p01   = (p0 + p1) * 0.5f;
+    const math::Vec2 p12   = (p1 + p2) * 0.5f;
+    const math::Vec2 p23   = (p2 + p3) * 0.5f;
+    const math::Vec2 p012  = (p01 + p12) * 0.5f;
+    const math::Vec2 p123  = (p12 + p23) * 0.5f;
+    const math::Vec2 p0123 = (p012 + p123) * 0.5f;
+
+    flatten_cubic_recursive(p0, p01, p012, p0123, tolerance, depth + 1, out_points);
+    flatten_cubic_recursive(p0123, p123, p23, p3, tolerance, depth + 1, out_points);
+}
+
+/// 将 Path 扁平化为多个子路径（支持 LineTo / QuadTo / CubicTo / Close）。
+static void flatten_path_to_subpaths(
+    const Path& path,
+    containers::Vector<FlattenedSubpath>& out_subpaths,
+    float tolerance = 0.35f)
+{
+    out_subpaths.clear();
+
+    FlattenedSubpath cur;
+    bool has_cur = false;
+    math::Vec2 cur_pt{};
+    math::Vec2 subpath_start{};
+
+    auto flush_cur = [&]() {
+        if (!has_cur || cur.points.size() < 2) {
+            cur.points.clear();
+            cur.closed = false;
+            has_cur = false;
+            return;
+        }
+
+        // 若闭合路径尾点与首点重复，则去重以避免退化边。
+        if (cur.closed && cur.points.size() >= 2) {
+            const auto& first = cur.points.front();
+            const auto& last  = cur.points.back();
+            if (std::abs(first.x - last.x) < 1e-5f && std::abs(first.y - last.y) < 1e-5f) {
+                cur.points.pop_back();
+            }
+        }
+
+        if (cur.points.size() >= 2) {
+            out_subpaths.push_back(std::move(cur));
+        }
+        cur.points.clear();
+        cur.closed = false;
+        has_cur = false;
+    };
+
+    for (const auto& pc : path.cmds()) {
+        if (pc.kind == PathCmdKind::MoveTo) {
+            flush_cur();
+            has_cur = true;
+            subpath_start = pc.pt[0];
+            cur_pt = subpath_start;
+            cur.closed = false;
+            cur.points.push_back(subpath_start);
+        }
+        else if (pc.kind == PathCmdKind::LineTo) {
+            if (!has_cur) {
+                has_cur = true;
+                subpath_start = pc.pt[0];
+                cur_pt = subpath_start;
+                cur.closed = false;
+                cur.points.push_back(subpath_start);
+            }
+            else {
+                cur.points.push_back(pc.pt[0]);
+                cur_pt = pc.pt[0];
+            }
+        }
+        else if (pc.kind == PathCmdKind::QuadTo) {
+            if (!has_cur) continue;
+            flatten_quad_recursive(cur_pt, pc.pt[0], pc.pt[1], tolerance, 0, cur.points);
+            cur_pt = pc.pt[1];
+        }
+        else if (pc.kind == PathCmdKind::CubicTo) {
+            if (!has_cur) continue;
+            flatten_cubic_recursive(cur_pt, pc.pt[0], pc.pt[1], pc.pt[2], tolerance, 0, cur.points);
+            cur_pt = pc.pt[2];
+        }
+        else if (pc.kind == PathCmdKind::Close) {
+            if (!has_cur) continue;
+            cur.closed = true;
+            cur_pt = subpath_start;
+            flush_cur();
+        }
+    }
+
+    flush_cur();
+}
+
+/// 将顶点数量压缩到 max_count（等距抽样，保留首顶点顺序）。
+static void reduce_vertices_evenly(
+    const containers::Vector<math::Vec2>& input,
+    containers::Vector<math::Vec2>& output,
+    size_t max_count)
+{
+    output.clear();
+    if (input.empty() || max_count == 0) return;
+    if (input.size() <= max_count) {
+        output = input;
+        return;
+    }
+    output.reserve(max_count);
+    const float step = static_cast<float>(input.size()) / static_cast<float>(max_count);
+    for (size_t i = 0; i < max_count; ++i) {
+        size_t idx = static_cast<size_t>(static_cast<float>(i) * step);
+        if (idx >= input.size()) idx = input.size() - 1;
+        output.push_back(input[idx]);
+    }
+}
+
+// ── 折线描边展开辅助函数（StrokePath 使用）──────────────────────────────────
 
 /**
  * @brief 将折线描边展开为顶点并写入列表（Miter join + Butt/Square cap）。
@@ -1343,8 +1509,8 @@ float4 main(SdfClipPSIn i) : SV_Target {
  * 对折线每个顶点计算角平分线 (miter) 方向的偏移量，生成上下两侧对称的点，
  * 相邻两点之间生成一个矩形（两个三角形）。
  *
- * 注：StrokeLine 单线段命令已改为 SDF 方案（kind=6）。
- *     本函数为后续 StrokePath（多段折线）预留，暂未被调用。
+ * 注：StrokeLine 单线段命令已改为 SDF 方案（kind=6）；
+ *     StrokePath 则复用本函数在 CPU 侧展开折线三角带。
  *
  * @param vertices  输出顶点列表（追加）
  * @param pts       折线点序列（屏幕像素坐标）
@@ -1353,9 +1519,6 @@ float4 main(SdfClipPSIn i) : SV_Target {
  * @param closed    是否为闭合路径（最后一段连回起点）
  * @param miter_lim Miter 上限，超出时截断为 Bevel（对应 Pen::miter_limit）
  */
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
-#pragma warning(push)
-#pragma warning(disable: 4505)  // 暂未调用，为 StrokePath 预留
 static void push_polyline_stroke_vertices(
     containers::Vector<PaintVertex>& vertices,
     const containers::Vector<math::Vec2>& pts,
@@ -1461,7 +1624,6 @@ static void push_polyline_stroke_vertices(
         vertices.push_back({l0.x, l0.y, r, g, b, a});
     }
 }
-#pragma warning(pop)
 
 // ── RhiRenderer 类 ────────────────────────────────────────────────────────────
 
@@ -2682,6 +2844,16 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
         }
     };
 
+    /// 对纯色顶点批次应用当前变换（用于 StrokePath 的三角带顶点）
+    auto apply_paint_transform = [&](containers::Vector<PaintVertex>& verts) {
+        if (current_transform_is_identity) return;
+        for (auto& v : verts) {
+            const math::Point sp = current_transform.apply(math::Point{v.x, v.y});
+            v.x = sp.x;
+            v.y = sp.y;
+        }
+    };
+
     // ── 5. 逐命令处理（每命令单独 DrawCall，保证绘制顺序）───────────────
 
     for (const DrawCmd& cmd : cmds) {
@@ -3409,7 +3581,131 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
         }
 
-        // StrokePath、ClipPushRect 等高级命令留至后续里程碑实现
+        // ── FillPath（路径填充）──────────────────────────────────────────────
+
+        else if (cmd.kind == DrawCmdKind::FillPath) {
+            // 当前与 FillPolygon 一致：路径填充先支持纯色画刷。
+            if (cmd.brush.kind() != BrushKind::SolidColor) continue;
+            if (cmd.path_index >= static_cast<uint32_t>(dl.paths().size())) continue;
+
+            const Path& path = dl.paths()[cmd.path_index];
+            containers::Vector<FlattenedSubpath> subpaths;
+            flatten_path_to_subpaths(path, subpaths);
+            if (subpaths.empty()) continue;
+
+            for (const auto& sp : subpaths) {
+                // 填充仅处理闭合子路径；开放子路径不参与面填充。
+                if (!sp.closed || sp.points.size() < 3) continue;
+
+                // 多边形 SDF 常量缓冲上限 64 顶点，超出时等距降采样。
+                containers::Vector<math::Vec2> poly_pts;
+                reduce_vertices_evenly(sp.points, poly_pts, 64);
+                if (poly_pts.size() < 3) continue;
+
+                float min_x = poly_pts[0].x, min_y = poly_pts[0].y;
+                float max_x = poly_pts[0].x, max_y = poly_pts[0].y;
+                for (size_t i = 1; i < poly_pts.size(); ++i) {
+                    min_x = std::min(min_x, poly_pts[i].x);
+                    min_y = std::min(min_y, poly_pts[i].y);
+                    max_x = std::max(max_x, poly_pts[i].x);
+                    max_y = std::max(max_y, poly_pts[i].y);
+                }
+
+                const float cx = (min_x + max_x) * 0.5f;
+                const float cy = (min_y + max_y) * 0.5f;
+                const float hw = (max_x - min_x) * 0.5f;
+                const float hh = (max_y - min_y) * 0.5f;
+                const math::Color c = cmd.brush.color();
+
+                containers::Vector<SdfVertex> sdf_verts;
+                push_sdf_quad_vertices(sdf_verts, cx, cy, hw, hh, 1.0f,
+                    c.r, c.g, c.b, c.a,
+                    10.0f,
+                    0.0f, 0.0f, 0.0f, 0.0f,
+                    0.0f);
+                apply_sdf_transform(sdf_verts);
+
+                gfx::BufferDesc vb_poly{};
+                vb_poly.size       = static_cast<uint64_t>(sdf_verts.size()) * sizeof(SdfVertex);
+                vb_poly.stride     = sizeof(SdfVertex);
+                vb_poly.bind_flags = gfx::BufferBindFlags::Vertex;
+                auto poly_vb = device_->create_buffer(vb_poly, sdf_verts.data());
+                if (!poly_vb) continue;
+
+                PolygonVertsCB poly_cb{};
+                poly_cb.vert_count = static_cast<int>(poly_pts.size());
+                poly_cb.pad[0] = poly_cb.pad[1] = poly_cb.pad[2] = 0.0f;
+                for (int k = 0; k < poly_cb.vert_count; ++k) {
+                    poly_cb.verts[k][0] = poly_pts[static_cast<size_t>(k)].x - cx;
+                    poly_cb.verts[k][1] = poly_pts[static_cast<size_t>(k)].y - cy;
+                    poly_cb.verts[k][2] = 0.0f;
+                    poly_cb.verts[k][3] = 0.0f;
+                }
+
+                gfx::BufferDesc cb_poly{};
+                cb_poly.size       = sizeof(PolygonVertsCB);
+                cb_poly.stride     = 0;
+                cb_poly.bind_flags = gfx::BufferBindFlags::Constant;
+                auto poly_cb_buf = device_->create_buffer(cb_poly, &poly_cb);
+                if (!poly_cb_buf) continue;
+
+                cmd_list_->set_pipeline(active_sdf_pl);
+                cmd_list_->set_constant_buffer(0, viewport_cb.get());
+                cmd_list_->set_constant_buffer(1, poly_cb_buf.get());
+                cmd_list_->set_vertex_buffer(0, poly_vb.get(), 0);
+                cmd_list_->draw(static_cast<uint32_t>(sdf_verts.size()), 1, 0, 0);
+            }
+        }
+
+        // ── StrokePath（路径描边）────────────────────────────────────────────
+
+        else if (cmd.kind == DrawCmdKind::StrokePath) {
+            if (cmd.brush.kind() != BrushKind::SolidColor) continue;
+            if (cmd.pen.width <= 0.0f) continue;
+            if (cmd.path_index >= static_cast<uint32_t>(dl.paths().size())) continue;
+
+            const Path& path = dl.paths()[cmd.path_index];
+            containers::Vector<FlattenedSubpath> subpaths;
+            flatten_path_to_subpaths(path, subpaths);
+            if (subpaths.empty()) continue;
+
+            const math::Color c = cmd.brush.color();
+            const float half_w  = cmd.pen.width * 0.5f;
+
+            // Bevel 连接可通过较小 miter_limit 逼近；Round 连接后续迭代为圆角 join 几何。
+            float miter_limit = cmd.pen.miter_limit;
+            if (cmd.pen.line_join == LineJoin::Bevel) {
+                miter_limit = 1.0f;
+            }
+
+            for (const auto& sp : subpaths) {
+                if (sp.points.size() < 2) continue;
+
+                containers::Vector<PaintVertex> stroke_verts;
+                push_polyline_stroke_vertices(
+                    stroke_verts,
+                    sp.points,
+                    half_w,
+                    c.r, c.g, c.b, c.a,
+                    sp.closed,
+                    miter_limit);
+
+                if (stroke_verts.empty()) continue;
+                apply_paint_transform(stroke_verts);
+
+                gfx::BufferDesc vb{};
+                vb.size       = static_cast<uint64_t>(stroke_verts.size()) * sizeof(PaintVertex);
+                vb.stride     = sizeof(PaintVertex);
+                vb.bind_flags = gfx::BufferBindFlags::Vertex;
+                auto buf = device_->create_buffer(vb, stroke_verts.data());
+                if (!buf) continue;
+
+                cmd_list_->set_pipeline(solid_pipeline_.get());
+                cmd_list_->set_constant_buffer(0, viewport_cb.get());
+                cmd_list_->set_vertex_buffer(0, buf.get(), 0);
+                cmd_list_->draw(static_cast<uint32_t>(stroke_verts.size()), 1, 0, 0);
+            }
+        }
 
         // ── 裁剪状态命令（ClipPush* / ClipPop）──────────────────────────────
         //

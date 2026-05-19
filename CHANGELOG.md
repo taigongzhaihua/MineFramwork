@@ -5,6 +5,12 @@
 ## [Unreleased]
 
 ### Added
+- **paint（路径渲染）**：实现 `FillPath / StrokePath` 执行链路：
+  - `RhiRenderer` 新增 Path 扁平化（`LineTo/QuadTo/CubicTo/Close`）
+  - `FillPath`：闭合子路径转换为多边形 SDF 填充（支持抗锯齿边缘）
+  - `StrokePath`：子路径展开为三角带并走 `solid_pipeline_` 描边
+  - 路径绘制纳入现有变换系统（`save/restore/transform`）
+
 - **platform（IME 输入法服务）**：实现 Win32 平台层完整 IME 支持（Windows IMM32 API）：
   - `WindowEventKind` 新增四种 IME 事件类型：`ImeCompositionStarted`、`ImeCompositionChanged`、`ImeCompositionCommitted`、`ImeCompositionEnded`
   - `WindowEvent` 新增 `ime_text_utf8[256]` 和 `ime_text_length` 字段，承载 UTF-8 编码的组合文字或提交文字
