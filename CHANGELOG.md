@@ -18,6 +18,8 @@
   - 当变换为单位矩阵时零开销（`current_transform_is_identity` 快速路径跳过顶点遍历）
   - 支持 `Transform2D::rotation_about(angle, pivot)` 绕任意点旋转
 
+- **samples（样例重构）**：`00-hello-rect` 网格布局从 2列×18行（竖长格）改为 6列×6行（接近正方形），36 个演示格子内容完全保留，按功能分组排布：行0 基本形状、行1 椭圆+线段、行2 圆弧+贝塞尔、行3 多边形+渐变、行4 亚克力+裁剪、行5 变换演示
+
 - **samples（样例更新）**：
   - `00-hello-rect`：增加 2 行新演示（行16-18）：
     - 行16左：`save/translate/rotate/restore` — 旋转 30° 的圆角矩形（含未旋转轮廓参考）

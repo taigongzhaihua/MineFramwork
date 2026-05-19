@@ -2,43 +2,25 @@
  * @file main.cpp
  * @brief 00-hello-rect 示例：mine.paint Canvas SDF 填充 + 描边 + 裁剪 + 变换命令综合演示。
  *
- * 演示内容（2×18 网格布局，左列填充/右列描边）：
- *   行1 左：FillRect                      — 纯色填充矩形（绿色）
- *   行1 右：StrokeRect                    — 矩形描边（绿色，线宽 4px）
- *   行2 左：FillRoundedRect               — 均匀圆角矩形填充（蓝色，radius=20px）
- *   行2 右：StrokeRoundedRect             — 均匀圆角矩形描边（蓝色，线宽 4px）
- *   行3 左：FillComplexRoundedRect        — 四角独立圆角矩形填充（橙色）
- *   行3 右：StrokeComplexRoundedRect      — 四角独立圆角矩形描边（橙色，线宽 4px）
- *   行4 左：FillEllipse                   — 满源填充（紫色）
- *   行4 右：StrokeEllipse                 — 满源描边（紫色，线宽 4px）
- *   行5 左：StrokeBorderedRoundedRect     — 四边不等宽 + 四角独立圆角内侧描边（红色）
- *   行5 右：StrokeBorderedRoundedRect     — 均匀圆角 + 仅上下边框（青色，上下员4 12px）
- *   行6 左：StrokeLine (Flat cap)          — 平端线段（双色渐变 SDF）
- *   行6 右：StrokeLine (Round + Square)    — 混合端点样式线段对比
- *   行7 左：StrokeArc (Flat cap)           — 四分之一圆弧，平端截断
- *   行7 右：StrokeArc (Round cap)          — 半圆弧，圆形端点
- *   行8 左：StrokeQuadBezier (Flat cap)    — 二次贝塞尔抛物线，平端截断
- *   行8 右：StrokeQuadBezier (Round cap)   — 二次贝塞尔 S 形曲线，圆形端点
- *   行9 左：StrokeCubicBezier (Flat cap)   — 水平 S/反 S 对照曲线（蓝色4px + 橙色2px，同起同终）
- *   行9 右：StrokeCubicBezier (Round cap)  — 三次贝塞尔大 S 形，圆形端点
- *   行10左：FillPolygon（凸多边形）         — SDF 填充正六边形（蓝色，IQ 绕数法）
- *   行10右：FillPolygon（凹多边形）         — SDF 填充五角星 + StrokePolygon 六边形描边
- *   行11左：LinearGradient FillRect        — 线性渐变矩形（蓝→橙，从左到右）
- *   行11右：RadialGradient FillEllipse     — 径向渐变椭圆（白→紫，从中心向外）
- *   行12左：LinearGradient FillRoundedRect — 线性渐变圆角矩形（青→绿，从上到下）
- *   行12右：RadialGradient FillRect        — 径向渐变矩形（黄→红，中心向外）
- *   行13左：AcrylicBrush FillRoundedRect   — 亚克力圆角矩形（蓝色色调，30px 模糊）
- *   行13右：AcrylicBrush FillEllipse       — 亚克力椭圆（橙色色调，20px 模糊）
- *   行14左：clip_rect + FillEllipse         — 矩形裁剪演示（截断椭圆）
- *   行14右：clip_rounded_rect + FillRect    — 均匀圆角矩形裁剪演示
- *   行15左：clip_complex_rounded_rect       — 四角独立圆角矩形裁剪演示
- *   行15右：clip_polygon + FillRect         — 三角形多边形裁剪演示
- *   行16左：translate + rotate              — 平移后旋转30°的圆角矩形（save/restore）
- *   行16右：translate + scale               — 平移后缩放1.5倍的椭圆（save/restore）
- *   行17左：嵌套变换（外层旋转 + 内层旋转+缩放）— 叠加变换演示
- *   行17右：rotation_about                  — 五个小矩形绕中心点匀角分布旋转
- *   行18左：translate（纯平移演示）         — 原始位置轮廓 + 平移后填充圆角矩形对比
- *   行18右：translate 步进演示           — 5个矩形以固定偶量递进平移（对角线布局）
+ * 演示内容（6×6 网格布局，6列 × 6行 = 36格）：
+ *   (col0,row0): FillRect              (col1,row0): StrokeRect
+ *   (col2,row0): FillRoundedRect        (col3,row0): StrokeRoundedRect
+ *   (col4,row0): FillComplexRoundedRect (col5,row0): StrokeComplexRoundedRect
+ *   (col0,row1): FillEllipse            (col1,row1): StrokeEllipse
+ *   (col2,row1): StrokeBorderedRR四边   (col3,row1): StrokeBorderedRR均匀
+ *   (col4,row1): StrokeLine Flat        (col5,row1): StrokeLine Round+Square
+ *   (col0,row2): StrokeArc Flat         (col1,row2): StrokeArc Round
+ *   (col2,row2): StrokeQuadBezier Flat  (col3,row2): StrokeQuadBezier Round
+ *   (col4,row2): StrokeCubicBezier Flat (col5,row2): StrokeCubicBezier Round
+ *   (col0,row3): FillPolygon 六边形     (col1,row3): FillPolygon 五角星+Stroke
+ *   (col2,row3): LinearGradient FillRect (col3,row3): RadialGradient FillEllipse
+ *   (col4,row3): LinearGradient FillRR  (col5,row3): RadialGradient FillRect
+ *   (col0,row4): AcrylicBrush RR        (col1,row4): AcrylicBrush Ellipse
+ *   (col2,row4): clip_rect              (col3,row4): clip_rounded_rect
+ *   (col4,row4): clip_complex_rr        (col5,row4): clip_polygon
+ *   (col0,row5): translate+rotate       (col1,row5): translate+scale
+ *   (col2,row5): 嵌套变换               (col3,row5): rotation_about
+ *   (col4,row5): translate 纯平移       (col5,row5): translate 步进
  */
 
 #include <mine/platform/PlatformAbi.h>
@@ -118,39 +100,31 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
             mine::math::Rect{0.0f, 0.0f, W, H},
             mine::paint::Brush::solid(mine::math::Color{0.12f, 0.12f, 0.12f, 1.0f}));
 
-        // 2×18 网格参数（2列 × 18行）
+        // 6×6 网格参数（6列 × 6行）
         const float outer_pad = 20.0f;
-        const float gap       = 10.0f;
-        const float cw        = (W - outer_pad * 2.0f - gap) * 0.5f;
-        const float ch        = (H - outer_pad * 2.0f - gap * 17.0f) / 18.0f;
+        const float gap       = 8.0f;
+        const float cw        = (W - outer_pad * 2.0f - gap * 5.0f) / 6.0f;
+        const float ch        = (H - outer_pad * 2.0f - gap * 5.0f) / 6.0f;
 
+        // 列起始 x 坐标（共 6 列）
         const float col0 = outer_pad;
-        const float col1 = outer_pad + cw + gap;
+        const float col1 = outer_pad + (cw + gap) * 1.0f;
+        const float col2 = outer_pad + (cw + gap) * 2.0f;
+        const float col3 = outer_pad + (cw + gap) * 3.0f;
+        const float col4 = outer_pad + (cw + gap) * 4.0f;
+        const float col5 = outer_pad + (cw + gap) * 5.0f;
 
-        const float row0  = outer_pad;
-        const float row1  = outer_pad + ch + gap;
-        const float row2  = outer_pad + (ch + gap) * 2.0f;
-        const float row3  = outer_pad + (ch + gap) * 3.0f;
-        const float row4  = outer_pad + (ch + gap) * 4.0f;
-        const float row5  = outer_pad + (ch + gap) * 5.0f;
-        const float row6  = outer_pad + (ch + gap) * 6.0f;
-        const float row7  = outer_pad + (ch + gap) * 7.0f;
-        const float row8  = outer_pad + (ch + gap) * 8.0f;
-        const float row9  = outer_pad + (ch + gap) * 9.0f;
-        // 新增：渐变画刷和亚克力画刷演示行
-        const float row10 = outer_pad + (ch + gap) * 10.0f;
-        const float row11 = outer_pad + (ch + gap) * 11.0f;
-        const float row12 = outer_pad + (ch + gap) * 12.0f;
-        const float row13 = outer_pad + (ch + gap) * 13.0f;
-        const float row14 = outer_pad + (ch + gap) * 14.0f;
-        // 新增：变换演示行（平移、旋转、缩放）
-        const float row15 = outer_pad + (ch + gap) * 15.0f;
-        const float row16 = outer_pad + (ch + gap) * 16.0f;
-        const float row17 = outer_pad + (ch + gap) * 17.0f;
+        // 行起始 y 坐标（共 6 行）
+        const float row0 = outer_pad;
+        const float row1 = outer_pad + (ch + gap) * 1.0f;
+        const float row2 = outer_pad + (ch + gap) * 2.0f;
+        const float row3 = outer_pad + (ch + gap) * 3.0f;
+        const float row4 = outer_pad + (ch + gap) * 4.0f;
+        const float row5 = outer_pad + (ch + gap) * 5.0f;
 
-        const float ip = 14.0f;
-        const float sw = cw - ip * 2.0f;
-        const float sh = ch - ip * 2.0f;
+        const float ip = 10.0f;           // 格子内边距
+        const float sw = cw - ip * 2.0f;  // 格子内容宽
+        const float sh = ch - ip * 2.0f;  // 格子内容高
 
         // 颜色定义
         const mine::math::Color col_green  {0.20f, 0.75f, 0.35f, 1.0f};
@@ -162,41 +136,53 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
 
         const mine::paint::Pen pen{.width = 2.0f, .miter_limit = 4.0f};
 
-        // ── 行1 左：FillRect ────────────────────────────────────────────
+        // ══ 行0：基本形状 ════════════════════════════════════════════════════
+
+        // ── (col0, row0)：FillRect ───────────────────────────────────────────
         canvas.fill_rect(
             mine::math::Rect{col0 + ip, row0 + ip, sw, sh},
             mine::paint::Brush::solid(col_green));
 
-        // ── 行1 右：StrokeRect ──────────────────────────────────────────
+        // ── (col1, row0)：StrokeRect ─────────────────────────────────────────
         canvas.stroke_rect(
             mine::math::Rect{col1 + ip, row0 + ip, sw, sh},
             mine::paint::Brush::solid(col_green), pen);
 
-        // ── 行2 左：FillRoundedRect ─────────────────────────────────────
+        // ── (col2, row0)：FillRoundedRect ────────────────────────────────────
         canvas.fill_rounded_rect(
-            mine::math::RoundedRect{mine::math::Rect{col0 + ip, row1 + ip, sw, sh}, 20.0f},
+            mine::math::RoundedRect{mine::math::Rect{col2 + ip, row0 + ip, sw, sh}, 16.0f},
             mine::paint::Brush::solid(col_blue));
 
-        // ── 行2 右：StrokeRoundedRect ───────────────────────────────────
+        // ── (col3, row0)：StrokeRoundedRect ──────────────────────────────────
         canvas.stroke_rounded_rect(
-            mine::math::RoundedRect{mine::math::Rect{col1 + ip, row1 + ip, sw, sh}, 20.0f},
+            mine::math::RoundedRect{mine::math::Rect{col3 + ip, row0 + ip, sw, sh}, 16.0f},
             mine::paint::Brush::solid(col_blue), pen);
 
-        // ── 行3 左：FillComplexRoundedRect ─────────────────────────────
-        const mine::math::CornerRadii radii{
-            {36.0f, 36.0f},  // 左上角
-            {8.0f,  8.0f},   // 右上角
-            {36.0f, 36.0f},  // 右下角
-            {8.0f,  8.0f}    // 左下角
-        };
-        canvas.fill_complex_rounded_rect(
-            mine::math::ComplexRoundedRect{mine::math::Rect{col0 + ip, row2 + ip, sw, sh}, radii},
-            mine::paint::Brush::solid(col_orange));
+        // ── (col4, row0)：FillComplexRoundedRect ────────────────────────────
+        {
+            const mine::math::CornerRadii radii{
+                {24.0f, 24.0f},  // 左上角
+                {6.0f,  6.0f},   // 右上角
+                {24.0f, 24.0f},  // 右下角
+                {6.0f,  6.0f}    // 左下角
+            };
+            canvas.fill_complex_rounded_rect(
+                mine::math::ComplexRoundedRect{mine::math::Rect{col4 + ip, row0 + ip, sw, sh}, radii},
+                mine::paint::Brush::solid(col_orange));
+        }
 
-        // ── 行3 右：StrokeComplexRoundedRect ───────────────────────────
-        canvas.stroke_complex_rounded_rect(
-            mine::math::ComplexRoundedRect{mine::math::Rect{col1 + ip, row2 + ip, sw, sh}, radii},
-            mine::paint::Brush::solid(col_orange), pen);
+        // ── (col5, row0)：StrokeComplexRoundedRect ───────────────────────────
+        {
+            const mine::math::CornerRadii radii{
+                {24.0f, 24.0f},  // 左上角
+                {6.0f,  6.0f},   // 右上角
+                {24.0f, 24.0f},  // 右下角
+                {6.0f,  6.0f}    // 左下角
+            };
+            canvas.stroke_complex_rounded_rect(
+                mine::math::ComplexRoundedRect{mine::math::Rect{col5 + ip, row0 + ip, sw, sh}, radii},
+                mine::paint::Brush::solid(col_orange), pen);
+        }
 
         // ── 行4 左：FillEllipse ─────────────────────────────────────────
         canvas.fill_ellipse(
@@ -229,11 +215,10 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
             mine::math::Thickness::symmetric(0.0f, 12.0f),  // 仅上下各 12px（symmetric: horizontal=0, vertical=12）
             mine::math::CornerRadii::uniform(16.0f));
 
-        // ── 行6 左：StrokeLine（Flat cap，斜线，SDF 抗锯齿）──────────────
-        // 展示 SDF 线段的平端截断，线条边缘无锯齿
+        // ── (col4, row1)：StrokeLine（Flat cap，斜线，SDF 抗锯齿）──────────
         {
-            const float x0 = col0 + ip;
-            const float y0 = row5 + ip;
+            const float x0 = col4 + ip;
+            const float y0 = row1 + ip;
             // 第一条：水平线（Flat，粗）
             mine::paint::Pen pen_flat;
             pen_flat.width     = 6.0f;
@@ -257,8 +242,8 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // ── 行6 右：StrokeLine（Round/Square 混合端点对比）──────────────────
         // 上：Round cap（两端圆形）；下：Square cap（两端方形延伸）
         {
-            const float x1 = col1 + ip;
-            const float y1 = row5 + ip;
+            const float x1 = col5 + ip;
+            const float y1 = row1 + ip;
             // Round cap
             mine::paint::Pen pen_round;
             pen_round.width     = 8.0f;
@@ -279,11 +264,12 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                 mine::paint::Brush::solid(col_purple), pen_square);
         }
 
-        // ── 行7 左：StrokeArc（Flat cap，四分之一圆弧）──────────────────
-        // 圆心位于 Quad 区域左下，90° 弧（从 0 到 π/2，顺时针 = 向下方向）
+        // ══ 行2：圆弧 + 二次 / 三次贝塞尔 ════════════════════════════════════════════
+
+        // ── (col0, row2)：StrokeArc（Flat cap，四分之一圆弧）──────────────────────────
         {
             const float cx7 = col0 + ip + sw * 0.5f;
-            const float cy7 = row6 + ip + sh * 0.5f;
+            const float cy7 = row2 + ip + sh * 0.5f;
             const float r7  = std::min(sw, sh) * 0.35f;  // 圆弧半径
 
             mine::paint::Pen pen_arc_flat;
@@ -313,7 +299,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // 180° 半圆弧，两端圆形，展示 Round cap 的自然过渡
         {
             const float cx7r = col1 + ip + sw * 0.5f;
-            const float cy7r = row6 + ip + sh * 0.5f;
+            const float cy7r = row2 + ip + sh * 0.5f;
             const float r7r  = std::min(sw, sh) * 0.35f;
 
             mine::paint::Pen pen_arc_round;
@@ -342,8 +328,8 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // ── 行8 左：StrokeQuadBezier（Flat cap，抛物线弧）──────────────────
         // P0→P1（控制点）→P2 形成典型弧线，Flat cap 截断两端
         {
-            const float bx  = col0 + ip;
-            const float by  = row7 + ip;
+            const float bx  = col2 + ip;
+            const float by  = row2 + ip;
             // 单条抛物线贝塞尔（Flat cap，红色）
             mine::paint::Pen pen_bez_flat;
             pen_bez_flat.width     = 4.0f;
@@ -370,8 +356,8 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // ── 行8 右：StrokeQuadBezier（Round cap，S 形曲线组合）─────────────
         // 两段贝塞尔组合成 S 形，展示 Round cap 的自然衔接
         {
-            const float bx  = col1 + ip;
-            const float by  = row7 + ip;
+            const float bx  = col3 + ip;
+            const float by  = row2 + ip;
 
             mine::paint::Pen pen_bez_round;
             pen_bez_round.width     = 5.0f;
@@ -396,8 +382,8 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // ── 行9 左：StrokeCubicBezier（Flat cap，S 形曲线）──────────────────
         // 两条水平 S/反 S 对照曲线（同起同终，弯曲方向相反），展示三次贝塞尔双曲率特性
         {
-            const float bx = col0 + ip;
-            const float by = row8 + ip;
+            const float bx = col4 + ip;
+            const float by = row2 + ip;
 
             mine::paint::Pen pen_cub_flat;
             pen_cub_flat.width     = 4.0f;
@@ -429,8 +415,8 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // ── 行9 右：StrokeCubicBezier（Round cap，大 S + 对称 C 形）────────────
         // Round cap 自然圆弧端点，展示三次贝塞尔在复杂路径中的表现
         {
-            const float bx = col1 + ip;
-            const float by = row8 + ip;
+            const float bx = col5 + ip;
+            const float by = row2 + ip;
 
             mine::paint::Pen pen_cub_round;
             pen_cub_round.width     = 5.0f;
@@ -462,7 +448,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // 以格子中心为圆心，绘制内切六边形（flat-top 朝向，6 个顶点均匀分布）
         {
             const float cx10  = col0 + ip + sw * 0.5f;
-            const float cy10  = row9 + ip + sh * 0.5f;
+            const float cy10  = row3 + ip + sh * 0.5f;
             const float r10   = std::min(sw, sh) * 0.44f;  // 外接圆半径
             constexpr float k_pi = 3.14159265358979323846f;
             mine::math::Vec2 hex[6];
@@ -481,7 +467,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // StrokePolygon：描边正六边形叠加，展示轮廓描边效果
         {
             const float cx10r = col1 + ip + sw * 0.5f;
-            const float cy10r = row9 + ip + sh * 0.5f;
+            const float cy10r = row3 + ip + sh * 0.5f;
             const float outer_r = std::min(sw, sh) * 0.44f;  // 外圈半径
             const float inner_r = outer_r * 0.38f;            // 内圈半径（约 0.382 = 1/φ²，黄金比例）
             constexpr float k_pi = 3.14159265358979323846f;
@@ -525,7 +511,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                 mine::math::Vec2{1.0f, 0.5f},   // 终点：右侧中点
                 mine::core::Span<mine::paint::GradientStop>(lg_stops, 2));
             canvas.fill_rect(
-                mine::math::Rect{col0 + ip, row10 + ip, sw, sh}, brush);
+                mine::math::Rect{col2 + ip, row3 + ip, sw, sh}, brush);
         }
 
         // ── 行11 右：径向渐变 FillEllipse（白 → 紫，从中心向外）────────────
@@ -540,11 +526,11 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                 mine::core::Span<mine::paint::GradientStop>(rg_stops, 2));
             // 为径向渐变提供深色背景
             canvas.fill_ellipse(
-                mine::math::Vec2{col1 + ip + sw * 0.5f, row10 + ip + sh * 0.5f},
+                mine::math::Vec2{col3 + ip + sw * 0.5f, row3 + ip + sh * 0.5f},
                 mine::math::Vec2{sw * 0.5f, sh * 0.5f},
                 mine::paint::Brush::solid(mine::math::Color{0.25f, 0.10f, 0.40f, 1.0f}));
             canvas.fill_ellipse(
-                mine::math::Vec2{col1 + ip + sw * 0.5f, row10 + ip + sh * 0.5f},
+                mine::math::Vec2{col3 + ip + sw * 0.5f, row3 + ip + sh * 0.5f},
                 mine::math::Vec2{sw * 0.5f, sh * 0.5f},
                 brush);
         }
@@ -561,7 +547,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                 mine::core::Span<mine::paint::GradientStop>(lg_stops, 2));
             canvas.fill_rounded_rect(
                 mine::math::RoundedRect{
-                    mine::math::Rect{col0 + ip, row11 + ip, sw, sh},
+                    mine::math::Rect{col4 + ip, row3 + ip, sw, sh},
                     std::min(sw, sh) * 0.25f,  // 圆角半径
                     std::min(sw, sh) * 0.25f},
                 brush);
@@ -579,10 +565,12 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                 1.0f,                            // 外径
                 mine::core::Span<mine::paint::GradientStop>(rg_stops, 3));
             canvas.fill_rect(
-                mine::math::Rect{col1 + ip, row11 + ip, sw, sh}, brush);
+                mine::math::Rect{col5 + ip, row3 + ip, sw, sh}, brush);
         }
 
-        // ── 行13 左：AcrylicBrush FillRoundedRect（蓝色调，30px 模糊）────────
+        // ══ 行4：亚克力画刷 + 裁剪演示 ══════════════════════════════════════════════
+
+        // ── (col0, row4)：AcrylicBrush FillRoundedRect（蓝色调，30px 模糊）────────
         // 亚克力效果：捕获上一帧内容 → 高斯模糊 → 叠加蓝色色调
         // 注：首帧背景为空（黑色），从第二帧起可见模糊内容
         {
@@ -593,13 +581,13 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                 1.2f);   // 饱和度增益（>1 增强饱和度）
             canvas.fill_rounded_rect(
                 mine::math::RoundedRect{
-                    mine::math::Rect{col0 + ip, row12 + ip, sw, sh},
+                    mine::math::Rect{col0 + ip, row4 + ip, sw, sh},
                     std::min(sw, sh) * 0.25f,
                     std::min(sw, sh) * 0.25f},
                 brush);
         }
 
-        // ── 行13 右：AcrylicBrush FillEllipse（橙色调，20px 模糊）────────────
+        // ── (col1, row4)：AcrylicBrush FillEllipse（橙色调，20px 模糊）────────────
         {
             auto brush = mine::paint::Brush::acrylic(
                 mine::math::Color{1.00f, 0.55f, 0.15f, 0.80f},  // 橙色色调
@@ -607,7 +595,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                 20.0f,   // 模糊量（像素，较小模糊用于轻微磨砂效果）
                 0.9f);   // 饱和度增益（<1 轻微降饱和）
             canvas.fill_ellipse(
-                mine::math::Vec2{col1 + ip + sw * 0.5f, row12 + ip + sh * 0.5f},
+                mine::math::Vec2{col1 + ip + sw * 0.5f, row4 + ip + sh * 0.5f},
                 mine::math::Vec2{sw * 0.5f, sh * 0.5f},
                 brush);
         }
@@ -616,10 +604,10 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // 压入矩形裁剪区（格子上半 60%），填充完整椭圆后弹出裁剪，
         // 展示 clip_rect 将椭圆下部截断的效果。
         {
-            const float x = col0, y = row13, w = cw, h = ch;
-            const float ip = 4.0f;
+            const float x = col2, y = row4, w = cw, h = ch;
+            const float clip_ip = 4.0f;
             // 裁剪区域：格子上半 60% 高度（截去下 40%）
-            mine::math::Rect clip{x + ip, y + ip, w - ip * 2.0f, h * 0.6f - ip};
+            mine::math::Rect clip{x + clip_ip, y + clip_ip, w - clip_ip * 2.0f, h * 0.6f - clip_ip};
             canvas.clip_rect(clip);
             // 填充超出裁剪区的大椭圆（下部被矩形截断）
             canvas.fill_ellipse(
@@ -637,15 +625,15 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // 压入均匀圆角矩形裁剪区，再填充金色矩形（四角被圆角截断），
         // 内部叠加蓝色小圆演示在裁剪区内继续绘制。
         {
-            const float x = col1, y = row13, w = cw, h = ch;
-            const float ip = 4.0f;
+            const float x = col3, y = row4, w = cw, h = ch;
+            const float clip_ip = 4.0f;
             const float radius = h * 0.3f;  // 30% 高度作为圆角半径
             mine::math::RoundedRect clip_rrect{
-                mine::math::Rect{x + ip, y + ip, w - ip * 2.0f, h - ip * 2.0f},
+                mine::math::Rect{x + clip_ip, y + clip_ip, w - clip_ip * 2.0f, h - clip_ip * 2.0f},
                 radius, radius};
             canvas.clip_rounded_rect(clip_rrect);
             canvas.fill_rect(
-                mine::math::Rect{x + ip, y + ip, w - ip * 2.0f, h - ip * 2.0f},
+                mine::math::Rect{x + clip_ip, y + clip_ip, w - clip_ip * 2.0f, h - clip_ip * 2.0f},
                 mine::paint::Brush::solid(mine::math::Color{0.95f, 0.75f, 0.2f, 1.0f}));  // 金色
             canvas.fill_ellipse(
                 mine::math::Vec2{x + w * 0.5f, y + h * 0.5f},
@@ -661,10 +649,10 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // 四角设置不同圆角（左上/右下大，右上/左下小），裁剪青→紫线性渐变矩形，
         // 展示 clip_complex_rounded_rect 的复杂形状裁剪能力。
         {
-            const float x = col0, y = row14, w = cw, h = ch;
-            const float ip = 4.0f;
+            const float x = col4, y = row4, w = cw, h = ch;
+            const float clip_ip = 4.0f;
             mine::math::ComplexRoundedRect clip_crr{};
-            clip_crr.rect = mine::math::Rect{x + ip, y + ip, w - ip * 2.0f, h - ip * 2.0f};
+            clip_crr.rect = mine::math::Rect{x + clip_ip, y + clip_ip, w - clip_ip * 2.0f, h - clip_ip * 2.0f};
             clip_crr.radii.top_left.x     = clip_crr.radii.top_left.y     = h * 0.4f;
             clip_crr.radii.top_right.x    = clip_crr.radii.top_right.y    = h * 0.1f;
             clip_crr.radii.bottom_left.x  = clip_crr.radii.bottom_left.y  = h * 0.1f;
@@ -685,11 +673,10 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                 mine::paint::Pen{});
         }
 
-        // ── 行15 右：clip_polygon（等边三角形裁剪演示）───────────────────────
-        // 以等边三角形作为裁剪区域，填充橙红色矩形后仅三角形内部可见。
+        // ── (col5, row4)：clip_polygon（等边三角形裁剪演示）─────────────────────
         {
-            const float x = col1, y = row14, w = cw, h = ch;
-            const float ip = 8.0f;
+            const float x = col5, y = row4, w = cw, h = ch;
+            const float clip_ip = 8.0f;
             const float cx = x + w * 0.5f;
             const float cy = y + h * 0.5f;
             const float r  = std::min(w, h) * 0.5f - ip;
@@ -701,7 +688,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
             };
             canvas.clip_polygon(mine::core::Span<const mine::math::Vec2>(tri_verts, 3));
             canvas.fill_rect(
-                mine::math::Rect{x + ip, y + ip, w - ip * 2.0f, h - ip * 2.0f},
+                mine::math::Rect{x + clip_ip, y + clip_ip, w - clip_ip * 2.0f, h - clip_ip * 2.0f},
                 mine::paint::Brush::solid(mine::math::Color{0.95f, 0.35f, 0.2f, 1.0f}));  // 橙红色
             canvas.clip_pop();
             // 三角形轮廓（半透明白色边框）
@@ -719,7 +706,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // save() → translate到格子中心 → rotate(30°) → fill_rounded_rect → restore()
         // 同时叠加一个未旋转的轮廓（半透明），对比旋转效果。
         {
-            const float x = col0, y = row15, w = cw, h = ch;
+            const float x = col0, y = row5, w = cw, h = ch;
             const float cx = x + w * 0.5f, cy = y + h * 0.5f;
             const float rw = sw * 0.72f, rh = sh * 0.52f;
             constexpr float kPi = 3.14159265f;
@@ -748,7 +735,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // ── 行16 右：translate + scale（平移后放大 1.5 倍的椭圆）───────────
         // 先绘制正常大小轮廓作参考，再 save → translate → scale → fill_ellipse → restore。
         {
-            const float x = col1, y = row15, w = cw, h = ch;
+            const float x = col1, y = row5, w = cw, h = ch;
             const float cx = x + w * 0.5f, cy = y + h * 0.5f;
             const float erx = sw * 0.28f, ery = sh * 0.33f;
 
@@ -775,7 +762,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // 外层：save → translate → rotate(15°) → fill_rounded_rect（绿色）
         // 内层：再 save → rotate(30°) → scale(0.6) → fill_rounded_rect（橙色）→ restore → restore
         {
-            const float x = col0, y = row16, w = cw, h = ch;
+            const float x = col2, y = row5, w = cw, h = ch;
             const float cx = x + w * 0.5f, cy = y + h * 0.5f;
             const float rw = sw * 0.60f, rh = sh * 0.58f;
             constexpr float kPi = 3.14159265f;
@@ -807,7 +794,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // 五个彩色圆角矩形绕格子中心以 72° 间隔排布，使用 Transform2D::rotation_about
         // 演示绕任意点旋转的能力。
         {
-            const float x = col1, y = row16, w = cw, h = ch;
+            const float x = col3, y = row5, w = cw, h = ch;
             const float cx = x + w * 0.5f, cy = y + h * 0.5f;
             const float orbit_r = std::min(sw, sh) * 0.30f;  // 轨道半径
             const float rw = sw * 0.22f, rh = sh * 0.18f;    // 小矩形尺寸
@@ -846,7 +833,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // 原始位置轮廓（半透明白色）+ save → translate(dx, dy) → 填充圆角矩形 → restore
         // 直观展示 translate 将画布原点偏移后绘图的效果。
         {
-            const float x = col0, y = row17;
+            const float x = col4, y = row5;
             const float rw = sw * 0.55f, rh = sh * 0.55f;
             const float dx = sw * 0.20f, dy = sh * 0.18f;  // 平移量
             // 参考矩形定位于格子内容区左上偏内位置
@@ -874,7 +861,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         // 5 个小圆角矩形，每个在前一个基础上向右下方固定步进平移，颜色从蓝渐变到橙。
         // 展示多次独立 save/translate/draw/restore 的累积效果对比。
         {
-            const float x = col1, y = row17;
+            const float x = col5, y = row5;
             constexpr int n = 5;
             const float rw = sw * 0.28f, rh = sh * 0.28f;
             // 步进量：让 n 个矩形均匀分布在格子内容区对角线上
@@ -951,7 +938,7 @@ int main(int /*argc*/, char* /*argv*/[])
     // 4. 创建窗口
     mine::platform::WindowDesc win_desc{};
     win_desc.title         = "MineFramework - Canvas SDF 渲染演示（Fill / Stroke × Rect / RoundedRect / ComplexRoundedRect / Ellipse）";
-    win_desc.size          = {960.0f, 810.0f};
+    win_desc.size          = {960.0f, 999.0f};
     win_desc.auto_position = true;
     win_desc.resizable     = true;
     win_desc.kind          = mine::platform::WindowKind::Normal;
