@@ -290,19 +290,68 @@ uint32_t Canvas::intern_path(const Path& path) {
     return index;
 }
 
+uint32_t Canvas::intern_text_run(TextRun run) {
+    const uint32_t index = static_cast<uint32_t>(text_runs_.size());
+    text_runs_.push_back(std::move(run));
+    return index;
+}
+
+// ── 文字绘制 ──────────────────────────────────────────────────────────────────
+
+void Canvas::draw_text(
+    core::StringView text,
+    math::Vec2       origin,
+    void*            font_face,
+    float            size_px,
+    const Brush&     brush) {
+
+    if (font_face == nullptr || text.empty() || size_px <= 0.0f) {
+        return;
+    }
+
+    // 构造 TextRun，将文字内容拷贝到 inline 缓冲
+    TextRun run;
+    const uint32_t raw_len = static_cast<uint32_t>(text.size());
+    // 超出缓冲则截断（保留末尾 '\0'）
+    const uint32_t copy_len = raw_len < TextRun::kMaxUtf8Bytes
+        ? raw_len
+        : (TextRun::kMaxUtf8Bytes - 1u);
+
+    for (uint32_t i = 0; i < copy_len; ++i) {
+        run.utf8[i] = text[i];
+    }
+    run.utf8[copy_len] = '\0';
+    run.length    = copy_len;
+    run.font_face = font_face;
+    run.size_px   = size_px;
+    run.origin_x  = origin.x;
+    run.origin_y  = origin.y;
+
+    const uint32_t run_index = intern_text_run(std::move(run));
+
+    // 生成 DrawText 命令，path_index 复用为 text_run 索引
+    DrawCmd cmd;
+    cmd.kind       = DrawCmdKind::DrawText;
+    cmd.path_index = run_index;
+    cmd.brush      = brush;
+    push(cmd);
+}
+
 // ── 完成/重置 ──────────────────────────────────────────────────────────────────
 
 DisplayList Canvas::end() {
     // 将内部缓冲移走构造 DisplayList，自身恢复为空
-    DisplayList dl(std::move(cmds_), std::move(paths_));
-    cmds_  = {};
-    paths_ = {};
+    DisplayList dl(std::move(cmds_), std::move(paths_), std::move(text_runs_));
+    cmds_       = {};
+    paths_      = {};
+    text_runs_  = {};
     return dl;
 }
 
 void Canvas::discard() {
-    cmds_  = {};
-    paths_ = {};
+    cmds_       = {};
+    paths_      = {};
+    text_runs_  = {};
 }
 
 } // namespace mine::paint

@@ -33,6 +33,7 @@
 #include <mine/math/ComplexRoundedRect.h>
 #include <mine/math/CornerRadii.h>
 #include <mine/core/Span.h>
+#include <mine/core/StringView.h>
 
 namespace mine::paint {
 
@@ -244,6 +245,27 @@ public:
      */
     void stroke_polygon(core::Span<const math::Vec2> vertices, const Brush& brush, const Pen& pen = {});
 
+    /**
+     * @brief 绘制 UTF-8 文字。
+     *
+     * 使用指定字体面和字号将文字渲染到画布。文字颜色由 brush 决定。
+     * 布局简化（M0 阶段）：不支持自动换行，从 origin 点沿 +X 方向线性排列字形。
+     *
+     * 坐标约定：origin 为基线起始点，Y 轴向下（屏幕坐标）。
+     *
+     * @param text      UTF-8 编码文字（最大 511 字节，超出部分被截断）
+     * @param origin    基线起始点（屏幕像素坐标）
+     * @param font_face 字体面指针（不可为 nullptr；生命周期须长于 DisplayList）
+     * @param size_px   字号（像素）
+     * @param brush     文字颜色画刷（当前仅支持 SolidColor）
+     */
+    void draw_text(
+        core::StringView text,
+        math::Vec2       origin,
+        void*            font_face,
+        float            size_px,
+        const Brush&     brush);
+
     // ── 完成录制 ────────────────────────────────────────────────────────
 
     /**
@@ -264,11 +286,15 @@ public:
     void discard();
 
 private:
-    containers::Vector<DrawCmd> cmds_{};    ///< 正在录制的命令序列
-    containers::Vector<Path>   paths_{};   ///< 路径数据（DrawCmd 通过 path_index 引用）
+    containers::Vector<DrawCmd>  cmds_{};        ///< 正在录制的命令序列
+    containers::Vector<Path>     paths_{};       ///< 路径数据（DrawCmd 通过 path_index 引用）
+    containers::Vector<TextRun>  text_runs_{};   ///< 文字段落（DrawText 命令通过 path_index 引用）
 
     /// 保存路径到内部数组，返回其索引（供 fill_path/stroke_path 使用）。
     uint32_t intern_path(const Path& path);
+
+    /// 保存文字段落到内部数组，返回其索引（供 draw_text 使用）。
+    uint32_t intern_text_run(TextRun run);
 
     /// 压入一条命令到录制缓冲。
     void push(DrawCmd cmd) { cmds_.push_back(std::move(cmd)); }

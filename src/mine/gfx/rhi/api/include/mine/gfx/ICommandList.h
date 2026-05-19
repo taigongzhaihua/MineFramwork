@@ -121,6 +121,15 @@ public:
         uint32_t first_index     = 0,
         int32_t  base_vertex     = 0,
         uint32_t first_instance  = 0) = 0;
+
+    /**
+     * @brief 绑定着色器资源纹理（SRV）到像素着色器。
+     * @param slot     绑定槽位（对应 HLSL: register(tN)）
+     * @param texture  具有 ShaderResource 绑定标志的纹理；传 nullptr 解绑。
+     *
+     * 同时绑定槽位相同的线性双线性采样器（register(sN)）。
+     */
+    virtual void set_shader_resource(uint32_t slot, ITexture* texture) = 0;
 };
 
 } // namespace mine::gfx

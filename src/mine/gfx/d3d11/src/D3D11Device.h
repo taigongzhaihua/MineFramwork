@@ -51,6 +51,15 @@ public:
     [[nodiscard]] Backend     backend()      const noexcept override { return Backend::D3D11; }
     [[nodiscard]] const char* adapter_name() const noexcept override { return adapter_name_; }
 
+    void update_texture_region(
+        ITexture*    texture,
+        uint32_t     x,
+        uint32_t     y,
+        uint32_t     width,
+        uint32_t     height,
+        const void*  data,
+        uint32_t     row_pitch) override;
+
     // ── 内部访问器 ────────────────────────────────────────────────────────
 
     /// 设备是否创建成功

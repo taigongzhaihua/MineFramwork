@@ -62,6 +62,8 @@ public:
                       uint32_t first_index = 0, int32_t base_vertex = 0,
                       uint32_t first_instance = 0) override;
 
+    void set_shader_resource(uint32_t slot, ITexture* texture) override;
+
     // ── D3D11 内部访问器 ──────────────────────────────────────────────────
 
     /**
@@ -80,6 +82,8 @@ private:
     ComPtr<ID3D11DeviceContext>  deferred_ctx_;
     /// end() 调用后生成的 D3D11 原生命令列表
     ComPtr<ID3D11CommandList>    d3d11_cmd_list_;
+    /// 线性双线性采样器（用于字形图集等 SRV 绑定）
+    ComPtr<ID3D11SamplerState>   linear_sampler_;
     /// 是否正在录制（防止重复 begin/end）
     bool                         recording_{false};
 };

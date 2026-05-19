@@ -59,6 +59,7 @@ using Microsoft::WRL::ComPtr;
  */
 inline DXGI_FORMAT to_dxgi_format(PixelFormat fmt) noexcept {
     switch (fmt) {
+    case PixelFormat::R8_UNorm:           return DXGI_FORMAT_R8_UNORM;
     case PixelFormat::RGBA8_UNorm:        return DXGI_FORMAT_R8G8B8A8_UNORM;
     case PixelFormat::RGBA8_UNorm_sRGB:   return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
     case PixelFormat::BGRA8_UNorm:        return DXGI_FORMAT_B8G8R8A8_UNORM;

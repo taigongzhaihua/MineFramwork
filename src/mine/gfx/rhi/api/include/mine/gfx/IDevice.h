@@ -107,6 +107,29 @@ public:
 
     /// 返回 GPU 名称（用于日志/调试）
     [[nodiscard]] virtual const char* adapter_name() const noexcept = 0;
+
+    /**
+     * @brief 将 CPU 数据上传到 GPU 纹理的指定矩形区域。
+     *
+     * 纹理必须以 D3D11_USAGE_DEFAULT / D3D11_USAGE_DYNAMIC 创建。
+     * 常用于字形图集的增量更新：仅上传新增字形所占的脏区域。
+     *
+     * @param texture   目标纹理（必须由 create_texture() 创建）
+     * @param x         目标区域左上角 X（像素，包含）
+     * @param y         目标区域左上角 Y（像素，包含）
+     * @param width     区域宽度（像素）
+     * @param height    区域高度（像素）
+     * @param data      源数据指针（从 (x,y) 开始的矩形像素数据，行主序）
+     * @param row_pitch 源数据每行的字节数（≥ width × bytes_per_pixel）
+     */
+    virtual void update_texture_region(
+        ITexture*    texture,
+        uint32_t     x,
+        uint32_t     y,
+        uint32_t     width,
+        uint32_t     height,
+        const void*  data,
+        uint32_t     row_pitch) = 0;
 };
 
 } // namespace mine::gfx

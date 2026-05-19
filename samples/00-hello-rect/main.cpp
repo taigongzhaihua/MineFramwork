@@ -28,6 +28,7 @@
 #include <mine/platform/PlatformAbi.h>
 #include <mine/gfx/Gfx.h>
 #include <mine/paint/Paint.h>
+#include <mine/text/FontFace.h>
 
 #include <cstdio>
 #include <cmath>
@@ -43,6 +44,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
     mine::core::OwnedPtr<mine::gfx::ISwapchain>   swapchain;
     mine::core::OwnedPtr<mine::gfx::ICommandList> cmd_list;   ///< 用于背景清除
     mine::core::OwnedPtr<mine::paint::IRenderer>  paint_renderer;
+    mine::core::OwnedPtr<mine::text::FontFace>    font_face;  ///< 用于 DrawText 演示的字体面
 
     /// 物理像素 / 逻辑像素缩放因子（由 IWindow::dpi() 初始化，DpiChanged 时更新）
     float dpi_scale_{1.0f};
@@ -486,6 +488,17 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                 pen_poly);
         }
 
+        // ── 文字渲染演示（顶部边距区域）──────────────────────────────────────
+        // 在 10 行网格上方的 20px 留白区域绘制标题文字，展示 FreeType DrawText 命令
+        if (font_face) {
+            canvas.draw_text(
+                mine::core::StringView{"MineFramework - SDF Shapes + FreeType Text Rendering"},
+                mine::math::Vec2{outer_pad, 15.0f},   // 基线 y=15，Segoe UI 12px ascender≈9px
+                font_face.get(),
+                12.0f,
+                mine::paint::Brush::solid(mine::math::Color{1.0f, 1.0f, 1.0f, 0.85f}));
+        }
+
         mine::paint::DisplayList dl = canvas.end();
 
         // ── 2. 提交渲染 ────────────────────────────────────────────────────
@@ -572,6 +585,16 @@ int main(int /*argc*/, char* /*argv*/[])
         }
         renderer.dpi_scale_ = dpi_scale;
         renderer.paint_renderer->set_dpi_scale(dpi_scale);
+    }
+
+    // 7.5 加载系统字体（用于顶部标题 DrawText 演示，失败时跳过，不影响其他功能）
+    renderer.font_face = mine::text::FontFace::load_from_file("C:\\Windows\\Fonts\\segoeui.ttf");
+    if (!renderer.font_face) {
+        // Segoe UI 不可用时尝试 Arial
+        renderer.font_face = mine::text::FontFace::load_from_file("C:\\Windows\\Fonts\\arial.ttf");
+    }
+    if (!renderer.font_face) {
+        std::fprintf(stderr, "警告：系统字体加载失败，DrawText 演示将被跳过\n");
     }
 
     // 8. 订阅窗口事件（Resized + DpiChanged）

@@ -47,6 +47,7 @@
 #include <mine/core/Memory.h>
 #include <mine/containers/Vector.h>
 #include <mine/math/Vec2.h>
+#include <mine/text/FontFace.h>
 #include <cmath>
 
 namespace mine::paint {
@@ -835,6 +836,75 @@ struct ViewportCB {
     float pad1{0.0f};
 };
 
+// ── 文字渲染 HLSL 着色器 ──────────────────────────────────────────────────────
+
+/// 文字顶点着色器：屏幕像素坐标 → NDC，透传 UV 和颜色
+static constexpr const char k_text_vertex_shader_hlsl[] = R"hlsl(
+cbuffer ViewportCB : register(b0) {
+    float2 viewport_size;
+    float2 _padding;
+};
+
+struct TextVSIn {
+    float2 pos   : POSITION;   // 屏幕像素坐标
+    float2 uv    : TEXCOORD0;  // 字形图集 UV（归一化 [0,1]）
+    float4 color : COLOR;      // 线性 RGBA 颜色（预乘 alpha）
+};
+
+struct TextVSOut {
+    float4 pos   : SV_Position;
+    float2 uv    : TEXCOORD0;
+    float4 color : COLOR;
+};
+
+TextVSOut main(TextVSIn i) {
+    TextVSOut o;
+    // 屏幕像素坐标 → NDC（Y 轴翻转）
+    o.pos.x =  (i.pos.x / viewport_size.x) * 2.0f - 1.0f;
+    o.pos.y = -(i.pos.y / viewport_size.y) * 2.0f + 1.0f;
+    o.pos.z =  0.0f;
+    o.pos.w =  1.0f;
+    o.uv    =  i.uv;
+    o.color =  i.color;
+    return o;
+}
+)hlsl";
+
+/// 文字像素着色器：采样 R8 字形图集，输出预乘 Alpha 颜色
+static constexpr const char k_text_pixel_shader_hlsl[] = R"hlsl(
+Texture2D    glyph_atlas   : register(t0);  // R8 字形灰度图集
+SamplerState glyph_sampler : register(s0);  // 线性双线性采样器（CLAMP）
+
+struct TextPSIn {
+    float4 pos   : SV_Position;
+    float2 uv    : TEXCOORD0;
+    float4 color : COLOR;
+};
+
+float4 main(TextPSIn i) : SV_Target {
+    // 采样字形灰度值（R 通道即 alpha 遮罩）
+    float alpha = glyph_atlas.Sample(glyph_sampler, i.uv).r;
+    // 预乘 Alpha 输出（匹配 ONE / INV_SRC_ALPHA 混合模式）
+    return float4(i.color.rgb * alpha, i.color.a * alpha);
+}
+)hlsl";
+
+// ── 文字顶点格式 ──────────────────────────────────────────────────────────────
+
+/**
+ * @brief 文字渲染顶点（32 字节）。
+ *
+ * 内存布局：
+ *   [0..7]   POSITION (float2) — 屏幕像素坐标（左上角原点）
+ *   [8..15]  TEXCOORD0 (float2) — 字形图集 UV（归一化 [0,1]）
+ *   [16..31] COLOR (float4)    — 线性 RGBA 颜色（已由 Canvas 写入）
+ */
+struct TextVertex {
+    float x, y;        ///< 屏幕像素坐标
+    float u, v;        ///< 字形图集 UV（归一化 [0,1]）
+    float r, g, b, a;  ///< 线性 RGBA 颜色
+};
+
 /// 多边形顶点常量缓冲（b1 槽，仅多边形 DrawCall 绑定）
 /// 内存布局与 HLSL PolygonVertsCB 完全一致（16 字节对齐）：
 ///   偏移   0: vert_count（int）
@@ -978,13 +1048,249 @@ static void push_polyline_stroke_vertices(
 // ── RhiRenderer 类 ────────────────────────────────────────────────────────────
 
 /**
+ * @brief 字形 Atlas 打包器（Shelf Packer 算法）。
+ *
+ * 从图集左上角开始，按行（shelf）分配空间。当前行放不下时换行。
+ */
+struct ShelfPacker {
+    uint32_t atlas_w{0};   ///< 图集宽度（像素）
+    uint32_t atlas_h{0};   ///< 图集高度（像素）
+    uint32_t cur_x{0};     ///< 当前行已用宽度
+    uint32_t cur_y{0};     ///< 当前行顶部 Y 坐标
+    uint32_t shelf_h{0};   ///< 当前行已分配的最大高度
+
+    /**
+     * @brief 尝试在图集中分配一块 w×h 的区域。
+     * @return true=分配成功，out_x/out_y 为左上角坐标；false=图集已满。
+     */
+    bool pack(uint32_t w, uint32_t h, uint32_t& out_x, uint32_t& out_y) {
+        // 当前行容纳不下时，换到新行
+        if (cur_x + w > atlas_w) {
+            cur_x  = 0;
+            cur_y += shelf_h;
+            shelf_h = 0;
+        }
+        if (cur_y + h > atlas_h) {
+            return false;  // 图集已满
+        }
+        out_x    = cur_x;
+        out_y    = cur_y;
+        cur_x   += w;
+        if (h > shelf_h) shelf_h = h;
+        return true;
+    }
+};
+
+/**
+ * @brief 字形图集条目（缓存键 + 图集位置 + 度量）。
+ */
+struct GlyphKey {
+    void*    face;       ///< FontFace* 指针（用于区分不同字体）
+    uint32_t codepoint;  ///< Unicode 码点
+    uint32_t size_px;    ///< 字号（整像素）
+};
+
+struct AtlasEntry {
+    GlyphKey key;         ///< 缓存键
+    uint16_t atlas_x;     ///< 字形在图集中的 X 坐标（像素）
+    uint16_t atlas_y;     ///< 字形在图集中的 Y 坐标（像素）
+    uint16_t atlas_w;     ///< 字形宽度（像素，0 表示空白字形）
+    uint16_t atlas_h;     ///< 字形高度（像素）
+    int16_t  bearing_x;   ///< 左边距（像素，相对基线笔触点）
+    int16_t  bearing_y;   ///< 顶边距（像素，基线上方为正）
+    int16_t  advance_x;   ///< 水平步进（像素）
+};
+
+/**
+ * @brief 字形 GPU 图集管理器。
+ *
+ * 职责：
+ *   - 维护一块 1024×1024 R8_UNorm CPU 位图（所有字形灰度数据）
+ *   - 维护相应的 GPU 纹理（懒创建，首次 flush 时创建）
+ *   - 字形缓存（线性查找，最多 kMaxGlyphs 条目）
+ *   - Shelf Packer 分配图集区域
+ *   - 脏标记机制：有新字形加入时标记 dirty，flush() 时上传到 GPU
+ *
+ * 注意：
+ *   - cpu_data_ 为 1MB 堆内存（GlyphAtlas 通过 MINE_NEW 分配）
+ *   - 非线程安全，在单一渲染线程中使用
+ */
+class GlyphAtlas {
+public:
+    static constexpr uint32_t kAtlasSize = 1024;   ///< 图集边长（像素）
+    static constexpr uint32_t kMaxGlyphs = 2048;   ///< 最大字形缓存条目数
+    static constexpr uint32_t kGlyphPad  = 1;      ///< 字形间距（防采样越界）
+
+    GlyphAtlas() {
+        packer_.atlas_w = kAtlasSize;
+        packer_.atlas_h = kAtlasSize;
+        // cpu_data_ 已在构造时零初始化（全黑透明图集）
+    }
+
+    ~GlyphAtlas() = default;
+
+    // 禁止拷贝
+    GlyphAtlas(const GlyphAtlas&)            = delete;
+    GlyphAtlas& operator=(const GlyphAtlas&) = delete;
+
+    /**
+     * @brief 查找或插入一个字形到图集。
+     *
+     * 若字形已在缓存中，直接返回；否则调用 FreeType 光栅化并写入图集。
+     *
+     * @param face      FontFace 对象（用于光栅化）
+     * @param codepoint Unicode 码点
+     * @param size_px   字号（整像素）
+     * @return 字形条目指针；若图集已满或光栅化失败则返回 nullptr。
+     */
+    const AtlasEntry* get_or_insert(text::FontFace* face, uint32_t codepoint, uint32_t size_px);
+
+    /**
+     * @brief 将图集数据上传到 GPU 纹理（若 dirty）。
+     *
+     * 首次调用时创建 GPU 纹理。M0 阶段全量上传（1024×1024 = 1MB R8 数据）。
+     *
+     * @param device 图形设备（用于创建纹理和上传数据）
+     */
+    void flush(gfx::IDevice* device);
+
+    /// 获取 GPU 纹理（flush() 之后有效；首次 flush 前为 nullptr）
+    [[nodiscard]] gfx::ITexture* texture() const noexcept { return gpu_texture_.get(); }
+
+private:
+    uint8_t     cpu_data_[kAtlasSize * kAtlasSize]{};  ///< R8 灰度图集（CPU 端，全零初始化）
+    ShelfPacker packer_{};                              ///< Shelf 打包器
+    bool        dirty_{false};                         ///< 是否有新字形未上传 GPU
+
+    core::OwnedPtr<gfx::ITexture> gpu_texture_;        ///< GPU 纹理（R8_UNorm，ShaderResource）
+
+    AtlasEntry  entries_[kMaxGlyphs]{};                ///< 字形缓存（线性数组）
+    uint32_t    entry_count_{0};                       ///< 已缓存字形数量
+
+    /// 在已缓存条目中查找（线性扫描）
+    const AtlasEntry* find(void* face, uint32_t codepoint, uint32_t size_px) const noexcept {
+        for (uint32_t i = 0; i < entry_count_; ++i) {
+            const AtlasEntry& e = entries_[i];
+            if (e.key.face == face &&
+                e.key.codepoint == codepoint &&
+                e.key.size_px == size_px) {
+                return &e;
+            }
+        }
+        return nullptr;
+    }
+};
+
+// ── GlyphAtlas 方法实现 ───────────────────────────────────────────────────────
+
+const AtlasEntry* GlyphAtlas::get_or_insert(
+    text::FontFace* face, uint32_t codepoint, uint32_t size_px) {
+
+    if (face == nullptr) return nullptr;
+
+    // 1. 缓存命中直接返回
+    const AtlasEntry* cached = find(face, codepoint, size_px);
+    if (cached != nullptr) return cached;
+
+    // 2. 缓存已满
+    if (entry_count_ >= kMaxGlyphs) return nullptr;
+
+    // 3. 设置字号并光栅化
+    if (!face->set_pixel_size(0, size_px)) return nullptr;
+
+    text::GlyphBitmap bitmap{};
+    if (!face->rasterize(codepoint, bitmap)) return nullptr;
+
+    // 4. 构造新条目
+    AtlasEntry& entry = entries_[entry_count_];
+    entry.key.face      = face;
+    entry.key.codepoint = codepoint;
+    entry.key.size_px   = size_px;
+    entry.bearing_x     = static_cast<int16_t>(bitmap.metrics.bearing_x);
+    entry.bearing_y     = static_cast<int16_t>(bitmap.metrics.bearing_y);
+    entry.advance_x     = static_cast<int16_t>(bitmap.metrics.advance_x);
+    entry.atlas_w       = static_cast<uint16_t>(bitmap.metrics.width);
+    entry.atlas_h       = static_cast<uint16_t>(bitmap.metrics.height);
+
+    // 5. 空白字形（空格等）：仅记录步进，不占图集空间
+    if (bitmap.metrics.width == 0 || bitmap.metrics.height == 0) {
+        entry.atlas_x = 0;
+        entry.atlas_y = 0;
+        entry.atlas_w = 0;
+        entry.atlas_h = 0;
+        ++entry_count_;
+        return &entries_[entry_count_ - 1];
+    }
+
+    // 6. 在图集中分配区域（含 1px 边距防采样越界）
+    uint32_t ax = 0, ay = 0;
+    const uint32_t alloc_w = entry.atlas_w + kGlyphPad;
+    const uint32_t alloc_h = entry.atlas_h + kGlyphPad;
+    if (!packer_.pack(alloc_w, alloc_h, ax, ay)) {
+        // 图集空间不足，返回失败（M0 不做动态扩容）
+        return nullptr;
+    }
+    entry.atlas_x = static_cast<uint16_t>(ax);
+    entry.atlas_y = static_cast<uint16_t>(ay);
+
+    // 7. 将字形位图逐行写入 CPU 图集
+    if (bitmap.data != nullptr) {
+        for (uint32_t row = 0; row < entry.atlas_h; ++row) {
+            const uint8_t* src_row = bitmap.data + row * bitmap.pitch;
+            uint8_t*       dst_row = cpu_data_ + (ay + row) * kAtlasSize + ax;
+            for (uint32_t col = 0; col < entry.atlas_w; ++col) {
+                dst_row[col] = src_row[col];
+            }
+        }
+    }
+
+    dirty_ = true;
+    ++entry_count_;
+    return &entries_[entry_count_ - 1];
+}
+
+void GlyphAtlas::flush(gfx::IDevice* device) {
+    if (device == nullptr) return;
+
+    // 首次 flush：创建 GPU 纹理（R8_UNorm，ShaderResource 绑定）
+    if (!gpu_texture_) {
+        gfx::TextureDesc tex_desc{};
+        tex_desc.width      = kAtlasSize;
+        tex_desc.height     = kAtlasSize;
+        tex_desc.format     = gfx::PixelFormat::R8_UNorm;
+        tex_desc.bind_flags = gfx::TextureBindFlags::ShaderResource;
+        tex_desc.mip_levels = 1;
+        tex_desc.array_size = 1;
+
+        gpu_texture_ = device->create_texture(tex_desc);
+        if (!gpu_texture_) return;
+
+        // 创建时上传一次全量数据（全零初始化图集）
+        dirty_ = true;
+    }
+
+    // 有新字形加入：全量上传 CPU 图集到 GPU（M0 简化策略）
+    if (dirty_) {
+        device->update_texture_region(
+            gpu_texture_.get(),
+            0, 0,              // 目标区域左上角
+            kAtlasSize,        // 宽度
+            kAtlasSize,        // 高度
+            cpu_data_,         // CPU 数据指针
+            kAtlasSize);       // 每行字节数（R8，每像素 1 字节，故 = 宽度）
+        dirty_ = false;
+    }
+}
+
+/**
  * @brief 基于 RHI 的 2D 渲染器。
  *
  * 所有 GPU 调用都通过 mine.gfx.rhi 抽象层进行，不直接使用具体图形 API。
  *
- * 包含两条渲染管线：
- *   - solid_pipeline_：用于折线描边展开（StrokeLine），POSITION + COLOR 顶点
+ * 包含三条渲染管线：
+ *   - solid_pipeline_：用于折线描边展开（StrokePath），POSITION + COLOR 顶点
  *   - sdf_pipeline_  ：用于 SDF 形状（矩形/圆角/椭圆），SdfVertex 顶点
+ *   - text_pipeline_ ：用于文字渲染（字形图集四边形），TextVertex 顶点
  */
 class RhiRenderer final : public IRenderer {
 public:
@@ -1008,6 +1314,9 @@ private:
 
     /// 创建 SDF 形状渲染管线（SdfVertex，含 SDF 参数）
     bool create_sdf_pipeline();
+
+    /// 创建文字渲染管线（TextVertex，字形图集采样）
+    bool create_text_pipeline();
 
     /**
      * @brief 生成 SDF 形状包围盒的 6 个顶点（2 个三角形），追加到 vertices。
@@ -1040,6 +1349,8 @@ private:
     core::OwnedPtr<gfx::ICommandList>    cmd_list_;              ///< 命令录制列表
     core::OwnedPtr<gfx::IPipeline>       solid_pipeline_;        ///< 折线描边管线（POSITION+COLOR）
     core::OwnedPtr<gfx::IPipeline>       sdf_pipeline_;          ///< SDF 形状管线（SdfVertex）
+    core::OwnedPtr<gfx::IPipeline>       text_pipeline_;         ///< 文字渲染管线（TextVertex）
+    core::OwnedPtr<GlyphAtlas>           glyph_atlas_;           ///< 字形 GPU 图集管理器
 };
 
 // ── 构造 ──────────────────────────────────────────────────────────────────────
@@ -1062,6 +1373,14 @@ RhiRenderer::RhiRenderer(gfx::IDevice* device)
 
     // 创建 SDF 形状管线（矩形/圆角/椭圆的填充与描边）
     if (!create_sdf_pipeline()) return;
+
+    // 创建文字渲染管线（字形图集四边形采样）
+    if (!create_text_pipeline()) return;
+
+    // 创建字形图集管理器（1024×1024 R8 灰度图集）
+    glyph_atlas_ = core::OwnedPtr<GlyphAtlas>(
+        MINE_NEW(GlyphAtlas),
+        &core::detail::typed_deleter<GlyphAtlas>);
 
     valid_ = true;
 }
@@ -1170,6 +1489,52 @@ bool RhiRenderer::create_sdf_pipeline() {
 
     sdf_pipeline_ = device_->create_pipeline(desc);
     return sdf_pipeline_ != nullptr;
+}
+
+bool RhiRenderer::create_text_pipeline() {
+    // 文字顶点布局：POSITION(float2) + TEXCOORD0(float2) + COLOR(float4) = 32 字节
+    gfx::PipelineDesc desc{};
+
+    desc.vertex_shader.data        = k_text_vertex_shader_hlsl;
+    desc.vertex_shader.size        = sizeof(k_text_vertex_shader_hlsl) - 1;
+    desc.vertex_shader.language    = gfx::ShaderLanguage::HLSL;
+    desc.vertex_shader.entry_point = "main";
+    desc.vertex_shader.is_source   = true;
+
+    desc.pixel_shader.data        = k_text_pixel_shader_hlsl;
+    desc.pixel_shader.size        = sizeof(k_text_pixel_shader_hlsl) - 1;
+    desc.pixel_shader.language    = gfx::ShaderLanguage::HLSL;
+    desc.pixel_shader.entry_point = "main";
+    desc.pixel_shader.is_source   = true;
+
+    // POSITION (float2) — offset 0：屏幕像素坐标
+    desc.vertex_elements[0].semantic       = gfx::VertexSemantic::Position;
+    desc.vertex_elements[0].semantic_index = 0;
+    desc.vertex_elements[0].format         = gfx::VertexElementFormat::Float2;
+    desc.vertex_elements[0].slot           = 0;
+    desc.vertex_elements[0].offset         = 0;
+
+    // TEXCOORD0 (float2) — offset 8：字形图集 UV
+    desc.vertex_elements[1].semantic       = gfx::VertexSemantic::TexCoord;
+    desc.vertex_elements[1].semantic_index = 0;
+    desc.vertex_elements[1].format         = gfx::VertexElementFormat::Float2;
+    desc.vertex_elements[1].slot           = 0;
+    desc.vertex_elements[1].offset         = offsetof(TextVertex, u);
+
+    // COLOR (float4) — offset 16：线性 RGBA 颜色
+    desc.vertex_elements[2].semantic       = gfx::VertexSemantic::Color;
+    desc.vertex_elements[2].semantic_index = 0;
+    desc.vertex_elements[2].format         = gfx::VertexElementFormat::Float4;
+    desc.vertex_elements[2].slot           = 0;
+    desc.vertex_elements[2].offset         = offsetof(TextVertex, r);
+
+    desc.vertex_element_count = 3;
+    desc.vertex_stride        = sizeof(TextVertex);  // 32 字节
+    desc.enable_blend         = true;               // 预乘 Alpha 混合
+    desc.enable_depth         = false;
+
+    text_pipeline_ = device_->create_pipeline(desc);
+    return text_pipeline_ != nullptr;
 }
 
 // ── 帧生命周期 ────────────────────────────────────────────────────────────────
@@ -1962,6 +2327,167 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             cmd_list_->set_constant_buffer(1, poly_cb_buf.get());  // 多边形顶点（b1）
             cmd_list_->set_vertex_buffer(0, poly_vb.get(), 0);
             cmd_list_->draw(static_cast<uint32_t>(sdf_verts.size()), 1, 0, 0);
+        }
+
+        // ── DrawText（文字渲染）─────────────────────────────────────────────
+
+        else if (cmd.kind == DrawCmdKind::DrawText) {
+            if (cmd.brush.kind() != BrushKind::SolidColor) continue;
+            if (!glyph_atlas_) continue;
+
+            // 获取 TextRun（path_index 复用为 text_run 索引）
+            const auto& text_runs = dl.text_runs();
+            if (cmd.path_index >= static_cast<uint32_t>(text_runs.size())) continue;
+            const TextRun& run = text_runs[cmd.path_index];
+
+            if (run.font_face == nullptr || run.length == 0 || run.size_px <= 0.0f) continue;
+
+            // 字号取整（缓存键使用整像素）
+            const uint32_t size_px = static_cast<uint32_t>(run.size_px + 0.5f);
+            auto* face = static_cast<text::FontFace*>(run.font_face);
+            const math::Color color = cmd.brush.color();
+
+            // ── 阶段 1：光栅化全部字形并写入 CPU 图集 ───────────────────────
+            // UTF-8 解码，逐码点查询/插入字形图集
+            {
+                uint32_t  i   = 0;
+                const char* s = run.utf8;
+                while (i < run.length) {
+                    uint32_t codepoint = 0;
+                    const uint8_t c0 = static_cast<uint8_t>(s[i]);
+                    uint32_t      adv = 1;
+
+                    if (c0 < 0x80u) {
+                        // ASCII（0xxxxxxx）
+                        codepoint = c0;
+                        adv = 1;
+                    } else if ((c0 & 0xE0u) == 0xC0u && i + 1 < run.length) {
+                        // 2 字节（110xxxxx 10xxxxxx）
+                        const uint8_t c1 = static_cast<uint8_t>(s[i + 1]);
+                        codepoint = ((c0 & 0x1Fu) << 6u) | (c1 & 0x3Fu);
+                        adv = 2;
+                    } else if ((c0 & 0xF0u) == 0xE0u && i + 2 < run.length) {
+                        // 3 字节（1110xxxx 10xxxxxx 10xxxxxx）
+                        const uint8_t c1 = static_cast<uint8_t>(s[i + 1]);
+                        const uint8_t c2 = static_cast<uint8_t>(s[i + 2]);
+                        codepoint = ((c0 & 0x0Fu) << 12u) | ((c1 & 0x3Fu) << 6u) | (c2 & 0x3Fu);
+                        adv = 3;
+                    } else if ((c0 & 0xF8u) == 0xF0u && i + 3 < run.length) {
+                        // 4 字节（11110xxx 10xxxxxx 10xxxxxx 10xxxxxx）
+                        const uint8_t c1 = static_cast<uint8_t>(s[i + 1]);
+                        const uint8_t c2 = static_cast<uint8_t>(s[i + 2]);
+                        const uint8_t c3 = static_cast<uint8_t>(s[i + 3]);
+                        codepoint = ((c0 & 0x07u) << 18u) | ((c1 & 0x3Fu) << 12u)
+                                  | ((c2 & 0x3Fu) << 6u)  |  (c3 & 0x3Fu);
+                        adv = 4;
+                    } else {
+                        // 非法 UTF-8 序列，跳过此字节
+                        adv = 1;
+                        codepoint = 0xFFFDu;  // 替换字符
+                    }
+
+                    i += adv;
+                    // 预热缓存（光栅化到 CPU 图集，尚未上传 GPU）
+                    glyph_atlas_->get_or_insert(face, codepoint, size_px);
+                }
+            }
+
+            // ── 阶段 2：上传 CPU 图集到 GPU（若有新字形）────────────────────
+            glyph_atlas_->flush(device_);
+            if (!glyph_atlas_->texture()) continue;
+
+            // ── 阶段 3：生成文字四边形顶点 ──────────────────────────────────
+            containers::Vector<TextVertex> text_verts;
+
+            float pen_x = run.origin_x;  // 当前笔触 X（基线）
+            const float pen_y = run.origin_y;   // 当前笔触 Y（基线，Y 向下）
+
+            // 再次遍历文字，生成每个字形的顶点
+            {
+                uint32_t  i   = 0;
+                const char* s = run.utf8;
+                while (i < run.length) {
+                    uint32_t codepoint = 0;
+                    uint32_t adv = 1;
+                    const uint8_t c0 = static_cast<uint8_t>(s[i]);
+
+                    if (c0 < 0x80u) {
+                        codepoint = c0; adv = 1;
+                    } else if ((c0 & 0xE0u) == 0xC0u && i + 1 < run.length) {
+                        const uint8_t c1 = static_cast<uint8_t>(s[i + 1]);
+                        codepoint = ((c0 & 0x1Fu) << 6u) | (c1 & 0x3Fu); adv = 2;
+                    } else if ((c0 & 0xF0u) == 0xE0u && i + 2 < run.length) {
+                        const uint8_t c1 = static_cast<uint8_t>(s[i + 1]);
+                        const uint8_t c2 = static_cast<uint8_t>(s[i + 2]);
+                        codepoint = ((c0 & 0x0Fu) << 12u) | ((c1 & 0x3Fu) << 6u) | (c2 & 0x3Fu); adv = 3;
+                    } else if ((c0 & 0xF8u) == 0xF0u && i + 3 < run.length) {
+                        const uint8_t c1 = static_cast<uint8_t>(s[i + 1]);
+                        const uint8_t c2 = static_cast<uint8_t>(s[i + 2]);
+                        const uint8_t c3 = static_cast<uint8_t>(s[i + 3]);
+                        codepoint = ((c0 & 0x07u) << 18u) | ((c1 & 0x3Fu) << 12u)
+                                  | ((c2 & 0x3Fu) << 6u)  |  (c3 & 0x3Fu); adv = 4;
+                    } else {
+                        adv = 1; codepoint = 0xFFFDu;
+                    }
+                    i += adv;
+
+                    const AtlasEntry* entry = glyph_atlas_->get_or_insert(face, codepoint, size_px);
+                    if (entry == nullptr) {
+                        // 缓存查找失败（理论上不会发生，第一阶段已插入）
+                        pen_x += static_cast<float>(size_px) * 0.5f;
+                        continue;
+                    }
+
+                    // 步进（包括宽度为 0 的空白字形）
+                    if (entry->atlas_w == 0) {
+                        pen_x += static_cast<float>(entry->advance_x);
+                        continue;
+                    }
+
+                    // 字形顶点左上角屏幕坐标（Y 向下，bearing_y 为基线上方，故减去）
+                    const float gx = pen_x + static_cast<float>(entry->bearing_x);
+                    const float gy = pen_y - static_cast<float>(entry->bearing_y);
+                    const float gw = static_cast<float>(entry->atlas_w);
+                    const float gh = static_cast<float>(entry->atlas_h);
+
+                    // 图集 UV（不偏移半像素，依赖 1px 边距保护采样越界）
+                    const float inv = 1.0f / static_cast<float>(GlyphAtlas::kAtlasSize);
+                    const float u0  = static_cast<float>(entry->atlas_x) * inv;
+                    const float v0  = static_cast<float>(entry->atlas_y) * inv;
+                    const float u1  = (static_cast<float>(entry->atlas_x) + gw) * inv;
+                    const float v1  = (static_cast<float>(entry->atlas_y) + gh) * inv;
+
+                    const float cr = color.r, cg = color.g, cb = color.b, ca = color.a;
+
+                    // 生成 2 个三角形（6 顶点）覆盖字形矩形
+                    // 三角形 1：左上, 右上, 左下
+                    text_verts.push_back({gx,      gy,      u0, v0, cr, cg, cb, ca});
+                    text_verts.push_back({gx + gw, gy,      u1, v0, cr, cg, cb, ca});
+                    text_verts.push_back({gx,      gy + gh, u0, v1, cr, cg, cb, ca});
+                    // 三角形 2：右上, 右下, 左下
+                    text_verts.push_back({gx + gw, gy,      u1, v0, cr, cg, cb, ca});
+                    text_verts.push_back({gx + gw, gy + gh, u1, v1, cr, cg, cb, ca});
+                    text_verts.push_back({gx,      gy + gh, u0, v1, cr, cg, cb, ca});
+
+                    pen_x += static_cast<float>(entry->advance_x);
+                }
+            }
+
+            if (text_verts.empty()) continue;
+
+            // ── 阶段 4：提交 DrawCall ──────────────────────────────────────────
+            gfx::BufferDesc vb{};
+            vb.size       = static_cast<uint64_t>(text_verts.size()) * sizeof(TextVertex);
+            vb.stride     = sizeof(TextVertex);
+            vb.bind_flags = gfx::BufferBindFlags::Vertex;
+            auto text_vb = device_->create_buffer(vb, text_verts.data());
+            if (!text_vb) continue;
+
+            cmd_list_->set_pipeline(text_pipeline_.get());
+            cmd_list_->set_constant_buffer(0, viewport_cb.get());
+            cmd_list_->set_shader_resource(0, glyph_atlas_->texture());
+            cmd_list_->set_vertex_buffer(0, text_vb.get(), 0);
+            cmd_list_->draw(static_cast<uint32_t>(text_verts.size()), 1, 0, 0);
         }
     }
     // 注：所有在循环内创建的临时顶点缓冲在 OwnedPtr 析构时释放，

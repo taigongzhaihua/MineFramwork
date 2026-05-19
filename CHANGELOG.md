@@ -5,7 +5,35 @@
 ## [Unreleased]
 
 ### Added
-- **paint（SDF 渲染管线）**：将所有矩形 / 圆角矩形 / 椭圆形状渲染切换为 SDF（有向距离场）方案：
+- **text（mine.text 模块）**：新增基于 FreeType 的字体光栅化模块（M0 阶段）：
+  - `FontFace`：字体面封装类（FreeType `FT_Face`），支持 `load_from_file` / `load_from_memory` 工厂方法，`set_pixel_size` / `rasterize` / `ascender` / `descender` / `line_height` API
+  - `GlyphMetrics` / `GlyphBitmap`：字形度量和位图结构体（bearing / advance / pitch）
+  - `FT_RENDER_MODE_NORMAL`：8-bit 灰度 Alpha 光栅化（非 SDF），与 GPU 字形图集匹配
+  - FreeType 库通过 xmake 包管理器自动获取（`add_requires("freetype", {system=false})`）
+  - `mine_module.lua` 扩展支持 `packages` 参数，传给 `add_packages()`
+
+- **gfx.rhi（接口扩展）**：
+  - `PixelFormat::R8_UNorm`：新增 8-bit 单通道线性格式，D3D11 映射为 `DXGI_FORMAT_R8_UNORM`
+  - `ICommandList::set_shader_resource(slot, texture)`：像素着色器 SRV 绑定（同时绑定线性采样器）
+  - `IDevice::update_texture_region(texture, x, y, w, h, data, row_pitch)`：部分纹理区域 CPU→GPU 上传
+
+- **gfx.d3d11（后端实现）**：
+  - `D3D11CommandList`：实现 `set_shader_resource()`，构造函数中预创建双线性线性采样器（CLAMP 模式）
+  - `D3D11Device`：实现 `update_texture_region()`，使用 `D3D11_BOX` + `UpdateSubresource`
+
+- **paint（文字渲染管线）**：
+  - `DrawCmdKind::DrawText`：新绘制命令，`path_index` 复用为 `text_run` 数组下标
+  - `TextRun`：内联字符串（512 字节 UTF-8）+ `font_face`（`void*`）+ `size_px` + 基线原点
+  - `DisplayList`：新增 `text_runs_` 成员，三参数构造，`text_runs()` / `text_run_count()` 访问器
+  - `Canvas::draw_text(text, origin, font_face, size_px, brush)`：录制文字绘制命令
+  - `RhiRenderer` 新增文字渲染管线 `text_pipeline_`（`TextVertex`，32 字节：pos + uv + color）和 `GlyphAtlas`（字形 GPU 图集管理器）：
+    - `GlyphAtlas`：1024×1024 R8_UNorm CPU 位图 + Shelf Packer 分配策略 + 线性缓存（最多 2048 条）+ dirty flag 全量上传
+    - `k_text_vertex_shader_hlsl` / `k_text_pixel_shader_hlsl`：文字专用 HLSL（R8 图集采样，预乘 Alpha 输出）
+    - `DrawText` 命令处理：UTF-8 解码 → 字形光栅化写入图集 → GPU 上传 → 生成 TextVertex 四边形 → DrawCall
+
+- **samples/00-hello-rect**：在 10 行演示网格顶部边距绘制 `draw_text()` 标题文字，展示 FreeType M0 文字渲染效果（加载 Segoe UI / Arial 系统字体）
+
+
   - `k_sdf_vertex_shader_hlsl`：SDF 顶点着色器，将屏幕坐标变换到 NDC 并透传形状参数
   - `k_sdf_pixel_shader_hlsl`：SDF 像素着色器，包含 `box_sdf`（矩形）/ `rounded_box_sdf`（均匀圆角矩形）/ `complex_rounded_box_sdf`（四角独立圆角矩形，基于 IQ sdRoundedBox）/ `ellipse_sdf`（IQ 近似椭圆 SDF）四种 SDF 函数，使用 `fwidth()` 实现亚像素级抗锯齿；填充和描边（中心对齐）统一在一个着色器中处理
   - `SdfVertex`（64 字节）：新顶点格式，包含屏幕坐标、颜色、本地坐标、形状参数（kind / half_w / half_h / p0-p3 圆角半径 / stroke_w）

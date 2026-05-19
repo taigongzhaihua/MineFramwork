@@ -59,6 +59,9 @@ enum class DrawCmdKind : uint8_t {
     ClipPop,           ///< 弹出最近一次裁剪状态
     TransformPush,     ///< 压入变换矩阵（与当前变换级联）
     TransformPop,      ///< 弹出最近一次变换状态
+
+    // ── 文字命令 ────────────────────────────────────────────────────────
+    DrawText,          ///< 绘制文字（path_index 引用 DisplayList::text_runs_；brush=文字颜色）
 };
 
 /**
@@ -103,6 +106,7 @@ enum class DrawCmdKind : uint8_t {
  *  ClipPop            |               |       |     |
  *  TransformPush      | transform     |       |     |
  *  TransformPop       |               |       |     |
+ *  DrawText           |               | ✓     |     | ✓（text_run 索引）
  */
 struct DrawCmd {
     DrawCmdKind kind{DrawCmdKind::FillRect};

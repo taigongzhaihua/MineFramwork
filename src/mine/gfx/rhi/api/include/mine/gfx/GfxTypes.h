@@ -38,6 +38,7 @@ enum class PixelFormat : int {
     Unknown,
 
     // ── 8-bit 通道格式 ──────────────────────────────────
+    R8_UNorm,           ///< 8-bit 单通道，线性空间（字形图集专用）
     RGBA8_UNorm,        ///< 8-bit RGBA，线性空间
     RGBA8_UNorm_sRGB,   ///< 8-bit RGBA，sRGB 空间
     BGRA8_UNorm,        ///< 8-bit BGRA，线性空间（DXGI/Win32 首选）

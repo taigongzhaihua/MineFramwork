@@ -17,7 +17,8 @@ target("sample.00-hello-rect")
     --   mine.platform.win32 → Win32 窗口 + 消息循环
     --   mine.gfx.d3d11      → D3D11 后端（自动传递 mine.gfx.rhi）
     --   mine.paint          → 2D 绘制抽象（Canvas / IRenderer 等）
-    add_deps("mine.platform.win32", "mine.gfx.d3d11", "mine.paint")
+    --   mine.text           → FontFace 字体面（FreeType，供 draw_text() 演示）
+    add_deps("mine.platform.win32", "mine.gfx.d3d11", "mine.paint", "mine.text")
 
     add_files("main.cpp")
 

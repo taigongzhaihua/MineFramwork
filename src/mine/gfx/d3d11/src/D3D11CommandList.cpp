@@ -15,9 +15,27 @@ namespace mine::gfx::d3d11 {
 D3D11CommandList::D3D11CommandList(ID3D11Device* device) {
     // 为此命令列表创建专用的 D3D11 延迟上下文
     // 延迟上下文线程安全：可在任意线程录制，提交到立即上下文是串行的
-    const HRESULT hr = device->CreateDeferredContext(0, &deferred_ctx_);
+    HRESULT hr = device->CreateDeferredContext(0, &deferred_ctx_);
     if (FAILED(hr)) {
-        OutputDebugStringA("[mine.gfx.d3d11] D3D11CommandList: CreateDeferredContext 失败\n");
+        OutputDebugStringA("[mine.gfx.d3d11] D3D11CommandList: CreateDeferredContext \u5931\u8d25\n");
+        return;
+    }
+
+    // 创建线性双线性采样器（用于字形图集纹理采样）
+    D3D11_SAMPLER_DESC sampler_desc{};
+    sampler_desc.Filter         = D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT; // 双线性居中灯光
+    sampler_desc.AddressU       = D3D11_TEXTURE_ADDRESS_CLAMP;           // 超出边界时贴边
+    sampler_desc.AddressV       = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sampler_desc.AddressW       = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sampler_desc.MipLODBias     = 0.0f;
+    sampler_desc.MaxAnisotropy  = 1;
+    sampler_desc.ComparisonFunc = D3D11_COMPARISON_NEVER;
+    sampler_desc.MinLOD         = 0.0f;
+    sampler_desc.MaxLOD         = D3D11_FLOAT32_MAX;
+
+    hr = device->CreateSamplerState(&sampler_desc, &linear_sampler_);
+    if (FAILED(hr)) {
+        OutputDebugStringA("[mine.gfx.d3d11] D3D11CommandList: CreateSamplerState \u5931\u8d25\n");
     }
 }
 
@@ -239,6 +257,38 @@ void D3D11CommandList::draw_indexed(
     } else {
         deferred_ctx_->DrawIndexedInstanced(
             index_count, instance_count, first_index, base_vertex, first_instance);
+    }
+}
+
+void D3D11CommandList::set_shader_resource(uint32_t slot, ITexture* texture) {
+    if (!deferred_ctx_ || !recording_) {
+        return;
+    }
+
+    if (texture == nullptr) {
+        // 解绑指定槽位的 SRV 和采样器
+        ID3D11ShaderResourceView* null_srv = nullptr;
+        ID3D11SamplerState*       null_smp = nullptr;
+        deferred_ctx_->PSSetShaderResources(slot, 1, &null_srv);
+        deferred_ctx_->PSSetSamplers(slot, 1, &null_smp);
+        return;
+    }
+
+    // 获取 SRV（纹理必须以 ShaderResource 绑定标志创建）
+    auto* d3d_tex = static_cast<D3D11Texture*>(texture);
+    ID3D11ShaderResourceView* srv = d3d_tex->srv();
+    if (srv == nullptr) {
+        OutputDebugStringA("[mine.gfx.d3d11] set_shader_resource: 纹理没有 SRV，请以 ShaderResource 标志创建\n");
+        return;
+    }
+
+    // 绑定 SRV 到像素着色器
+    deferred_ctx_->PSSetShaderResources(slot, 1, &srv);
+
+    // 绑定线性双线性采样器到相同槽位
+    if (linear_sampler_) {
+        ID3D11SamplerState* smp = linear_sampler_.Get();
+        deferred_ctx_->PSSetSamplers(slot, 1, &smp);
     }
 }
 

@@ -73,6 +73,11 @@ function mine_module(name, config)
             add_defines(table.unpack(config.defines))
         end
 
+        -- 第三方包依赖（通过 add_requires 声明的包，如 freetype）
+        if config.packages and #config.packages > 0 then
+            add_packages(table.unpack(config.packages))
+        end
+
         if kind ~= "headeronly" then
             add_files(source_pattern)
             add_defines("MINE_BUILDING_" .. name:upper():gsub("[^%w]", "_"), {private = true})

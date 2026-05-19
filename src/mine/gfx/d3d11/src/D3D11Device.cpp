@@ -225,4 +225,42 @@ mine::core::OwnedPtr<IPipeline> D3D11DeviceImpl::create_pipeline(const PipelineD
         &mine::core::detail::typed_deleter<D3D11Pipeline>);
 }
 
+void D3D11DeviceImpl::update_texture_region(
+    ITexture*    texture,
+    uint32_t     x,
+    uint32_t     y,
+    uint32_t     width,
+    uint32_t     height,
+    const void*  data,
+    uint32_t     row_pitch) {
+
+    if (!device_ || !immediate_ctx_ || texture == nullptr || data == nullptr) {
+        return;
+    }
+
+    auto* d3d_tex = static_cast<D3D11Texture*>(texture);
+    ID3D11Resource* res = d3d_tex->texture();
+    if (res == nullptr) {
+        return;
+    }
+
+    // 构造目标矩形框（D3D11_BOX 的 right/bottom 是不含端点的）
+    D3D11_BOX dst_box{};
+    dst_box.left   = x;
+    dst_box.top    = y;
+    dst_box.front  = 0;
+    dst_box.right  = x + width;
+    dst_box.bottom = y + height;
+    dst_box.back   = 1;
+
+    // UpdateSubresource 将 CPU 内存直接写入 GPU 纹理的 subresource 0（mip0，array0）
+    immediate_ctx_->UpdateSubresource(
+        res,
+        0,          // 子资源索引（mip 0，数组层 0）
+        &dst_box,
+        data,
+        row_pitch,
+        0);         // depth_row_pitch（2D 纹理不使用）
+}
+
 } // namespace mine::gfx::d3d11

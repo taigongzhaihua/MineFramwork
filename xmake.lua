@@ -11,6 +11,7 @@ includes("xmake/rules/mml_compile.lua")
 includes("xmake/rules/pkg_export.lua")
 
 add_requires("doctest", {system = false})
+add_requires("freetype", {system = false})
 
 local function include_if_exists(script)
     if os.isfile(path.join(os.scriptdir(), script)) then
