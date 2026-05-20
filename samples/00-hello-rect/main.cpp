@@ -21,6 +21,9 @@
  *   (col0,row5): translate+rotate       (col1,row5): translate+scale
  *   (col2,row5): 嵌套变换               (col3,row5): rotation_about
  *   (col4,row5): translate 纯平移       (col5,row5): translate 步进
+ *   (col0,row6): FillPath 椭圆路径      (col1,row6): FillPath 心形
+ *   (col2,row6): StrokePath 波浪线      (col3,row6): StrokePath 圆形轮廓
+ *   (col4,row6): ClipPath 椭圆路径裁剪  (col5,row6): ClipPath 心形路径裁剪
  */
 
 #include <mine/platform/PlatformAbi.h>
@@ -104,7 +107,7 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         const float outer_pad = 20.0f;
         const float gap       = 8.0f;
         const float cw        = (W - outer_pad * 2.0f - gap * 5.0f) / 6.0f;
-        const float ch        = (H - outer_pad * 2.0f - gap * 5.0f) / 6.0f;
+        const float ch        = (H - outer_pad * 2.0f - gap * 6.0f) / 7.0f;
 
         // 列起始 x 坐标（共 6 列）
         const float col0 = outer_pad;
@@ -114,13 +117,14 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
         const float col4 = outer_pad + (cw + gap) * 4.0f;
         const float col5 = outer_pad + (cw + gap) * 5.0f;
 
-        // 行起始 y 坐标（共 6 行）
+        // 行起始 y 坐标（共 7 行）
         const float row0 = outer_pad;
         const float row1 = outer_pad + (ch + gap) * 1.0f;
         const float row2 = outer_pad + (ch + gap) * 2.0f;
         const float row3 = outer_pad + (ch + gap) * 3.0f;
         const float row4 = outer_pad + (ch + gap) * 4.0f;
         const float row5 = outer_pad + (ch + gap) * 5.0f;
+        const float row6 = outer_pad + (ch + gap) * 6.0f;
 
         const float ip = 10.0f;           // 格子内边距
         const float sw = cw - ip * 2.0f;  // 格子内容宽
@@ -184,21 +188,21 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                 mine::paint::Brush::solid(col_orange), pen);
         }
 
-        // ── 行4 左：FillEllipse ─────────────────────────────────────────
+        // ── (col0, row1)：FillEllipse ─────────────────────────────────────────
         canvas.fill_ellipse(
-            mine::math::Vec2{col0 + ip + sw * 0.5f, row3 + ip + sh * 0.5f},
+            mine::math::Vec2{col0 + ip + sw * 0.5f, row1 + ip + sh * 0.5f},
             mine::math::Vec2{sw * 0.5f, sh * 0.5f},
             mine::paint::Brush::solid(col_purple));
 
-        // ── 行4 右：StrokeEllipse ───────────────────────────────────────
+        // ── (col1, row1)：StrokeEllipse ───────────────────────────────────────
         canvas.stroke_ellipse(
-            mine::math::Vec2{col1 + ip + sw * 0.5f, row3 + ip + sh * 0.5f},
+            mine::math::Vec2{col1 + ip + sw * 0.5f, row1 + ip + sh * 0.5f},
             mine::math::Vec2{sw * 0.5f, sh * 0.5f},
             mine::paint::Brush::solid(col_purple), pen);
 
-        // ── 行5 左：StrokeBorderedRoundedRect（四边不等宽 + 四角独立圆角）──
+        // ── (col2, row1)：StrokeBorderedRoundedRect（四边不等宽 + 四角独立圆角）──
         canvas.stroke_bordered_rounded_rect(
-            mine::math::Rect{col0 + ip, row4 + ip, sw, sh},
+            mine::math::Rect{col2 + ip, row1 + ip, sw, sh},
             mine::paint::Brush::solid(col_red),
             mine::math::Thickness{8.0f, 4.0f, 2.0f, 16.0f},  // left=8, top=4, right=2, bottom=16
             mine::math::CornerRadii{
@@ -208,9 +212,9 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
                 {0.0f,  0.0f}    // 左下角（直角）
             });
 
-        // ── 行5 右：StrokeBorderedRoundedRect（均匀圆角 + 仅上下边框各12px）──
+        // ── (col3, row1)：StrokeBorderedRoundedRect（均匀圆角 + 仅上下边框各12px）──
         canvas.stroke_bordered_rounded_rect(
-            mine::math::Rect{col1 + ip, row4 + ip, sw, sh},
+            mine::math::Rect{col3 + ip, row1 + ip, sw, sh},
             mine::paint::Brush::solid(col_cyan),
             mine::math::Thickness::symmetric(0.0f, 12.0f),  // 仅上下各 12px（symmetric: horizontal=0, vertical=12）
             mine::math::CornerRadii::uniform(16.0f));
@@ -890,6 +894,187 @@ struct HelloRectRenderer : public mine::platform::IWindowEventSink {
             }
         }
 
+        // ══ 行6：FillPath / StrokePath / ClipPath 演示 ═══════════════════════
+
+        // ── (col0, row6)：FillPath — cubic bezier 近似椭圆路径填充 ─────────────
+        // 用 4 段三次贝塞尔曲线近似圆（κ≈0.5523），展示 FillPath 对曲线路径的支持。
+        {
+            constexpr float k_pi = 3.14159265358979323846f;
+            const float cx6 = col0 + ip + sw * 0.5f;
+            const float cy6 = row6 + ip + sh * 0.5f;
+            const float rx6 = sw * 0.44f;  // 水平半径
+            const float ry6 = sh * 0.44f;  // 垂直半径（略扁的椭圆）
+            constexpr float kappa = 0.5523f;
+
+            mine::paint::PathBuilder pb6;
+            pb6.move_to({cx6, cy6 - ry6});
+            pb6.cubic_to({cx6 + kappa * rx6, cy6 - ry6},
+                         {cx6 + rx6, cy6 - kappa * ry6},
+                         {cx6 + rx6, cy6});
+            pb6.cubic_to({cx6 + rx6, cy6 + kappa * ry6},
+                         {cx6 + kappa * rx6, cy6 + ry6},
+                         {cx6, cy6 + ry6});
+            pb6.cubic_to({cx6 - kappa * rx6, cy6 + ry6},
+                         {cx6 - rx6, cy6 + kappa * ry6},
+                         {cx6 - rx6, cy6});
+            pb6.cubic_to({cx6 - rx6, cy6 - kappa * ry6},
+                         {cx6 - kappa * rx6, cy6 - ry6},
+                         {cx6, cy6 - ry6});
+            pb6.close();
+            auto path6 = pb6.build();
+            canvas.fill_path(path6, mine::paint::Brush::solid(col_green));
+            (void)k_pi;
+        }
+
+        // ── (col1, row6)：FillPath — 心形路径（cubic bezier 近似）─────────────
+        // 4 段三次贝塞尔曲线拼合心形，展示 FillPath 对复杂闭合路径的支持。
+        {
+            const float cx6 = col1 + ip + sw * 0.5f;
+            const float cy6 = row6 + ip + sh * 0.5f;
+            const float r6  = std::min(sw, sh) * 0.40f;
+
+            mine::paint::PathBuilder pb6;
+            pb6.move_to({cx6, cy6 + r6});                        // 底部尖点
+            pb6.cubic_to({cx6 - r6 * 0.45f, cy6 + r6 * 0.70f},
+                         {cx6 - r6,          cy6},
+                         {cx6 - r6,          cy6 - r6 * 0.25f}); // 左下段
+            pb6.cubic_to({cx6 - r6,          cy6 - r6 * 0.85f},
+                         {cx6 - r6 * 0.50f,  cy6 - r6},
+                         {cx6,               cy6 - r6 * 0.65f}); // 左上段
+            pb6.cubic_to({cx6 + r6 * 0.50f,  cy6 - r6},
+                         {cx6 + r6,          cy6 - r6 * 0.85f},
+                         {cx6 + r6,          cy6 - r6 * 0.25f}); // 右上段
+            pb6.cubic_to({cx6 + r6,          cy6},
+                         {cx6 + r6 * 0.45f,  cy6 + r6 * 0.70f},
+                         {cx6,               cy6 + r6});          // 右下段
+            pb6.close();
+            auto path6 = pb6.build();
+            canvas.fill_path(path6, mine::paint::Brush::solid(col_red));
+        }
+
+        // ── (col2, row6)：StrokePath — 波浪路径（多段 QuadTo 描边）─────────────
+        // 4 段二次贝塞尔拼成连续波浪，展示 StrokePath 对开放曲线路径的描边支持。
+        {
+            const float x6    = col2 + ip;
+            const float mid_y = row6 + ip + sh * 0.5f;
+            const float amp   = sh * 0.36f;
+            const float step  = sw / 4.0f;
+
+            mine::paint::PathBuilder pb6;
+            pb6.move_to({x6, mid_y});
+            for (int k = 0; k < 4; ++k) {
+                const float ctrl_y = mid_y + ((k % 2 == 0) ? -amp : amp);
+                const float ctrl_x = x6 + (k + 0.5f) * step;
+                const float end_x  = x6 + (k + 1.0f) * step;
+                pb6.quad_to({ctrl_x, ctrl_y}, {end_x, mid_y});
+            }
+            auto path6 = pb6.build();
+            mine::paint::Pen pen6{.width = 3.0f};
+            canvas.stroke_path(path6, mine::paint::Brush::solid(col_orange), pen6);
+        }
+
+        // ── (col3, row6)：StrokePath — 六角星形轮廓（QuadTo 波浪环）────────────
+        // 用 6 段 QuadTo 拼合一个向外凸出的星形闭合轮廓，展示闭合路径的描边效果。
+        {
+            constexpr float k_pi = 3.14159265358979323846f;
+            const float cx6 = col3 + ip + sw * 0.5f;
+            const float cy6 = row6 + ip + sh * 0.5f;
+            const float r_out = std::min(sw, sh) * 0.44f;
+            const float r_in  = r_out * 0.55f;
+
+            mine::paint::PathBuilder pb6;
+            // 从顶部顶点开始，6 段 QuadTo：奇数段向外，偶数段向内
+            pb6.move_to({cx6, cy6 - r_out});
+            for (int k = 0; k < 6; ++k) {
+                const float a_ctrl = -k_pi * 0.5f + (k + 0.5f) * k_pi / 3.0f;
+                const float a_end  = -k_pi * 0.5f + (k + 1.0f) * k_pi / 3.0f;
+                const float r_ctrl = (k % 2 == 0) ? r_in : r_out * 1.15f;
+                pb6.quad_to({cx6 + r_ctrl * std::cos(a_ctrl),
+                              cy6 + r_ctrl * std::sin(a_ctrl)},
+                             {cx6 + r_out  * std::cos(a_end),
+                              cy6 + r_out  * std::sin(a_end)});
+            }
+            pb6.close();
+            auto path6 = pb6.build();
+            mine::paint::Pen pen6{.width = 2.5f};
+            canvas.stroke_path(path6, mine::paint::Brush::solid(col_cyan), pen6);
+            (void)k_pi;
+        }
+
+        // ── (col4, row6)：ClipPath — 椭圆路径裁剪（内部线性渐变矩形）────────────
+        // cubic bezier 近似椭圆作为裁剪形状，展示 clip_path 对曲线路径的支持。
+        {
+            const float cx6 = col4 + ip + sw * 0.5f;
+            const float cy6 = row6 + ip + sh * 0.5f;
+            const float rx6 = sw * 0.44f;
+            const float ry6 = sh * 0.44f;
+            constexpr float kappa = 0.5523f;
+
+            mine::paint::PathBuilder pb6;
+            pb6.move_to({cx6, cy6 - ry6});
+            pb6.cubic_to({cx6 + kappa * rx6, cy6 - ry6},
+                         {cx6 + rx6, cy6 - kappa * ry6},
+                         {cx6 + rx6, cy6});
+            pb6.cubic_to({cx6 + rx6, cy6 + kappa * ry6},
+                         {cx6 + kappa * rx6, cy6 + ry6},
+                         {cx6, cy6 + ry6});
+            pb6.cubic_to({cx6 - kappa * rx6, cy6 + ry6},
+                         {cx6 - rx6, cy6 + kappa * ry6},
+                         {cx6 - rx6, cy6});
+            pb6.cubic_to({cx6 - rx6, cy6 - kappa * ry6},
+                         {cx6 - kappa * rx6, cy6 - ry6},
+                         {cx6, cy6 - ry6});
+            pb6.close();
+
+            canvas.save();
+            canvas.clip_path(pb6.build());
+            // 内部填充对角线线性渐变矩形
+            mine::paint::GradientStop stops[] = {
+                {0.0f, mine::math::Color{0.15f, 0.55f, 1.00f, 1.0f}},
+                {1.0f, mine::math::Color{0.90f, 0.25f, 0.75f, 1.0f}},
+            };
+            canvas.fill_rect(
+                mine::math::Rect{col4 + ip, row6 + ip, sw, sh},
+                mine::paint::Brush::linear_gradient(
+                    mine::math::Vec2{0.0f, 0.0f},
+                    mine::math::Vec2{1.0f, 1.0f},
+                    mine::core::Span<const mine::paint::GradientStop>{stops, 2}));
+            canvas.restore();
+        }
+
+        // ── (col5, row6)：ClipPath — 心形路径裁剪（内部填充橙色椭圆）──────────
+        // 心形 cubic bezier 路径作为裁剪区域，内填橙色椭圆，展示复杂路径裁剪效果。
+        {
+            const float cx6 = col5 + ip + sw * 0.5f;
+            const float cy6 = row6 + ip + sh * 0.5f;
+            const float r6  = std::min(sw, sh) * 0.40f;
+
+            mine::paint::PathBuilder pb6;
+            pb6.move_to({cx6, cy6 + r6});
+            pb6.cubic_to({cx6 - r6 * 0.45f, cy6 + r6 * 0.70f},
+                         {cx6 - r6,          cy6},
+                         {cx6 - r6,          cy6 - r6 * 0.25f});
+            pb6.cubic_to({cx6 - r6,          cy6 - r6 * 0.85f},
+                         {cx6 - r6 * 0.50f,  cy6 - r6},
+                         {cx6,               cy6 - r6 * 0.65f});
+            pb6.cubic_to({cx6 + r6 * 0.50f,  cy6 - r6},
+                         {cx6 + r6,          cy6 - r6 * 0.85f},
+                         {cx6 + r6,          cy6 - r6 * 0.25f});
+            pb6.cubic_to({cx6 + r6,          cy6},
+                         {cx6 + r6 * 0.45f,  cy6 + r6 * 0.70f},
+                         {cx6,               cy6 + r6});
+            pb6.close();
+
+            canvas.save();
+            canvas.clip_path(pb6.build());
+            // 内填橙色椭圆
+            canvas.fill_ellipse(
+                mine::math::Vec2{cx6, cy6},
+                mine::math::Vec2{sw * 0.48f, sh * 0.48f},
+                mine::paint::Brush::solid(col_orange));
+            canvas.restore();
+        }
+
         // ── 文字渲染演示（顶部边距区域）──────────────────────────────────────
         // 在 15 行网格上方的 20px 留白区域绘制标题文字
         if (font_face) {
@@ -938,7 +1123,7 @@ int main(int /*argc*/, char* /*argv*/[])
     // 4. 创建窗口
     mine::platform::WindowDesc win_desc{};
     win_desc.title         = "MineFramework - Canvas SDF 渲染演示（Fill / Stroke × Rect / RoundedRect / ComplexRoundedRect / Ellipse）";
-    win_desc.size          = {960.0f, 999.0f};
+    win_desc.size          = {960.0f, 1160.0f};
     win_desc.auto_position = true;
     win_desc.resizable     = true;
     win_desc.kind          = mine::platform::WindowKind::Normal;
