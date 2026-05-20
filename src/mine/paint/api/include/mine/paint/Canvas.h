@@ -127,10 +127,22 @@ public:
     void clip_polygon(core::Span<const math::Vec2> vertices);
 
     /**
+     * @brief 以任意路径形状裁剪后续绘制内容。
+     *
+     * 路径中的曲线段（QuadTo / CubicTo）由渲染器内部自动扁平化为折线多边形，
+     * 再通过 SDF 多边形软裁剪评估。优先取第一个闭合子路径；若无闭合子路径，
+     * 则取顶点最多的子路径。
+     * 可与其他 clip_* 嵌套使用，通过 save()/restore() 撤销。
+     *
+     * @param path  待裁剪路径（必须含有至少 3 个顶点的子路径）
+     */
+    void clip_path(const Path& path);
+
+    /**
      * @brief 弹出最近一次压入的裁剪区域。
      *
      * 与 clip_rect / clip_rounded_rect / clip_complex_rounded_rect /
-     * clip_polygon 配套调用。也可通过 save()/restore() 自动撤销。
+     * clip_polygon / clip_path 配套调用。也可通过 save()/restore() 自动撤销。
      */
     void clip_pop();
 

@@ -5,6 +5,12 @@
 ## [Unreleased]
 
 ### Added
+- **paint（路径裁剪）**：实现 `clip_path(const Path&)` 路径形状裁剪：
+  - 新增 `DrawCmdKind::ClipPushPath`，携带原始 Path 索引，曲线段扁平化在渲染器内部完成
+  - `Canvas::clip_path()` API：直接存储路径引用，保持 Canvas 层轻量
+  - `RhiRenderer` 新增 `ClipPushPath` 执行分支：调用 `flatten_path_to_subpaths`，优先取第一个闭合子路径，降采样至 ≤64 顶点后填写 `ClipSdfLayer`（kind=10 多边形 SDF）
+  - 同步将 `k_max_clip_poly_verts` 从 16 扩展至 64，更新 HLSL `ClipSdfLayer.poly_verts` 数组大小及 C++ `static_assert`（`ClipSdfLayer` 1072 字节，`ClipSdfCB` 4304 字节）
+
 - **paint（路径渲染）**：实现 `FillPath / StrokePath` 执行链路：
   - `RhiRenderer` 新增 Path 扁平化（`LineTo/QuadTo/CubicTo/Close`）
   - `FillPath`：闭合子路径转换为多边形 SDF 填充（支持抗锯齿边缘）

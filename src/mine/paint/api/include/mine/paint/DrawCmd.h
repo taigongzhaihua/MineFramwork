@@ -59,6 +59,7 @@ enum class DrawCmdKind : uint8_t {
     ClipPushRoundedRect,        ///< 压入均匀圆角矩形裁剪区域（rrect 字段）
     ClipPushComplexRoundedRect, ///< 压入四角独立圆角矩形裁剪区域（complex_rrect 字段）
     ClipPushPolygon,            ///< 压入多边形裁剪区域（path_index 引用顶点；pt_a=AABB中心，pt_b=AABB半尺寸）
+    ClipPushPath,               ///< 压入任意路径裁剪区域（path_index 引用 Path，渲染器内部我平化）
     ClipPop,                    ///< 弹出最近一次裁剪状态
     TransformPush,     ///< 保存当前变换快照到栈（save() 使用）
     TransformSet,      ///< 将当前变换与 cmd.transform 级联（不压栈；transform/translate/rotate/scale 使用）
@@ -111,6 +112,7 @@ enum class DrawCmdKind : uint8_t {
  *  ClipPushComplexRoundedRect | complex_rrect |  |   |
  *  ClipPushPolygon    | pt_a(AABB中心)|       |     | ✓
  *                     | pt_b(AABB半尺寸)|     |     |
+ *  ClipPushPath       |               |       |     | ✓（Path 引用）
  *  ClipPop            |               |       |     |
  *  TransformPush      | transform     |       |     |
  *  TransformPop       |               |       |     |

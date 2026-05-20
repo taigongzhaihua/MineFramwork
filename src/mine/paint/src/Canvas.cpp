@@ -96,6 +96,14 @@ void Canvas::clip_polygon(core::Span<const math::Vec2> vertices) {
     push(cmd);
 }
 
+void Canvas::clip_path(const Path& path) {
+    // 路径由渲染器内部扁平化，Canvas 层只需存储原始路径引用
+    DrawCmd cmd;
+    cmd.kind       = DrawCmdKind::ClipPushPath;
+    cmd.path_index = intern_path(path);
+    push(cmd);
+}
+
 void Canvas::clip_pop() {
     DrawCmd cmd;
     cmd.kind = DrawCmdKind::ClipPop;
