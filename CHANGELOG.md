@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Added
+- **mine.ui.property（依赖属性系统）**：完整实现 WPF 风格依赖属性模块（M1.1）：
+  - `DependencyProperty`：全局唯一静态描述符，支持 `register_property` / `register_attached_property` 注册，包含名称、属主类型、值类型、默认值、属性元数据（影响布局/渲染失效标志、变更回调、继承标志）
+  - `DependencyObject`：基于 Pimpl 的属性值存储基类，支持多优先级槽（Default / Inherited / StyleSetter / StyleTrigger / TemplateBind / Local / Animation），`set_value` / `get_value` / `clear_value` / `has_value` 按优先级合并生效
+  - 属性变更通知：`on_property_changed` 虚方法 + `subscribe_property_changed` 订阅机制，内置防递归保护
+  - 虚方法钩子 `invalidate_measure` / `invalidate_arrange` / `invalidate_render`，与属性元数据 `affects_*` 标志联动
+  - 共 19 个单元测试（doctest），覆盖注册、get/set/clear、优先级覆盖、通知、防递归、附加属性等场景
+
 ### Fixed
 - **paint（路径裁剪形状错误）**：修复 `ClipPushPath` 渲染路径中多边形顶点数 `nv` 在 HLSL 着色器内被错误限制为最多 16 个的 Bug：
   - `evaluate_clip_coverage` 中 `clamp(..., 3, 16)` 同步更新为 `clamp(..., 3, 64)`，与 C++ 侧 `k_max_clip_poly_verts=64` 保持一致
