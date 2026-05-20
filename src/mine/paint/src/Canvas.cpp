@@ -12,12 +12,25 @@ namespace mine::paint {
 // ── 状态管理 ──────────────────────────────────────────────────────────────────
 
 void Canvas::save() {
+    // 保存当前裁剪层深度（restore 时自动弹出超出部分）
+    clip_depth_stack_.push_back(clip_depth_);
     DrawCmd cmd;
     cmd.kind = DrawCmdKind::TransformPush;
     push(cmd);
 }
 
 void Canvas::restore() {
+    // 自动弹出自上次 save() 以来推入的所有裁剪层
+    if (!clip_depth_stack_.empty()) {
+        const int saved_depth = clip_depth_stack_.back();
+        clip_depth_stack_.pop_back();
+        while (clip_depth_ > saved_depth) {
+            DrawCmd pop_cmd;
+            pop_cmd.kind = DrawCmdKind::ClipPop;
+            push(pop_cmd);
+            --clip_depth_;
+        }
+    }
     DrawCmd cmd;
     cmd.kind = DrawCmdKind::TransformPop;
     push(cmd);
@@ -47,6 +60,7 @@ void Canvas::rotate(float angle_rad) {
 }
 
 void Canvas::clip_rect(math::Rect rect) {
+    ++clip_depth_;
     DrawCmd cmd;
     cmd.kind = DrawCmdKind::ClipPushRect;
     cmd.rect = rect;
@@ -54,6 +68,7 @@ void Canvas::clip_rect(math::Rect rect) {
 }
 
 void Canvas::clip_rounded_rect(math::RoundedRect rrect) {
+    ++clip_depth_;
     DrawCmd cmd;
     cmd.kind  = DrawCmdKind::ClipPushRoundedRect;
     cmd.rrect = rrect;
@@ -61,6 +76,7 @@ void Canvas::clip_rounded_rect(math::RoundedRect rrect) {
 }
 
 void Canvas::clip_complex_rounded_rect(math::ComplexRoundedRect rrect) {
+    ++clip_depth_;
     DrawCmd cmd;
     cmd.kind          = DrawCmdKind::ClipPushComplexRoundedRect;
     cmd.complex_rrect = rrect;
@@ -88,6 +104,7 @@ void Canvas::clip_polygon(core::Span<const math::Vec2> vertices) {
     }
     pb.close();
 
+    ++clip_depth_;
     DrawCmd cmd;
     cmd.kind       = DrawCmdKind::ClipPushPolygon;
     cmd.pt_a       = {(min_x + max_x) * 0.5f, (min_y + max_y) * 0.5f};  // AABB 中心
@@ -98,6 +115,7 @@ void Canvas::clip_polygon(core::Span<const math::Vec2> vertices) {
 
 void Canvas::clip_path(const Path& path) {
     // 路径由渲染器内部扁平化，Canvas 层只需存储原始路径引用
+    ++clip_depth_;
     DrawCmd cmd;
     cmd.kind       = DrawCmdKind::ClipPushPath;
     cmd.path_index = intern_path(path);
@@ -105,6 +123,7 @@ void Canvas::clip_path(const Path& path) {
 }
 
 void Canvas::clip_pop() {
+    if (clip_depth_ > 0) --clip_depth_;
     DrawCmd cmd;
     cmd.kind = DrawCmdKind::ClipPop;
     push(cmd);

@@ -341,6 +341,11 @@ private:
     containers::Vector<Path>     paths_{};       ///< 路径数据（DrawCmd 通过 path_index 引用）
     containers::Vector<TextRun>  text_runs_{};   ///< 文字段落（DrawText 命令通过 path_index 引用）
 
+    /// 当前裁剪层深度（每次 clip_* 调用 +1，每次 clip_pop 调用 -1）
+    int                          clip_depth_ = 0;
+    /// save() 时保存的裁剪层深度快照栈（restore() 时弹出，自动发出必要的 ClipPop）
+    containers::Vector<int>      clip_depth_stack_{};
+
     /// 保存路径到内部数组，返回其索引（供 fill_path/stroke_path 使用）。
     uint32_t intern_path(const Path& path);
 

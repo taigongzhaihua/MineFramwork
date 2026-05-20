@@ -10,6 +10,20 @@
   - 修复前：椭圆裁剪仅使用前 16 个折线顶点，呈现为楔形；心形裁剪区域完全为空白
   - 修复后：任意复杂曲线路径裁剪均可正确显示
 
+- **paint（心形路径裁剪空白）**：修复 `Canvas::save()/restore()` 不保存/恢复裁剪层深度导致相邻 `clip_path` 块裁剪状态叠加的 Bug：
+  - `canvas.restore()` 现在自动弹出自上次 `save()` 以来推入的所有裁剪层（发出对应数量的 `ClipPop` 命令），无需手动调用 `clip_pop()`
+  - 所有 `clip_*()` 方法（`clip_rect / clip_rounded_rect / clip_complex_rounded_rect / clip_polygon / clip_path`）现在维护 `clip_depth_` 计数器，`clip_pop()` 也对应递减
+  - 修复前：先 `clip_path(椭圆)` 再 `clip_path(心形)` 时两个裁剪层同时生效，心形内的内容完全位于椭圆裁剪区外，导致空白
+  - 修复后：每个 `save/clip_path.../restore` 块独立管理裁剪层，互不干扰
+
+- **paint（路径描边曲线锯齿）**：`StrokePath` 渲染方案从折线扁平化逐段 kind=6 改为遍历原始路径命令并为每种曲线段发射对应 SDF 图元，真正实现曲线 SDF 抗锯齿描边：
+  - `LineTo` → SDF kind=6（线段 SDF）
+  - `QuadTo` → SDF kind=8（二次贝塞尔 SDF，IQ 解析解，无折线化误差）
+  - `CubicTo` → SDF kind=9（三次贝塞尔 SDF，数值迭代）
+  - 内部接缝使用 Round cap，路径首尾端点沿用 `Pen` 设定的 cap 样式（kind=8/9 不支持 Square，回退为 Flat）
+  - 修复前：波浪线等 QuadBezier 路径在折线化后存在折线感和接缝瑕疵
+  - 修复后：每段曲线均以原生 SDF 渲染，边缘天然抗锯齿，无折线化误差
+
 - **paint（路径描边抗锯齿）**：`StrokePath` 渲染方案从 CPU 三角带展开（`solid_pipeline_`，无抗锯齿）改为逐线段 SDF 渲染（kind=6，天然抗锯齿）：
   - 每条扁平化折线段发射独立的 SDF kind=6 quad，使用 `sdf_pipeline_` 渲染
   - 内部接缝处使用 Round cap 填充，路径首尾端点沿用 `Pen` 设定的 cap 样式

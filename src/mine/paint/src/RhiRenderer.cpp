@@ -3534,8 +3534,12 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
         }
 
         // ── StrokePath（路径描边）────────────────────────────────────────────
-        // 将扁平化后的折线分解为多条线段，每条线段发射独立的 SDF kind=6 quad，
-        // 天然抗锯齿；相邻线段接缝处用 Round cap 填充，路径首尾端点使用 pen 设定样式。
+        // 遍历路径的原始命令（MoveTo/LineTo/QuadTo/CubicTo/Close），
+        // 对每段分别发射对应的 SDF 图元（kind=6/8/9），真正实现曲线 SDF 抗锯齿描边：
+        //   - LineTo  → kind=6（线段 SDF）
+        //   - QuadTo  → kind=8（二次贝塞尔 SDF，IQ 解析解）
+        //   - CubicTo → kind=9（三次贝塞尔 SDF，数值迭代）
+        // 相邻段接缝使用 Round cap，路径首尾使用 pen 指定样式。
 
         else if (cmd.kind == DrawCmdKind::StrokePath) {
             if (cmd.brush.kind() != BrushKind::SolidColor) continue;
@@ -3543,65 +3547,187 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             if (cmd.path_index >= static_cast<uint32_t>(dl.paths().size())) continue;
 
             const Path& path = dl.paths()[cmd.path_index];
-            containers::Vector<FlattenedSubpath> subpaths;
-            flatten_path_to_subpaths(path, subpaths);
-            if (subpaths.empty()) continue;
-
             const math::Color c = cmd.brush.color();
             const float sw      = cmd.pen.width;
-            const float padding = sw * 0.5f + 1.0f;  // SDF quad 外扩：半线宽 + AA 余量
+            const float half_sw = sw * 0.5f;
+            const float padding = half_sw + 1.0f;  // SDF quad 外扩：半线宽 + AA 余量
 
-            // 端点样式编码（0=Flat, 1=Round, 2=Square）
-            auto encode_cap = [](LineCap cap) -> float {
+            // 线段端点 cap 编码（0=Flat, 1=Round, 2=Square）
+            auto line_cap = [](LineCap cap) -> float {
                 if (cap == LineCap::Round)  return 1.0f;
                 if (cap == LineCap::Square) return 2.0f;
                 return 0.0f;
             };
-            const float scap_path = encode_cap(cmd.pen.start_cap);
-            const float ecap_path = encode_cap(cmd.pen.end_cap);
+            // 贝塞尔端点 cap 编码（kind=8/9 不支持 Square，Square 回退为 Flat）
+            auto bez_cap = [](LineCap cap) -> float {
+                return (cap == LineCap::Round) ? 1.0f : 0.0f;
+            };
+            const float scap_line = line_cap(cmd.pen.start_cap);
+            const float ecap_line = line_cap(cmd.pen.end_cap);
+            const float scap_bez  = bez_cap(cmd.pen.start_cap);
+            const float ecap_bez  = bez_cap(cmd.pen.end_cap);
 
             containers::Vector<SdfVertex> verts;
 
-            for (const auto& sp : subpaths) {
-                const auto& pts    = sp.points;
-                const size_t n     = pts.size();
-                if (n < 2) continue;
+            // 按子路径收集段信息，flush 时根据首末位置设置正确的端点 cap
+            struct SegInfo {
+                int        type;        // 0=线段, 1=QuadTo, 2=CubicTo
+                math::Vec2 p0, p1, p2, p3;  // 起点 / 控制点 / 终点（按 type 使用）
+            };
+            containers::Vector<SegInfo> subpath_segs;
+            bool subpath_closed = false;
 
-                const size_t seg_count = sp.closed ? n : (n - 1);
+            // 发射当前子路径所有段，清空 subpath_segs
+            auto flush_subpath = [&]() {
+                const size_t n = subpath_segs.size();
+                if (n == 0) return;
 
-                for (size_t k = 0; k < seg_count; ++k) {
-                    const math::Vec2& A = pts[k];
-                    const math::Vec2& B = pts[(k + 1) % n];
+                for (size_t i = 0; i < n; i++) {
+                    const SegInfo& seg  = subpath_segs[i];
+                    const bool is_first = (i == 0);
+                    const bool is_last  = (i == n - 1);
+                    // 闭合路径无开放端点，所有接缝用 Round
+                    const float sc_l = subpath_closed ? 1.0f : (is_first ? scap_line : 1.0f);
+                    const float ec_l = subpath_closed ? 1.0f : (is_last  ? ecap_line : 1.0f);
+                    const float sc_b = subpath_closed ? 1.0f : (is_first ? scap_bez  : 1.0f);
+                    const float ec_b = subpath_closed ? 1.0f : (is_last  ? ecap_bez  : 1.0f);
 
-                    const float ax = A.x, ay = A.y;
-                    const float bx = B.x, by = B.y;
+                    if (seg.type == 0) {
+                        // ── 线段（kind=6）────────────────────────────────────
+                        const float p0x = seg.p0.x, p0y = seg.p0.y;
+                        const float p1x = seg.p1.x, p1y = seg.p1.y;
+                        const float segcx = (p0x + p1x) * 0.5f;
+                        const float segcy = (p0y + p1y) * 0.5f;
+                        const float hw = std::abs(p1x - p0x) * 0.5f + padding;
+                        const float hh = std::abs(p1y - p0y) * 0.5f + padding;
+                        const float lp0x = p0x - segcx, lp0y = p0y - segcy;
+                        const float lp1x = p1x - segcx, lp1y = p1y - segcy;
+                        push_sdf_quad_vertices(verts, segcx, segcy, hw, hh, 0.0f,
+                            c.r, c.g, c.b, c.a,
+                            6.0f, sc_l, ec_l, 0.0f, 0.0f,
+                            sw, lp0x, lp0y, lp1x, lp1y);
 
-                    // 线段中心（SDF 局部坐标系原点）
-                    const float segcx = (ax + bx) * 0.5f;
-                    const float segcy = (ay + by) * 0.5f;
+                    } else if (seg.type == 1) {
+                        // ── 二次贝塞尔（kind=8）──────────────────────────────
+                        const float p0x = seg.p0.x, p0y = seg.p0.y;  // 起点
+                        const float p1x = seg.p1.x, p1y = seg.p1.y;  // 控制点
+                        const float p2x = seg.p2.x, p2y = seg.p2.y;  // 终点
+                        const float xmin = std::min(p0x, std::min(p1x, p2x));
+                        const float xmax = std::max(p0x, std::max(p1x, p2x));
+                        const float ymin = std::min(p0y, std::min(p1y, p2y));
+                        const float ymax = std::max(p0y, std::max(p1y, p2y));
+                        const float cx   = (xmin + xmax) * 0.5f;
+                        const float cy   = (ymin + ymax) * 0.5f;
+                        const float qhw  = (xmax - xmin) * 0.5f + padding;
+                        const float qhh  = (ymax - ymin) * 0.5f + padding;
+                        const float lp0x = p0x - cx, lp0y = p0y - cy;  // P0 本地坐标
+                        const float lp1x = p1x - cx, lp1y = p1y - cy;  // P1（控制点）本地坐标
+                        const float lp2x = p2x - cx, lp2y = p2y - cy;  // P2（终点）本地坐标
+                        // half_w/half_h 借用存放 P2 本地坐标，e0/e1=P0，e2/e3=P1
+                        auto make_v8 = [&](float sx, float sy) -> SdfVertex {
+                            return {sx, sy, c.r, c.g, c.b, c.a,
+                                    sx - cx, sy - cy,
+                                    8.0f, lp2x, lp2y,
+                                    sc_b, ec_b, 0.0f, 0.0f, sw,
+                                    lp0x, lp0y, lp1x, lp1y};
+                        };
+                        verts.push_back(make_v8(cx - qhw, cy - qhh));
+                        verts.push_back(make_v8(cx + qhw, cy - qhh));
+                        verts.push_back(make_v8(cx - qhw, cy + qhh));
+                        verts.push_back(make_v8(cx + qhw, cy - qhh));
+                        verts.push_back(make_v8(cx + qhw, cy + qhh));
+                        verts.push_back(make_v8(cx - qhw, cy + qhh));
 
-                    // 包围盒半尺寸（线段 AABB + 外扩）
-                    const float hw = std::abs(bx - ax) * 0.5f + padding;
-                    const float hh = std::abs(by - ay) * 0.5f + padding;
+                    } else {
+                        // ── 三次贝塞尔（kind=9）──────────────────────────────
+                        const float p0x = seg.p0.x, p0y = seg.p0.y;  // 起点
+                        const float p1x = seg.p1.x, p1y = seg.p1.y;  // 控制点1
+                        const float p2x = seg.p2.x, p2y = seg.p2.y;  // 控制点2
+                        const float p3x = seg.p3.x, p3y = seg.p3.y;  // 终点
+                        const float xmin = std::min(p0x, std::min(p1x, std::min(p2x, p3x)));
+                        const float xmax = std::max(p0x, std::max(p1x, std::max(p2x, p3x)));
+                        const float ymin = std::min(p0y, std::min(p1y, std::min(p2y, p3y)));
+                        const float ymax = std::max(p0y, std::max(p1y, std::max(p2y, p3y)));
+                        const float cx   = (xmin + xmax) * 0.5f;
+                        const float cy   = (ymin + ymax) * 0.5f;
+                        const float qhw  = (xmax - xmin) * 0.5f + padding;
+                        const float qhh  = (ymax - ymin) * 0.5f + padding;
+                        const float lp0x = p0x - cx, lp0y = p0y - cy;  // P0 本地坐标
+                        const float lp1x = p1x - cx, lp1y = p1y - cy;  // P1 本地坐标
+                        const float lp2x = p2x - cx, lp2y = p2y - cy;  // P2 本地坐标（借用 p2/p3 槽）
+                        const float lp3x = p3x - cx, lp3y = p3y - cy;  // P3 本地坐标（借用 half_w/half_h 槽）
+                        // half_w/half_h 借用存放 P3 本地坐标，p2/p3 槽存放 P2 本地坐标
+                        auto make_v9 = [&](float sx, float sy) -> SdfVertex {
+                            return {sx, sy, c.r, c.g, c.b, c.a,
+                                    sx - cx, sy - cy,
+                                    9.0f, lp3x, lp3y,
+                                    sc_b, ec_b, lp2x, lp2y, sw,
+                                    lp0x, lp0y, lp1x, lp1y};
+                        };
+                        verts.push_back(make_v9(cx - qhw, cy - qhh));
+                        verts.push_back(make_v9(cx + qhw, cy - qhh));
+                        verts.push_back(make_v9(cx - qhw, cy + qhh));
+                        verts.push_back(make_v9(cx + qhw, cy - qhh));
+                        verts.push_back(make_v9(cx + qhw, cy + qhh));
+                        verts.push_back(make_v9(cx - qhw, cy + qhh));
+                    }
+                }
+                subpath_segs.clear();
+                subpath_closed = false;
+            };
 
-                    // 端点在局部坐标系中的位置
-                    const float lax = ax - segcx, lay = ay - segcy;
-                    const float lbx = bx - segcx, lby = by - segcy;
+            // 遍历原始路径命令，按类型收集段并在子路径结束时 flush
+            math::Vec2 cur_pt{0.0f, 0.0f};
+            math::Vec2 start_pt{0.0f, 0.0f};
+            bool has_cur = false;
 
-                    // 内部接缝处用 Round cap 填充，首尾端点采用 pen 指定样式
-                    const bool is_first = (!sp.closed && k == 0);
-                    const bool is_last  = (!sp.closed && k == seg_count - 1);
-                    const float scap = is_first ? scap_path : 1.0f;
-                    const float ecap = is_last  ? ecap_path : 1.0f;
+            for (const auto& pc : path.cmds()) {
+                switch (pc.kind) {
+                case PathCmdKind::MoveTo:
+                    flush_subpath();
+                    cur_pt   = pc.pt[0];
+                    start_pt = pc.pt[0];
+                    has_cur  = true;
+                    break;
 
-                    push_sdf_quad_vertices(verts, segcx, segcy, hw, hh, 0.0f,
-                        c.r, c.g, c.b, c.a,
-                        6.0f,                   // kind=6（线段 SDF）
-                        scap, ecap, 0.0f, 0.0f,
-                        sw,
-                        lax, lay, lbx, lby);
+                case PathCmdKind::LineTo:
+                    if (!has_cur) break;
+                    subpath_segs.push_back({0, cur_pt, pc.pt[0], {}, {}});
+                    cur_pt = pc.pt[0];
+                    break;
+
+                case PathCmdKind::QuadTo:
+                    if (!has_cur) break;
+                    // pt[0]=控制点，pt[1]=终点
+                    subpath_segs.push_back({1, cur_pt, pc.pt[0], pc.pt[1], {}});
+                    cur_pt = pc.pt[1];
+                    break;
+
+                case PathCmdKind::CubicTo:
+                    if (!has_cur) break;
+                    // pt[0]=控制点1，pt[1]=控制点2，pt[2]=终点
+                    subpath_segs.push_back({2, cur_pt, pc.pt[0], pc.pt[1], pc.pt[2]});
+                    cur_pt = pc.pt[2];
+                    break;
+
+                case PathCmdKind::Close:
+                    if (!has_cur) break;
+                    // 首尾不重合时追加关闭线段
+                    if (std::abs(cur_pt.x - start_pt.x) > 1e-4f ||
+                        std::abs(cur_pt.y - start_pt.y) > 1e-4f) {
+                        subpath_segs.push_back({0, cur_pt, start_pt, {}, {}});
+                    }
+                    subpath_closed = true;
+                    flush_subpath();
+                    cur_pt  = start_pt;
+                    has_cur = false;
+                    break;
+
+                default:
+                    break;
                 }
             }
+            flush_subpath();  // 处理最后一个未关闭子路径
 
             if (verts.empty()) continue;
             apply_sdf_transform(verts);
