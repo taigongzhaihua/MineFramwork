@@ -5,6 +5,22 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.window（平台窗口与视觉树桥接）**：实现 Window 类，将 `platform::IWindow`、`gfx::IDevice/IQueue`、`paint::IRenderer` 与 UIElement 视觉树整合（M1.1 任务 #21）：
+  - `Window`（Pimpl 模式）：封装平台窗口与渲染管线的完整生命周期
+    - 构造时自动创建 `ISwapchain`（按逻辑尺寸×DPI 缩放因子得到物理像素分辨率）并订阅平台窗口事件（`IWindowEventSink`）
+    - 析构时取消事件订阅，确保 Impl 不被悬空调用
+    - `set_content(UIElement*)` / `content()`：设置视觉树根元素，设置后立即执行布局（Measure + Arrange）并渲染
+    - `show() / hide() / close()`：委托到 `platform::IWindow`
+    - `set_title(StringView) / set_size(Size)`：委托到 `platform::IWindow`
+    - `size() / dpi() / native_window()`：查询委托到 `platform::IWindow`
+    - `is_closed()`：返回 Closed 事件后设置的 `is_closed_` 标志
+    - `render()`：`is_closed` 时为空操作，否则执行完整渲染流程
+    - DPI 感知：`dpi_scale_ = dpi() / 96.0f`，构造和 `DpiChanged` 事件时更新渲染器缩放因子并重调交换链尺寸
+    - 事件响应：`Resized` → wait_idle + 交换链 resize + 布局 + 渲染；`DpiChanged` → 更新 dpi_scale + wait_idle + 交换链 resize + 布局 + 渲染；`Closed` → `is_closed_ = true`
+    - 渲染流程（`do_render`）：`Canvas::fill_rect`（背景）→ `UIElement::render_to_canvas`（视觉树） → `canvas.end()` 得到 DisplayList → `renderer.begin_frame/render/end_frame` → `swapchain.present()`
+    - 布局流程（`run_layout`）：`content_->measure(available_size)` → `content_->arrange(Rect{0,0,w,h})`
+  - 共 20 个单元测试（doctest），覆盖：构造交换链创建/事件订阅、析构取消订阅、初始状态、DPI 初始化、set_content/content 读写/清除、set_content 触发布局与渲染、show/hide/close 委托、size/dpi 委托、Resized 事件（wait_idle + resize + 布局 + 渲染）、DpiChanged 事件（dpi_scale 更新 + 交换链 resize）、Closed 事件（is_closed 置位）、close() 调用后 is_closed、render() 调用流程与 present、is_closed 时 render 空操作、native_window 访问
+
 - **mine.ui.layout（两遍布局协议）**：实现 WPF 风格 Measure/Arrange 两遍布局系统，新增 FrameworkElement、Panel、StackPanel、Grid（M1.1 任务 #20）：
   - `UIElement`（扩展）：新增公共 `measure(Size)` 入口方法和受保护 `set_desired_size(Size)` 辅助方法，为 FrameworkElement 提供协议扩展钩子
   - `FrameworkElement`：在 UIElement 基础上实现完整两遍布局协议：
