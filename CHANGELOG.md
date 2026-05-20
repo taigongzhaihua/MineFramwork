@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### Fixed
+- **paint（路径裁剪形状错误）**：修复 `ClipPushPath` 渲染路径中多边形顶点数 `nv` 在 HLSL 着色器内被错误限制为最多 16 个的 Bug：
+  - `evaluate_clip_coverage` 中 `clamp(..., 3, 16)` 同步更新为 `clamp(..., 3, 64)`，与 C++ 侧 `k_max_clip_poly_verts=64` 保持一致
+  - 修复前：椭圆裁剪仅使用前 16 个折线顶点，呈现为楔形；心形裁剪区域完全为空白
+  - 修复后：任意复杂曲线路径裁剪均可正确显示
+
+- **paint（路径描边抗锯齿）**：`StrokePath` 渲染方案从 CPU 三角带展开（`solid_pipeline_`，无抗锯齿）改为逐线段 SDF 渲染（kind=6，天然抗锯齿）：
+  - 每条扁平化折线段发射独立的 SDF kind=6 quad，使用 `sdf_pipeline_` 渲染
+  - 内部接缝处使用 Round cap 填充，路径首尾端点沿用 `Pen` 设定的 cap 样式
+  - 同步移除不再使用的 `push_polyline_stroke_vertices` 辅助函数
+
 ### Added
 - **paint（路径裁剪）**：实现 `clip_path(const Path&)` 路径形状裁剪：
   - 新增 `DrawCmdKind::ClipPushPath`，携带原始 Path 索引，曲线段扁平化在渲染器内部完成

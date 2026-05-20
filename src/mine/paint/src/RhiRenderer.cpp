@@ -388,7 +388,7 @@ float evaluate_clip_coverage(float2 sv_pos) {
             dc = complex_rounded_box_sdf(cp, float2(chw, chh), float4(r0, r1, r2, r3));
         } else if (ck == 10) {
             // 多边形
-            int nv = clamp((int)(clip_layers[ci].p3_nv_pad.y + 0.5f), 3, 16);
+            int nv = clamp((int)(clip_layers[ci].p3_nv_pad.y + 0.5f), 3, 64);
             dc = sdClipPolygon(cp, ci, nv);
         } else {
             // 矩形（ck == 0）
@@ -1498,130 +1498,6 @@ static void reduce_vertices_evenly(
         size_t idx = static_cast<size_t>(static_cast<float>(i) * step);
         if (idx >= input.size()) idx = input.size() - 1;
         output.push_back(input[idx]);
-    }
-}
-
-// ── 折线描边展开辅助函数（StrokePath 使用）──────────────────────────────────
-
-/**
- * @brief 将折线描边展开为顶点并写入列表（Miter join + Butt/Square cap）。
- *
- * 对折线每个顶点计算角平分线 (miter) 方向的偏移量，生成上下两侧对称的点，
- * 相邻两点之间生成一个矩形（两个三角形）。
- *
- * 注：StrokeLine 单线段命令已改为 SDF 方案（kind=6）；
- *     StrokePath 则复用本函数在 CPU 侧展开折线三角带。
- *
- * @param vertices  输出顶点列表（追加）
- * @param pts       折线点序列（屏幕像素坐标）
- * @param half_w    线宽一半（pen.width / 2）
- * @param r,g,b,a   描边颜色
- * @param closed    是否为闭合路径（最后一段连回起点）
- * @param miter_lim Miter 上限，超出时截断为 Bevel（对应 Pen::miter_limit）
- */
-static void push_polyline_stroke_vertices(
-    containers::Vector<PaintVertex>& vertices,
-    const containers::Vector<math::Vec2>& pts,
-    float half_w,
-    float r, float g, float b, float a,
-    bool closed,
-    float miter_lim = 10.0f)
-{
-    const int32_t n = static_cast<int32_t>(pts.size());
-    if (n < 2) return;
-
-    // ── 计算各点的垂直偏移（单位法线，已乘以 half_w 后的 miter 长度）──
-
-    // 辅助：计算 2D 向量长度
-    auto vec_len = [](float dx, float dy) -> float {
-        return std::sqrt(dx * dx + dy * dy);
-    };
-    // 辅助：归一化 2D 向量（零向量返回 {0,0}）
-    auto normalize = [&](float dx, float dy, float& ox, float& oy) {
-        const float len = vec_len(dx, dy);
-        if (len < 1e-6f) { ox = 0.0f; oy = 0.0f; }
-        else              { ox = dx / len; oy = dy / len; }
-    };
-
-    // 每个折线顶点的上下侧偏移点
-    containers::Vector<math::Vec2> upper(static_cast<uint32_t>(n));
-    containers::Vector<math::Vec2> lower(static_cast<uint32_t>(n));
-
-    for (int32_t i = 0; i < n; ++i) {
-        // 计算当前顶点的 miter 法线偏移量
-        float nx = 0.0f, ny = 0.0f;   // 最终法线方向（已乘以 miter 长度）
-
-        const bool is_first = !closed && (i == 0);
-        const bool is_last  = !closed && (i == n - 1);
-
-        if (is_first) {
-            // 起点：用第一段方向的法线
-            float tx, ty;
-            normalize(pts[1].x - pts[0].x, pts[1].y - pts[0].y, tx, ty);
-            nx = -ty; ny = tx;  // 左旋 90°
-            nx *= half_w; ny *= half_w;
-        } else if (is_last) {
-            // 终点：用最后一段方向的法线
-            float tx, ty;
-            normalize(pts[n-1].x - pts[n-2].x, pts[n-1].y - pts[n-2].y, tx, ty);
-            nx = -ty; ny = tx;
-            nx *= half_w; ny *= half_w;
-        } else {
-            // 中间点（或闭合路径首/末点）：miter 角平分线
-            const int32_t prev = (i - 1 + n) % n;
-            const int32_t next = (i + 1) % n;
-
-            // 前段方向向量（已归一化）
-            float t0x, t0y;
-            normalize(pts[i].x - pts[prev].x, pts[i].y - pts[prev].y, t0x, t0y);
-            // 后段方向向量（已归一化）
-            float t1x, t1y;
-            normalize(pts[next].x - pts[i].x, pts[next].y - pts[i].y, t1x, t1y);
-
-            // 前段法线（左旋 90°）
-            const float n0x = -t0y, n0y = t0x;
-            // 后段法线
-            const float n1x = -t1y, n1y = t1x;
-
-            // miter 法线 = 归一化(n0 + n1)
-            float mx, my;
-            normalize(n0x + n1x, n0y + n1y, mx, my);
-
-            // miter 长度 = half_w / dot(miter, n0)
-            // 当线段几乎平行时 dot ≈ 1，当折角很尖时 dot 趋近于 0（长度趋于无穷）
-            const float dot = mx * n0x + my * n0y;
-            float miter_len = (std::abs(dot) > 1e-4f) ? (half_w / dot) : half_w;
-
-            // 超过 miter_limit 时，回退到 Bevel（截断为法线的半宽）
-            if (miter_len > miter_lim * half_w) miter_len = half_w;
-
-            nx = mx * miter_len;
-            ny = my * miter_len;
-        }
-
-        upper[static_cast<uint32_t>(i)] = {pts[i].x + nx, pts[i].y + ny};
-        lower[static_cast<uint32_t>(i)] = {pts[i].x - nx, pts[i].y - ny};
-    }
-
-    // ── 生成三角带（相邻两点之间一个矩形 = 2 个三角形）──────────────────
-
-    const int32_t seg_count = closed ? n : n - 1;
-    for (int32_t i = 0; i < seg_count; ++i) {
-        const int32_t j = (i + 1) % n;
-        const math::Vec2& u0 = upper[static_cast<uint32_t>(i)];
-        const math::Vec2& u1 = upper[static_cast<uint32_t>(j)];
-        const math::Vec2& l0 = lower[static_cast<uint32_t>(i)];
-        const math::Vec2& l1 = lower[static_cast<uint32_t>(j)];
-
-        // 三角形 1：u0, u1, l0
-        vertices.push_back({u0.x, u0.y, r, g, b, a});
-        vertices.push_back({u1.x, u1.y, r, g, b, a});
-        vertices.push_back({l0.x, l0.y, r, g, b, a});
-
-        // 三角形 2：u1, l1, l0
-        vertices.push_back({u1.x, u1.y, r, g, b, a});
-        vertices.push_back({l1.x, l1.y, r, g, b, a});
-        vertices.push_back({l0.x, l0.y, r, g, b, a});
     }
 }
 
@@ -3658,6 +3534,8 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
         }
 
         // ── StrokePath（路径描边）────────────────────────────────────────────
+        // 将扁平化后的折线分解为多条线段，每条线段发射独立的 SDF kind=6 quad，
+        // 天然抗锯齿；相邻线段接缝处用 Round cap 填充，路径首尾端点使用 pen 设定样式。
 
         else if (cmd.kind == DrawCmdKind::StrokePath) {
             if (cmd.brush.kind() != BrushKind::SolidColor) continue;
@@ -3670,41 +3548,75 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             if (subpaths.empty()) continue;
 
             const math::Color c = cmd.brush.color();
-            const float half_w  = cmd.pen.width * 0.5f;
+            const float sw      = cmd.pen.width;
+            const float padding = sw * 0.5f + 1.0f;  // SDF quad 外扩：半线宽 + AA 余量
 
-            // Bevel 连接可通过较小 miter_limit 逼近；Round 连接后续迭代为圆角 join 几何。
-            float miter_limit = cmd.pen.miter_limit;
-            if (cmd.pen.line_join == LineJoin::Bevel) {
-                miter_limit = 1.0f;
-            }
+            // 端点样式编码（0=Flat, 1=Round, 2=Square）
+            auto encode_cap = [](LineCap cap) -> float {
+                if (cap == LineCap::Round)  return 1.0f;
+                if (cap == LineCap::Square) return 2.0f;
+                return 0.0f;
+            };
+            const float scap_path = encode_cap(cmd.pen.start_cap);
+            const float ecap_path = encode_cap(cmd.pen.end_cap);
+
+            containers::Vector<SdfVertex> verts;
 
             for (const auto& sp : subpaths) {
-                if (sp.points.size() < 2) continue;
+                const auto& pts    = sp.points;
+                const size_t n     = pts.size();
+                if (n < 2) continue;
 
-                containers::Vector<PaintVertex> stroke_verts;
-                push_polyline_stroke_vertices(
-                    stroke_verts,
-                    sp.points,
-                    half_w,
-                    c.r, c.g, c.b, c.a,
-                    sp.closed,
-                    miter_limit);
+                const size_t seg_count = sp.closed ? n : (n - 1);
 
-                if (stroke_verts.empty()) continue;
-                apply_paint_transform(stroke_verts);
+                for (size_t k = 0; k < seg_count; ++k) {
+                    const math::Vec2& A = pts[k];
+                    const math::Vec2& B = pts[(k + 1) % n];
 
-                gfx::BufferDesc vb{};
-                vb.size       = static_cast<uint64_t>(stroke_verts.size()) * sizeof(PaintVertex);
-                vb.stride     = sizeof(PaintVertex);
-                vb.bind_flags = gfx::BufferBindFlags::Vertex;
-                auto buf = device_->create_buffer(vb, stroke_verts.data());
-                if (!buf) continue;
+                    const float ax = A.x, ay = A.y;
+                    const float bx = B.x, by = B.y;
 
-                cmd_list_->set_pipeline(solid_pipeline_.get());
-                cmd_list_->set_constant_buffer(0, viewport_cb.get());
-                cmd_list_->set_vertex_buffer(0, buf.get(), 0);
-                cmd_list_->draw(static_cast<uint32_t>(stroke_verts.size()), 1, 0, 0);
+                    // 线段中心（SDF 局部坐标系原点）
+                    const float segcx = (ax + bx) * 0.5f;
+                    const float segcy = (ay + by) * 0.5f;
+
+                    // 包围盒半尺寸（线段 AABB + 外扩）
+                    const float hw = std::abs(bx - ax) * 0.5f + padding;
+                    const float hh = std::abs(by - ay) * 0.5f + padding;
+
+                    // 端点在局部坐标系中的位置
+                    const float lax = ax - segcx, lay = ay - segcy;
+                    const float lbx = bx - segcx, lby = by - segcy;
+
+                    // 内部接缝处用 Round cap 填充，首尾端点采用 pen 指定样式
+                    const bool is_first = (!sp.closed && k == 0);
+                    const bool is_last  = (!sp.closed && k == seg_count - 1);
+                    const float scap = is_first ? scap_path : 1.0f;
+                    const float ecap = is_last  ? ecap_path : 1.0f;
+
+                    push_sdf_quad_vertices(verts, segcx, segcy, hw, hh, 0.0f,
+                        c.r, c.g, c.b, c.a,
+                        6.0f,                   // kind=6（线段 SDF）
+                        scap, ecap, 0.0f, 0.0f,
+                        sw,
+                        lax, lay, lbx, lby);
+                }
             }
+
+            if (verts.empty()) continue;
+            apply_sdf_transform(verts);
+
+            gfx::BufferDesc vb{};
+            vb.size       = static_cast<uint64_t>(verts.size()) * sizeof(SdfVertex);
+            vb.stride     = sizeof(SdfVertex);
+            vb.bind_flags = gfx::BufferBindFlags::Vertex;
+            auto buf = device_->create_buffer(vb, verts.data());
+            if (!buf) continue;
+
+            cmd_list_->set_pipeline(active_sdf_pl);
+            cmd_list_->set_constant_buffer(0, viewport_cb.get());
+            cmd_list_->set_vertex_buffer(0, buf.get(), 0);
+            cmd_list_->draw(static_cast<uint32_t>(verts.size()), 1, 0, 0);
         }
 
         // ── 裁剪状态命令（ClipPush* / ClipPop）──────────────────────────────
