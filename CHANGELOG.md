@@ -5,6 +5,25 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.visual（视觉树与渲染管线接入）**：实现视觉基类 Visual、UIElement、Control，完成视觉树管理、局部变换、矩形裁剪、依赖属性接入和 paint 渲染管线（M1.1 任务 #19）：
+  - `Visibility`：枚举 Visible / Hidden / Collapsed，Hidden 保留布局空间但跳过渲染，Collapsed 同时跳过渲染与布局
+  - `Visual`：视觉树根基类，继承 `DependencyObject` + `IRoutedEventTarget`：
+    - 视觉树管理：`add_child` / `remove_child` / `remove_all_children`，析构时自动从父节点移除防止悬空
+    - 局部变换：`render_transform()` / `set_render_transform(Transform2D)`，直接字段存储（Transform2D 36字节超出 Variant SBO）
+    - 矩形裁剪：`set_clip_rect(Rect)` / `has_clip_rect()` / `clip_rect()` / `clear_clip_rect()`
+    - 依赖属性：`OpacityProperty`（float [0,1]，affects_render）、`VisibilityProperty`（affects_measure/arrange/render）
+    - 脏区传播：`invalidate_render()` 沿父链向上传播，直到已脏祖先节点或根节点
+    - 渲染管线：`render_to_canvas(Canvas&)` → save → transform → clip → `on_render()` → 递归子树 → restore → 清除脏标志
+    - 路由事件：实现 `add_handler / remove_handler / invoke_handlers / parent_target`，handled=true 中止本层后续处理器
+    - 无 RTTI 类型探查：`virtual UIElement* as_element()` 虚方法，替代 `dynamic_cast`（项目禁用 `/GR-`）
+  - `UIElement`：布局接口与命中测试基类：
+    - 布局边界：`bounds_rect()` / `set_bounds_rect(Rect)` / `desired_size()`
+    - 命中测试：`hit_test(Point)` — Collapsed 跳过 → 逆变换局部坐标 → 裁剪检查 → 子节点逆序递归 → `hit_test_local()` 自身判断
+    - 布局虚方法桩：`on_measure(Size)` / `on_arrange(Rect)` / `hit_test_local(Point)`（默认检查 bounds_rect）
+    - 布局失效：`invalidate_measure()` / `invalidate_arrange()` 维护内部脏标志
+  - `Control`：控件基类（M1.1 仅作为继承链节点，后续 mine.ui.style 扩展）
+  - 共 35 个单元测试（doctest），覆盖：视觉树增删/父子关系/析构清理、变换存取/渲染失效触发、裁剪区域管理、Opacity/Visibility 依赖属性含边界钳制、脏区传播链、渲染管线（Hidden/Collapsed/子树递归）、路由事件处理器顺序/handled 中止/remove_handler、命中测试（点内/点外/Collapsed/子节点优先）
+
 - **mine.ui.event（路由事件系统与命令接口）**：实现 WPF 风格路由事件系统和 ICommand/RelayCommand（M1.1 任务 #17）：
   - `RoutingStrategy`：枚举 Bubble（冒泡）/ Tunnel（隧道/Preview）/ Direct（直接）
   - `RoutedEvent`：全局唯一路由事件描述符，地址稳定，由 `RoutedEventRegistry`（Meyer's 单例）统一管理；`register_event<TOwner>(name, strategy)` 类型安全注册 API；内部分配名称字符串副本保证生命周期

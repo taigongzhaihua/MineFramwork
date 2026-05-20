@@ -1,0 +1,136 @@
+/**
+ * @file UIElement.h
+ * @brief UIElement —— 具有布局接口与命中测试能力的视觉元素基类。
+ *
+ * UIElement 在 Visual 的基础上添加：
+ *   - 布局接口桩（Measure/Arrange，mine.ui.layout 实现后覆盖）
+ *   - 布局边界（bounds_rect：由布局系统设置的最终排列矩形）
+ *   - 命中测试（hit_test：将屏幕坐标映射到局部坐标后判断是否命中）
+ *
+ * 继承关系：
+ *   Visual
+ *       └─ UIElement  (mine.ui.visual)
+ *           └─ Control
+ */
+
+#pragma once
+
+#include <mine/ui/visual/Api.h>
+#include <mine/ui/visual/Visual.h>
+#include <mine/math/Size.h>
+#include <mine/math/Point.h>
+
+namespace mine::ui {
+
+/**
+ * @brief 具有布局接口与命中测试能力的视觉元素基类。
+ *
+ * 命中测试流程（hit_test）：
+ *   1. 若 Visibility == Collapsed，返回 nullptr
+ *   2. 将输入点逆变换到本节点局部坐标系
+ *   3. 若有裁剪区域且点在裁剪区域之外，返回 nullptr
+ *   4. 按逆序遍历子节点，递归调用 hit_test；首个命中子节点立即返回
+ *   5. 若子节点均未命中，调用 hit_test_local() 判断本节点自身是否命中
+ *
+ * @note 命中测试不依赖路由事件系统，仅用于确定"哪个元素在指定坐标处"。
+ *       mine.ui.input 模块通过命中测试结果决定事件派发目标。
+ */
+class MINE_UI_VISUAL_API UIElement : public Visual {
+public:
+    // ── 生命周期 ──────────────────────────────────────────────────────────
+
+    UIElement();
+    ~UIElement() override;
+
+    UIElement(const UIElement&)            = delete;
+    UIElement& operator=(const UIElement&) = delete;
+    UIElement(UIElement&&)                 = default;
+    UIElement& operator=(UIElement&&)      = default;
+
+    /**
+     * @brief 返回 this，供 Visual::as_element() 虚方法链使用（无 RTTI）。
+     */
+    [[nodiscard]] UIElement* as_element() noexcept override;
+
+    // ── 布局边界 ─────────────────────────────────────────────────────────
+
+    /**
+     * @brief 返回由布局系统设置的最终排列矩形（相对于父节点坐标系）。
+     *
+     * 在布局系统（mine.ui.layout）Arrange 阶段完成后由 set_bounds_rect() 写入。
+     * 未经布局时默认为零矩形 {0, 0, 0, 0}。
+     */
+    [[nodiscard]] math::Rect bounds_rect() const noexcept;
+
+    /**
+     * @brief 由布局系统调用，设置元素的最终排列矩形。
+     *
+     * 同时调用 on_arrange(rect) 让子类更新内部状态。
+     */
+    void set_bounds_rect(math::Rect rect);
+
+    /**
+     * @brief 返回期望尺寸（由 Measure 阶段写入）。
+     *
+     * 默认为 {0, 0}，由布局系统完成 Measure 后更新。
+     */
+    [[nodiscard]] math::Size desired_size() const noexcept;
+
+    // ── 命中测试 ─────────────────────────────────────────────────────────
+
+    /**
+     * @brief 在指定屏幕坐标处进行命中测试，返回最顶层命中的 UIElement。
+     *
+     * @param p 屏幕坐标系中的测试点（相对于父节点坐标系）
+     * @return  命中的最内层 UIElement 指针；若无命中则返回 nullptr
+     */
+    UIElement* hit_test(math::Point p);
+
+protected:
+    // ── 布局虚方法（由 mine.ui.layout 覆盖）─────────────────────────────
+
+    /**
+     * @brief Measure 阶段虚方法，计算元素的期望尺寸。
+     *
+     * 子类覆盖此方法实现自定义尺寸计算逻辑。
+     * 默认实现将 desired_size 置为 {0, 0}。
+     *
+     * @param available_size 父节点提供的可用空间
+     */
+    virtual void on_measure(math::Size available_size);
+
+    /**
+     * @brief Arrange 阶段虚方法，响应布局系统的最终排列。
+     *
+     * 子类覆盖此方法在布局确定后更新内部状态（如子元素位置）。
+     * 默认实现为空操作。
+     *
+     * @param final_rect 布局系统分配的最终矩形
+     */
+    virtual void on_arrange(math::Rect final_rect);
+
+    /**
+     * @brief 局部坐标系下的命中测试判断。
+     *
+     * 子类覆盖此方法实现自定义命中测试逻辑（如非矩形控件）。
+     * 默认实现：若 p 落在 bounds_rect() 范围内则命中。
+     *
+     * @param p 已变换到本节点局部坐标系的测试点
+     * @return  true 表示命中本节点
+     */
+    virtual bool hit_test_local(math::Point p) const;
+
+    // ── 覆盖 DependencyObject 布局失效接口 ───────────────────────────────
+
+    /// 布局测量失效：设置内部脏标志（mine.ui.layout 接管后转为队列通知）
+    void invalidate_measure() override;
+
+    /// 布局排列失效：设置内部脏标志
+    void invalidate_arrange() override;
+
+private:
+    struct Impl;
+    core::Pimpl<Impl> p_;
+};
+
+} // namespace mine::ui
