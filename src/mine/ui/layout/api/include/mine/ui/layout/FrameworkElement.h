@@ -115,14 +115,14 @@ public:
     // ── Arrange 公共入口 ───────────────────────────────────────────────────
 
     /**
-     * @brief Arrange 公共入口（由父 Panel 调用）。
+     * @brief Arrange 公共入口，覆盖 UIElement::arrange。
      *
      * 处理 Margin 和对齐方式后，调用 set_bounds_rect(content_rect)，
      * 进而触发 on_arrange(content_rect) → arrange_override(content_size)。
      *
      * @param slot 父节点分配给本元素的完整矩形槽（含 Margin 区域）
      */
-    void arrange(math::Rect slot);
+    void arrange(math::Rect slot) override;
 
 protected:
     // ── 布局扩展点（子类覆盖）─────────────────────────────────────────────

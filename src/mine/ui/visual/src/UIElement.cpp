@@ -172,6 +172,13 @@ void UIElement::measure(math::Size available_size)
     on_measure(available_size);
 }
 
+void UIElement::arrange(math::Rect slot)
+{
+    // 默认：直接将分配区域设为排列矩形（无 Margin / 对齐处理）
+    // FrameworkElement 覆盖此方法以添加 Margin 和对齐计算
+    set_bounds_rect(slot);
+}
+
 // ============================================================================
 // 受保护辅助：设置期望尺寸（供 FrameworkElement 的 on_measure 覆盖调用）
 // ============================================================================

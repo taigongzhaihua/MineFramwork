@@ -86,6 +86,17 @@ public:
      */
     void measure(math::Size available_size);
 
+    /**
+     * @brief 公共 Arrange 入口，将元素排列到指定矩形区域内。
+     *
+     * 默认实现直接调用 set_bounds_rect(slot)。
+     * mine.ui.layout 中的 FrameworkElement 覆盖此方法，在调用 set_bounds_rect
+     * 之前处理 Margin 和 HorizontalAlignment/VerticalAlignment 对齐。
+     *
+     * @param slot 父节点为本元素分配的矩形区域（父节点坐标系）
+     */
+    virtual void arrange(math::Rect slot);
+
     // ── 命中测试 ─────────────────────────────────────────────────────────
 
     /**
