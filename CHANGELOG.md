@@ -5,6 +5,22 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.input（键盘/鼠标输入路由）**：实现 Win32 输入接收与视觉树事件派发（M1.1 任务 #18）：
+  - `mine.platform.abi / WindowEvent`：扩展 `WindowEventKind` 枚举新增 `KeyDown / KeyUp / Char / MouseMove / MouseDown / MouseUp / MouseWheel`；`WindowEvent` 结构体新增键盘字段（`key_vk_code / key_scan_code / char_utf32 / key_is_repeat`）、鼠标字段（`mouse_x / mouse_y / mouse_button / mouse_wheel_delta`）和修饰键字段（`mod_ctrl / mod_shift / mod_alt`）
+  - `mine.platform.win32 / Win32Window`：新增对 `WM_KEYDOWN / WM_SYSKEYDOWN / WM_KEYUP / WM_SYSKEYUP / WM_CHAR / WM_MOUSEMOVE / WM_LBUTTONDOWN / WM_LBUTTONUP / WM_RBUTTONDOWN / WM_RBUTTONUP / WM_MBUTTONDOWN / WM_MBUTTONUP / WM_XBUTTONDOWN / WM_XBUTTONUP / WM_MOUSEWHEEL` 共 15 类消息的处理，填充平台 `WindowEvent` 并通过 `event_source_.fire(ev)` 派发；鼠标坐标使用 `phys_to_logical(DPI)` 转换为逻辑像素；`WM_MOUSEWHEEL` 坐标用 `ScreenToClient` 由屏幕坐标转为客户区坐标；左键按下/释放时调用 `SetCapture / ReleaseCapture` 确保按住拖拽消息连续接收
+  - `Key`：平台无关虚拟键枚举（值与 Win32 VK_ 常量对齐），包含字母 A-Z、数字 0-9、功能键 F1-F12、导航键（方向/Home/End/PageUp/PageDown）、数字键盘、锁定键和修饰键；`key_from_win32_vk(uint32_t) → Key` 直接转换（大多数键无需查表）
+  - `ModifierKeys`：Ctrl / Shift / Alt 位域枚举，重载 `| / & / ~` 和 `|= / &=` 运算符，`has_flag()` 检测辅助函数
+  - `MouseButton`：左 / 右 / 中 / X1 / X2 枚举（None=255 表示无特定按键，用于 MouseMove/MouseWheel）
+  - `KeyEventArgs`：键盘路由事件参数，继承 `RoutedEventArgs`，携带 `Key / scan_code / ModifierKeys / is_repeat` 及 `ctrl() / shift() / alt()` 快捷访问器
+  - `MouseEventArgs`：鼠标路由事件参数，继承 `RoutedEventArgs`，携带 `MouseButton / math::Point position / ModifierKeys / wheel_delta` 及 `ctrl() / shift() / alt()` 快捷访问器
+  - `InputEvents`：10 个标准路由事件声明与注册（Meyer's 单例）：`PreviewKeyDown / KeyDown / PreviewKeyUp / KeyUp`（键盘）+ `PreviewMouseDown / MouseDown / PreviewMouseUp / MouseUp / MouseMove / MouseWheel`（鼠标）；Preview 系列注册为 Tunnel 策略，其余为 Bubble 策略；所有事件以 `UIElement` 为所有者类型
+  - `InputRouter`：实现 `IWindowEventSink`，订阅平台窗口事件并路由到视觉树：
+    - `set_root(UIElement*)` / `set_keyboard_focus(UIElement*)` 配置路由目标
+    - 鼠标事件：通过 `UIElement::hit_test(Point)` 命中测试确定目标，更新 `mouse_over_element()`，按 Preview-正式事件对派发（Preview 被处理则跳过正式事件）
+    - 键盘事件：派发到 `keyboard_focus_` 元素，无焦点时退化到根节点
+    - 修饰键提取：`make_modifiers(WindowEvent&)` 内部辅助从 `mod_ctrl/shift/alt` 字段组装 `ModifierKeys`
+  - 共 26 个单元测试（doctest），覆盖：ModifierKeys 位运算与 `has_flag`、Key 枚举转换、KeyEventArgs / MouseEventArgs 构造与访问器、InputEvents 单例引用同一性与路由策略验证、InputRouter 无根节点不崩溃、命中测试命中/不命中派发、鼠标移动/滚轮事件、键盘焦点派发、无焦点退化路由、Preview 被处理后正式事件跳过、mouse_over_element 状态更新
+
 - **mine.ui.visual（视觉树与渲染管线接入）**：实现视觉基类 Visual、UIElement、Control，完成视觉树管理、局部变换、矩形裁剪、依赖属性接入和 paint 渲染管线（M1.1 任务 #19）：
   - `Visibility`：枚举 Visible / Hidden / Collapsed，Hidden 保留布局空间但跳过渲染，Collapsed 同时跳过渲染与布局
   - `Visual`：视觉树根基类，继承 `DependencyObject` + `IRoutedEventTarget`：

@@ -12,6 +12,8 @@
 #include <windows.h>
 // 开启 Per-Monitor DPI v2 支持
 #include <shellscalingapi.h>
+// 提供 GET_X_LPARAM / GET_Y_LPARAM 鼠标坐标辅助宏
+#include <windowsx.h>
 
 #include <algorithm>
 #include <cstring>
@@ -521,6 +523,188 @@ LRESULT Win32Window::handle_message(
         event_source_.fire(ev);
         // 传递给系统让 IME 清理组合窗口
         return DefWindowProcW(hwnd, msg, wparam, lparam);
+    }
+
+    // ── 键盘输入消息 ────────────────────────────────────────────────────────────
+
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN: {
+        WindowEvent ev{};
+        ev.kind           = WindowEventKind::KeyDown;
+        ev.key_vk_code    = static_cast<uint32_t>(wparam);
+        ev.key_scan_code  = (static_cast<uint32_t>(lparam) >> 16) & 0xFFu;
+        ev.key_is_repeat  = (lparam & (1 << 30)) != 0;
+        ev.mod_ctrl       = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        ev.mod_shift      = (GetKeyState(VK_SHIFT)   & 0x8000) != 0;
+        ev.mod_alt        = (lparam & (1 << 29)) != 0; // ALT 键标志在 lParam[29]
+        event_source_.fire(ev);
+        return 0;
+    }
+
+    case WM_KEYUP:
+    case WM_SYSKEYUP: {
+        WindowEvent ev{};
+        ev.kind           = WindowEventKind::KeyUp;
+        ev.key_vk_code    = static_cast<uint32_t>(wparam);
+        ev.key_scan_code  = (static_cast<uint32_t>(lparam) >> 16) & 0xFFu;
+        ev.key_is_repeat  = false;
+        ev.mod_ctrl       = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        ev.mod_shift      = (GetKeyState(VK_SHIFT)   & 0x8000) != 0;
+        ev.mod_alt        = (lparam & (1 << 29)) != 0;
+        event_source_.fire(ev);
+        return 0;
+    }
+
+    case WM_CHAR:
+    case WM_SYSCHAR: {
+        // wparam 是 UTF-16 码元（代理对暂不处理，M1.1 阶段简化）
+        // 控制字符（< 0x20）不作为可打印字符上报
+        if (wparam >= 0x20u && wparam != 0x7Fu) {
+            WindowEvent ev{};
+            ev.kind       = WindowEventKind::Char;
+            ev.char_utf32 = static_cast<uint32_t>(wparam); // BMP 内直接是 Unicode 码点
+            ev.mod_ctrl   = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+            ev.mod_shift  = (GetKeyState(VK_SHIFT)   & 0x8000) != 0;
+            ev.mod_alt    = (lparam & (1 << 29)) != 0;
+            event_source_.fire(ev);
+        }
+        return 0;
+    }
+
+    // ── 鼠标输入消息 ────────────────────────────────────────────────────────────
+
+    case WM_MOUSEMOVE: {
+        WindowEvent ev{};
+        ev.kind     = WindowEventKind::MouseMove;
+        ev.mouse_x  = phys_to_logical(static_cast<float>(GET_X_LPARAM(lparam)), dpi_);
+        ev.mouse_y  = phys_to_logical(static_cast<float>(GET_Y_LPARAM(lparam)), dpi_);
+        ev.mod_ctrl  = (wparam & MK_CONTROL) != 0;
+        ev.mod_shift = (wparam & MK_SHIFT)   != 0;
+        ev.mod_alt   = (GetKeyState(VK_MENU)  & 0x8000) != 0;
+        event_source_.fire(ev);
+        return 0;
+    }
+
+    case WM_LBUTTONDOWN: {
+        SetCapture(hwnd); // 捕获鼠标，确保按键释放时能收到消息
+        WindowEvent ev{};
+        ev.kind         = WindowEventKind::MouseDown;
+        ev.mouse_button = 0;
+        ev.mouse_x      = phys_to_logical(static_cast<float>(GET_X_LPARAM(lparam)), dpi_);
+        ev.mouse_y      = phys_to_logical(static_cast<float>(GET_Y_LPARAM(lparam)), dpi_);
+        ev.mod_ctrl     = (wparam & MK_CONTROL) != 0;
+        ev.mod_shift    = (wparam & MK_SHIFT)   != 0;
+        ev.mod_alt      = (GetKeyState(VK_MENU)  & 0x8000) != 0;
+        event_source_.fire(ev);
+        return 0;
+    }
+    case WM_LBUTTONUP: {
+        ReleaseCapture();
+        WindowEvent ev{};
+        ev.kind         = WindowEventKind::MouseUp;
+        ev.mouse_button = 0;
+        ev.mouse_x      = phys_to_logical(static_cast<float>(GET_X_LPARAM(lparam)), dpi_);
+        ev.mouse_y      = phys_to_logical(static_cast<float>(GET_Y_LPARAM(lparam)), dpi_);
+        ev.mod_ctrl     = (wparam & MK_CONTROL) != 0;
+        ev.mod_shift    = (wparam & MK_SHIFT)   != 0;
+        ev.mod_alt      = (GetKeyState(VK_MENU)  & 0x8000) != 0;
+        event_source_.fire(ev);
+        return 0;
+    }
+
+    case WM_RBUTTONDOWN: {
+        WindowEvent ev{};
+        ev.kind         = WindowEventKind::MouseDown;
+        ev.mouse_button = 1;
+        ev.mouse_x      = phys_to_logical(static_cast<float>(GET_X_LPARAM(lparam)), dpi_);
+        ev.mouse_y      = phys_to_logical(static_cast<float>(GET_Y_LPARAM(lparam)), dpi_);
+        ev.mod_ctrl     = (wparam & MK_CONTROL) != 0;
+        ev.mod_shift    = (wparam & MK_SHIFT)   != 0;
+        ev.mod_alt      = (GetKeyState(VK_MENU)  & 0x8000) != 0;
+        event_source_.fire(ev);
+        return 0;
+    }
+    case WM_RBUTTONUP: {
+        WindowEvent ev{};
+        ev.kind         = WindowEventKind::MouseUp;
+        ev.mouse_button = 1;
+        ev.mouse_x      = phys_to_logical(static_cast<float>(GET_X_LPARAM(lparam)), dpi_);
+        ev.mouse_y      = phys_to_logical(static_cast<float>(GET_Y_LPARAM(lparam)), dpi_);
+        ev.mod_ctrl     = (wparam & MK_CONTROL) != 0;
+        ev.mod_shift    = (wparam & MK_SHIFT)   != 0;
+        ev.mod_alt      = (GetKeyState(VK_MENU)  & 0x8000) != 0;
+        event_source_.fire(ev);
+        return 0;
+    }
+
+    case WM_MBUTTONDOWN: {
+        WindowEvent ev{};
+        ev.kind         = WindowEventKind::MouseDown;
+        ev.mouse_button = 2;
+        ev.mouse_x      = phys_to_logical(static_cast<float>(GET_X_LPARAM(lparam)), dpi_);
+        ev.mouse_y      = phys_to_logical(static_cast<float>(GET_Y_LPARAM(lparam)), dpi_);
+        ev.mod_ctrl     = (wparam & MK_CONTROL) != 0;
+        ev.mod_shift    = (wparam & MK_SHIFT)   != 0;
+        ev.mod_alt      = (GetKeyState(VK_MENU)  & 0x8000) != 0;
+        event_source_.fire(ev);
+        return 0;
+    }
+    case WM_MBUTTONUP: {
+        WindowEvent ev{};
+        ev.kind         = WindowEventKind::MouseUp;
+        ev.mouse_button = 2;
+        ev.mouse_x      = phys_to_logical(static_cast<float>(GET_X_LPARAM(lparam)), dpi_);
+        ev.mouse_y      = phys_to_logical(static_cast<float>(GET_Y_LPARAM(lparam)), dpi_);
+        ev.mod_ctrl     = (wparam & MK_CONTROL) != 0;
+        ev.mod_shift    = (wparam & MK_SHIFT)   != 0;
+        ev.mod_alt      = (GetKeyState(VK_MENU)  & 0x8000) != 0;
+        event_source_.fire(ev);
+        return 0;
+    }
+
+    case WM_XBUTTONDOWN: {
+        // XBUTTON1 = 0x0001, XBUTTON2 = 0x0002
+        const uint8_t btn = (GET_XBUTTON_WPARAM(wparam) == XBUTTON1) ? 3u : 4u;
+        WindowEvent ev{};
+        ev.kind         = WindowEventKind::MouseDown;
+        ev.mouse_button = btn;
+        ev.mouse_x      = phys_to_logical(static_cast<float>(GET_X_LPARAM(lparam)), dpi_);
+        ev.mouse_y      = phys_to_logical(static_cast<float>(GET_Y_LPARAM(lparam)), dpi_);
+        ev.mod_ctrl     = (GET_KEYSTATE_WPARAM(wparam) & MK_CONTROL) != 0;
+        ev.mod_shift    = (GET_KEYSTATE_WPARAM(wparam) & MK_SHIFT)   != 0;
+        ev.mod_alt      = (GetKeyState(VK_MENU) & 0x8000) != 0;
+        event_source_.fire(ev);
+        return TRUE; // XBUTTON 消息要求返回 TRUE
+    }
+    case WM_XBUTTONUP: {
+        const uint8_t btn = (GET_XBUTTON_WPARAM(wparam) == XBUTTON1) ? 3u : 4u;
+        WindowEvent ev{};
+        ev.kind         = WindowEventKind::MouseUp;
+        ev.mouse_button = btn;
+        ev.mouse_x      = phys_to_logical(static_cast<float>(GET_X_LPARAM(lparam)), dpi_);
+        ev.mouse_y      = phys_to_logical(static_cast<float>(GET_Y_LPARAM(lparam)), dpi_);
+        ev.mod_ctrl     = (GET_KEYSTATE_WPARAM(wparam) & MK_CONTROL) != 0;
+        ev.mod_shift    = (GET_KEYSTATE_WPARAM(wparam) & MK_SHIFT)   != 0;
+        ev.mod_alt      = (GetKeyState(VK_MENU) & 0x8000) != 0;
+        event_source_.fire(ev);
+        return TRUE;
+    }
+
+    case WM_MOUSEWHEEL: {
+        // 滚轮坐标是屏幕坐标，需转换为客户区坐标
+        POINT screen_pt{ GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam) };
+        ScreenToClient(hwnd, &screen_pt);
+        const float delta = static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam));
+        WindowEvent ev{};
+        ev.kind              = WindowEventKind::MouseWheel;
+        ev.mouse_x           = phys_to_logical(static_cast<float>(screen_pt.x), dpi_);
+        ev.mouse_y           = phys_to_logical(static_cast<float>(screen_pt.y), dpi_);
+        ev.mouse_wheel_delta = delta;
+        ev.mod_ctrl          = (GET_KEYSTATE_WPARAM(wparam) & MK_CONTROL) != 0;
+        ev.mod_shift         = (GET_KEYSTATE_WPARAM(wparam) & MK_SHIFT)   != 0;
+        ev.mod_alt           = (GetKeyState(VK_MENU) & 0x8000) != 0;
+        event_source_.fire(ev);
+        return 0;
     }
 
     default:
