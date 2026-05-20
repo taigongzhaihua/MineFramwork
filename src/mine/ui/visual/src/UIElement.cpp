@@ -131,8 +131,7 @@ UIElement* UIElement::hit_test(math::Point p)
 void UIElement::on_measure(math::Size /*available_size*/)
 {
     // 默认：期望尺寸为零（等待布局模块覆盖）
-    p_->desired_size_ = {};
-    p_->measure_dirty_ = false;
+    set_desired_size({});
 }
 
 void UIElement::on_arrange(math::Rect /*final_rect*/)
@@ -162,6 +161,25 @@ void UIElement::invalidate_arrange()
 {
     p_->arrange_dirty_ = true;
     invalidate_render();
+}
+
+// ============================================================================
+// 公共布局入口（FrameworkElement 通过 on_measure 覆盖实现约束处理）
+// ============================================================================
+
+void UIElement::measure(math::Size available_size)
+{
+    on_measure(available_size);
+}
+
+// ============================================================================
+// 受保护辅助：设置期望尺寸（供 FrameworkElement 的 on_measure 覆盖调用）
+// ============================================================================
+
+void UIElement::set_desired_size(math::Size size) noexcept
+{
+    p_->desired_size_  = size;
+    p_->measure_dirty_ = false;
 }
 
 } // namespace mine::ui

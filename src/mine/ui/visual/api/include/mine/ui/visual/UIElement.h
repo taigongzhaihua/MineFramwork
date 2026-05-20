@@ -76,6 +76,16 @@ public:
      */
     [[nodiscard]] math::Size desired_size() const noexcept;
 
+    /**
+     * @brief 公共 Measure 入口，驱动元素完成测量并更新 desired_size。
+     *
+     * 调用受保护的 on_measure(available_size)，mine.ui.layout 中的
+     * FrameworkElement 覆盖 on_measure 以实现完整的约束与边距处理。
+     *
+     * @param available_size 父节点提供的可用空间
+     */
+    void measure(math::Size available_size);
+
     // ── 命中测试 ─────────────────────────────────────────────────────────
 
     /**
@@ -127,7 +137,14 @@ protected:
 
     /// 布局排列失效：设置内部脏标志
     void invalidate_arrange() override;
-
+    /**
+     * @brief 设置期望尺寸（供 FrameworkElement 等子类在 on_measure 中调用）。
+     *
+     * 同时清除 measure_dirty_ 标志。
+     *
+     * @param size 计算出的期望尺寸
+     */
+    void set_desired_size(math::Size size) noexcept;
 private:
     struct Impl;
     core::Pimpl<Impl> p_;

@@ -5,6 +5,32 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.layout（两遍布局协议）**：实现 WPF 风格 Measure/Arrange 两遍布局系统，新增 FrameworkElement、Panel、StackPanel、Grid（M1.1 任务 #20）：
+  - `UIElement`（扩展）：新增公共 `measure(Size)` 入口方法和受保护 `set_desired_size(Size)` 辅助方法，为 FrameworkElement 提供协议扩展钩子
+  - `FrameworkElement`：在 UIElement 基础上实现完整两遍布局协议：
+    - 依赖属性：`Width / Height`（默认 NaN=Auto）、`MinWidth / MaxWidth / MinHeight / MaxHeight`（默认 0 / +∞）、`Margin`（`math::Thickness`，默认 0）、`HorizontalAlignment / VerticalAlignment`（默认 Stretch）
+    - `on_measure`：减 Margin → 应用 Width/Height 明确值 → clamp Min/Max → 调用 `measure_override()` → 再次应用 Width/Height → 再次 clamp → 加 Margin → `set_desired_size()`
+    - `arrange(Rect slot)`：减 Margin → 依据 HA/VA 计算内容矩形（非 Stretch 使用 desiredSize 尺寸并对齐）→ `set_bounds_rect(content_rect)`
+    - `on_arrange(Rect)`：调用 `arrange_override(final_rect.size())`
+    - 子类覆盖点：`measure_override(Size)`（默认 {0,0}）/ `arrange_override(Size)`（默认接受 final_size）
+  - `Panel`：FrameworkElement 的多子元素容器基类：
+    - `add_child(FrameworkElement*)`：防重复添加，同步加入视觉树（`Visual::add_child()`），失效布局
+    - `remove_child(FrameworkElement*)`：手动移位保序删除（SmallVector 无 erase），同步从视觉树移除，失效布局
+    - `child_at(uint32_t)` / `children_count()`：随机访问
+  - `StackPanel`：沿单一方向线性堆叠子元素：
+    - `Orientation` 依赖属性（默认 Vertical）
+    - Vertical Measure：向各子元素传 `{panelWidth, INFINITY}`，总高度累加，总宽度取最大
+    - Horizontal Measure：向各子元素传 `{INFINITY, panelHeight}`，总宽度累加，总高度取最大
+    - Arrange：沿主轴累计偏移量逐一调用 `child->arrange(slot)`，交叉轴尺寸 = 面板分配尺寸（允许子元素内部 Stretch）
+  - `Grid`：行列网格布局，三步尺寸计算算法：
+    - `GridLength`：`Pixel / Auto / Star` 三种模式，含静态工厂 `pixel() / auto_() / star(weight)`
+    - `RowDefinition / ColumnDefinition`：含 GridLength 尺寸和 Min/Max 约束
+    - 附加属性：`RowProperty / ColumnProperty`（0-based 索引）、`RowSpanProperty / ColumnSpanProperty`（默认 1）；静态便捷方法 `get/set_row/column/row_span/column_span(FrameworkElement&)`
+    - 尺寸计算：Pixel → 固定像素（clamp Min/Max）；Auto → 收集该行/列内单跨子元素的 desiredSize 取最大；Star → 按权重比例分配剩余空间
+    - 无行/列定义时视为单行单列（1*）
+    - RowSpan/ColumnSpan：slot 宽/高为跨越行/列的实际尺寸之和
+  - 共 27 个单元测试（doctest），覆盖：默认属性值、Measure（叶子零尺寸/明确Width-Height/Margin增量/Min/Max约束）、Arrange（Stretch充满/Left-Center-Right-Bottom-Center对齐/Margin偏移）、Panel 子节点增删/防重复、StackPanel 垂直水平 Measure desiredSize 累加/Arrange 顺序偏移、Grid 像素行列单/多子元素位置、Auto 行列尺寸、Star 等权重/不等权重比例、ColumnSpan slot 合并宽度、无定义默认单行单列
+
 - **mine.ui.input（键盘/鼠标输入路由）**：实现 Win32 输入接收与视觉树事件派发（M1.1 任务 #18）：
   - `mine.platform.abi / WindowEvent`：扩展 `WindowEventKind` 枚举新增 `KeyDown / KeyUp / Char / MouseMove / MouseDown / MouseUp / MouseWheel`；`WindowEvent` 结构体新增键盘字段（`key_vk_code / key_scan_code / char_utf32 / key_is_repeat`）、鼠标字段（`mouse_x / mouse_y / mouse_button / mouse_wheel_delta`）和修饰键字段（`mod_ctrl / mod_shift / mod_alt`）
   - `mine.platform.win32 / Win32Window`：新增对 `WM_KEYDOWN / WM_SYSKEYDOWN / WM_KEYUP / WM_SYSKEYUP / WM_CHAR / WM_MOUSEMOVE / WM_LBUTTONDOWN / WM_LBUTTONUP / WM_RBUTTONDOWN / WM_RBUTTONUP / WM_MBUTTONDOWN / WM_MBUTTONUP / WM_XBUTTONDOWN / WM_XBUTTONUP / WM_MOUSEWHEEL` 共 15 类消息的处理，填充平台 `WindowEvent` 并通过 `event_source_.fire(ev)` 派发；鼠标坐标使用 `phys_to_logical(DPI)` 转换为逻辑像素；`WM_MOUSEWHEEL` 坐标用 `ScreenToClient` 由屏幕坐标转为客户区坐标；左键按下/释放时调用 `SetCapture / ReleaseCapture` 确保按住拖拽消息连续接收

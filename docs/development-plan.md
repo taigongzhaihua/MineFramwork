@@ -86,7 +86,7 @@ git tag：`v0.1.0-m0`
 | 17 | `mine.ui.event`：路由事件（Tunnel/Bubble/Direct）、命令接口 | `src/mine/ui/event` | 与 input 模块对接 |
 | 18 | `mine.ui.input`：键盘/鼠标/触摸事件路由、命中测试 | `src/mine/ui/input` | 接收 Win32 输入并派发 |
 | 19 | `mine.ui.visual`：`Visual` 基类、视觉树、变换、剪裁 | `src/mine/ui/visual` | 渲染管线接入 paint |
-| 20 | `mine.ui.layout`：`Measure/Arrange` 协议、`StackPanel`、`Grid` | `src/mine/ui/layout` | 经典布局算法 |
+| 20 | ✅ `mine.ui.layout`：`Measure/Arrange` 协议、`StackPanel`、`Grid` | `src/mine/ui/layout` | 经典布局算法 |
 | 21 | `mine.ui.window`：`Window` 类、生命周期、与 PAL 桥接 | `src/mine/ui/window` | 多实例支持 |
 | 22 | `mine.ui.app`：`Application`、主循环、退出码 | `src/mine/ui/app` | `MINE_APPLICATION_MAIN` 宏 |
 | 23 | `mine.ui.controls.basic`：`TextBlock`、`Button`、`Border`、`StackPanel`、`Grid` | `src/mine/ui/controls` | 渲染 + 命中测试通过 |
