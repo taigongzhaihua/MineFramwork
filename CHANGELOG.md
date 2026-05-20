@@ -5,6 +5,15 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.binding（单向数据绑定系统）**：实现 OneWay/OneTime 单向绑定（M1.1），并为 TwoWay 预留完整基础设施：
+  - `BindingMode`：枚举 OneWay / TwoWay / OneWayToSource / OneTime
+  - `IConverter`：绑定值转换器接口，`convert()`（正向，M1.1 使用）+ `convert_back()`（反向，M2 预留）
+  - `INotifyPropertyChanged`：ViewModel 属性变更通知接口，基于原始函数指针 + void* user_data，无 RTTI/异常依赖
+  - `PropertyDependency`：依赖源描述符，支持两种来源：`DependencyObject + DependencyProperty`（按属性描述符指针过滤）或 `INotifyPropertyChanged + StringView 属性名`（按名字符串过滤）
+  - `BindingExpression`：运行时绑定核心，Pimpl 实现，`attach()/detach()/evaluate()` 生命周期管理；attach 时预 reserve 订阅记录确保地址稳定；OneTime 模式 attach 后立即取消订阅；`fallback` 值在 getter 返空时自动使用；TwoWay 基础：`setter` 字段已定义、`is_updating` 防循环标志已预留
+  - `mine.core::Function<R(Args...)>`：新增 32 字节 SBO move-only 函数包装器，作为 getter/setter 的闭包容器，static const Ops 虚表（无多态开销），noexcept 移动/调用接口
+  - 共 22 个单元测试（doctest），覆盖：Function<> 基础语义、DependencyObject 来源绑定（初始求值/变更触发/属性过滤/detach）、INotifyPropertyChanged 来源绑定、converter 正向转换、fallback 回退、OneTime 模式、TwoWay 预留字段验证、手动 evaluate、move 语义、析构自动取消订阅
+
 - **mine.ui.property（依赖属性系统）**：完整实现 WPF 风格依赖属性模块（M1.1）：
   - `DependencyProperty`：全局唯一静态描述符，支持 `register_property` / `register_attached_property` 注册，包含名称、属主类型、值类型、默认值、属性元数据（影响布局/渲染失效标志、变更回调、继承标志）
   - `DependencyObject`：基于 Pimpl 的属性值存储基类，支持多优先级槽（Default / Inherited / StyleSetter / StyleTrigger / TemplateBind / Local / Animation），`set_value` / `get_value` / `clear_value` / `has_value` 按优先级合并生效
