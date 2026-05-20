@@ -5,6 +5,16 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.event（路由事件系统与命令接口）**：实现 WPF 风格路由事件系统和 ICommand/RelayCommand（M1.1 任务 #17）：
+  - `RoutingStrategy`：枚举 Bubble（冒泡）/ Tunnel（隧道/Preview）/ Direct（直接）
+  - `RoutedEvent`：全局唯一路由事件描述符，地址稳定，由 `RoutedEventRegistry`（Meyer's 单例）统一管理；`register_event<TOwner>(name, strategy)` 类型安全注册 API；内部分配名称字符串副本保证生命周期
+  - `RoutedEventArgs`：路由事件参数基类，携带事件描述符引用、source/original_source（void*）和 Handled 标志；栈上分配，禁止拷贝（防止多态切片）
+  - `IRoutedEventTarget`：路由目标纯虚接口，提供 `parent_target()` 和 `invoke_handlers()`，将路由算法与 UIElement 实现完全解耦
+  - `EventManager`：纯静态派发器，`raise(source, args)` 根据事件策略执行三种传播算法：Bubble（source→root，handled 停止）、Tunnel（收集完整路径后 root→source 反向派发，handled 停止）、Direct（仅 source）
+  - `ICommand`：命令抽象接口，`can_execute() / execute()` + `subscribe_can_execute_changed() / unsubscribe_can_execute_changed(token)` 订阅模式
+  - `RelayCommand`：ICommand 的 Pimpl 实现，接受 `Function<void(const Variant&)>` execute 和可选 `Function<bool(const Variant&)>` can_execute；`notify_can_execute_changed()` 手动触发订阅者通知；默认 can_execute 空时始终返回 true
+  - 共 24 个单元测试（doctest），覆盖：RoutedEvent 注册/属性/多所有者、RoutedEventArgs 初始状态/source/handled、Bubble 三层树传播/handled 中止/无父节点、Tunnel 反向顺序/handled 中止/无父节点、Direct 不传播、RelayCommand execute/can_execute/subscribe/unsubscribe/notify/多订阅/重复取消/move/ICommand 接口
+
 - **mine.ui.binding（单向数据绑定系统）**：实现 OneWay/OneTime 单向绑定（M1.1），并为 TwoWay 预留完整基础设施：
   - `BindingMode`：枚举 OneWay / TwoWay / OneWayToSource / OneTime
   - `IConverter`：绑定值转换器接口，`convert()`（正向，M1.1 使用）+ `convert_back()`（反向，M2 预留）
