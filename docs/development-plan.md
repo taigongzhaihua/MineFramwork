@@ -81,7 +81,7 @@ git tag：`v0.2.0-f1`
 | # | 模块 | 路径 | 验收 |
 |---|------|------|------|
 | 10 | ✅ `mine.ui.style`：`ResourceDictionary`（树形作用域、`resource_changed` 信号） | `src/mine/ui/style` | 17/17 单测通过：跨层查找、变更通知 |
-| 11 | `mine.ui.style`：`Style` + `StyleSetter`；依赖属性值优先级链（样式层） | `src/mine/ui/style` | 样式 setter 不覆盖本地值 |
+| 11 | ✅ `mine.ui.style`：`Style` + `StyleSetter`；依赖属性值优先级链（样式层） | `src/mine/ui/style` | 17/17 单测通过：样式 setter 不覆盖本地值 |
 | 12 | `mine.ui.style`：`ControlTemplate` + `TemplateRegistry`；`bind_template` / `find_template_child` | `src/mine/ui/style` | 单测：build → bind → find |
 | 13 | `mine.ui.style`：`VisualStateManager`：状态定义、过渡配置、`go_to_state()` | `src/mine/ui/style` | Normal→Hovered 正确触发 |
 | 14 | `mine.ui.app`：`Application::set_theme()`：合并/切换主题资源字典 | `src/mine/ui/app` | 运行时切换浅色/深色无崩溃 |

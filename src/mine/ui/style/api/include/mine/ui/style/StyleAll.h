@@ -6,3 +6,5 @@
 #include <mine/ui/style/Api.h>
 #include <mine/ui/style/HandlerId.h>
 #include <mine/ui/style/ResourceDictionary.h>
+#include <mine/ui/style/StyleSetter.h>
+#include <mine/ui/style/Style.h>

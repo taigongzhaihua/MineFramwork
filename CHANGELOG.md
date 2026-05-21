@@ -5,6 +5,19 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.style（Style + StyleSetter）**：实现 F2.1 任务 #11 的 `Style` 与 `StyleSetter`：
+  - 新增 `StyleSetter` 结构体：描述"将某依赖属性设置为指定值"的操作，支持静态值（`value` 字段）与 DynamicResource 键（`res_key` 字段）两种模式
+  - 新增 `VisualStateSetters` 结构体：单个视觉状态下的 setter 集合（`state_name` + `SmallVector<StyleSetter, 8>`）
+  - 新增 `Style` 类：实现依赖属性值优先级链的样式层
+    - `apply(DependencyObject&)`：以 `ValuePriority::StyleSetter(20)` 写入属性值；先应用父样式（BasedOn 继承），再应用本样式（子样式覆盖同属性父样式值）；`apply_fn_` 非空时使用 mmlc 生成路径
+    - `apply_state(DependencyObject&, StringView)`：以 `ValuePriority::StyleTrigger(30)` 写入指定视觉状态的 setter；状态不存在时为空操作
+    - 构建器接口：`set_name()` / `set_target_type()` / `set_base()` / `add_setter()` / `add_state_setters()`
+    - `apply_fn_` 公开成员（`ApplyFn = void (*)(DependencyObject&)`）：为 mmlc 生成代码预留入口
+  - 优先级链保证：`StyleSetter(20)` 低于 `Local(50)`，样式值不覆盖本地设置值；`StyleTrigger(30)` 可覆盖 `StyleSetter(20)`，仍低于 `Local(50)`
+  - 更新 `xmake.lua`：追加 `mine.ui.property` 依赖（`Style::apply()` 需要 `DependencyObject` + `ValuePriority`）
+  - 更新 `StyleAll.h`：新增 `StyleSetter.h` / `Style.h` 的伞形引入
+  - 新增 17 个单元测试（doctest），全部通过，覆盖：结构体默认构造、静态值/DynamicResource 键构造、VisualStateSetters 构造、构建器接口、apply() 写入优先级、**核心验收（Local 值不被样式覆盖）**、逆向验收（apply 后设本地值有效）、apply_state() 写入 StyleTrigger、StyleTrigger 不覆盖 Local、BasedOn 继承、apply_fn_ 路径、状态不存在空操作、Style 可拷贝、set_base(nullptr) 清除继承、多属性并行 setter、查询接口
+
 - **mine.ui.style（树形资源字典）**：实现 F2.1 任务 #10 的 `ResourceDictionary`：
   - 新增 `ResourceDictionary`（Pimpl 模式）：多层键值资源存储，支持树形查找链
     - `set(key, value)`：写入静态值（不触发通知，适用于批量初始化 / 主题加载）
