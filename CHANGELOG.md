@@ -5,6 +5,29 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.animation（Storyboard 属性动画）**：实现 F2.2 任务 #17 的属性动画与 VSM 过渡集成：
+  - 新增 `PropertyAnimation` 结构体：描述单个依赖属性动画（target/prop/from/to/duration/easing/elapsed/complete）；`to_is_resolved` 标志区分显式 to（`animate_dp_to`）与状态采样（`animate_dp`）两条路径
+  - 新增 `Storyboard` 类：属性动画时间线容器，支持多属性并行动画：
+    - `animate_dp(target, prop, duration, easing)` —— 自动 to（`resolve_and_begin` 时从对象采样）
+    - `animate_dp_to(target, prop, to, duration, easing)` —— 显式 to
+    - `capture_from_values()` —— 在 StyleTrigger 写入前采样所有动画的起始值
+    - `resolve_and_begin()` —— 解析 to 值（对 `to_is_resolved=false` 的动画从对象当前值读取），然后以 `ValuePriority::Animation(60)` 写入 from 值，启动动画
+    - `tick(dt)` —— 推进所有动画，返回 `true` 表示全部完成；内部调用 `lerp_variant`（支持 `float`/`math::Color`/`math::Thickness`/任意离散类型）
+    - `stop()` —— 清除所有属性的 `Animation` 优先级槽
+  - 内部 `lerp_variant`：float 线性插值 / Color 四分量各自插值 / Thickness 四边各自插值 / 其他类型 `t>=1.0f` 时 snap 到 to
+  - 更新 `AnimationAll.h` 伞形头文件，新增 `PropertyAnimation.h` / `Storyboard.h`
+  - `xmake.lua` 追加 `mine.ui.property` 依赖（DependencyObject / DependencyProperty / ValuePriority）
+  - 新增 11 个 Storyboard 单元测试（51/355 总计），覆盖：动画注册计数、空 Storyboard 立即完成、Animation 层写入 from、Linear 中间进度插值、完成时精确等于 to、stop 清除 Animation 层、Color / Thickness 各分量插值、自动 to 从对象读取、超时 tick 夹紧到 to、多属性并行动画均完成才返回 true；51/51 全部通过
+
+- **mine.ui.style（VisualStateManager 动画集成）**：Task #17 验收：VSM 与 Storyboard 过渡集成：
+  - 新增 `add_transition(from, to, configure_fn)` 重载：注册带 `core::Function<void(Storyboard&)>` 配置函数的动画过渡
+  - 新增 `tick_animations(dt) -> bool`：推进所有活跃 Storyboard，返回 `true` 表示仍有活跃动画；完成的 Storyboard 自动调用 `stop()`（清除 Animation 层）并从 `active_storyboards_` 移除（SmallVector 双指针压缩策略，无 `erase`）
+  - `go_to_state` 扩展流程：有 configure_fn 过渡时：创建 Storyboard → configure → `capture_from_values` → `apply_state`（写 StyleTrigger） → `resolve_and_begin`（读 to，写 Animation=from） → 压入 `active_storyboards_`；无 configure_fn 过渡时：直接 `apply_state`（立即跳变）；状态切换时自动停止旧动画
+  - `VisualStateTransition` 扩展为 move-only：新增 `configure` 字段（`core::Function<void(Storyboard&)>`，SBO 32 字节）
+  - 新增 `active_storyboards_`（`SmallVector<OwnedPtr<Storyboard>, 4>`）私有成员
+  - `xmake.lua` 追加 `mine.ui.animation` 依赖
+  - 新增 7 个 VSM 动画集成测试，覆盖：带/不带 configure_fn 的 has_transition、动画启动后 Animation 层写入 from、tick 推进中间值、动画完成后 tick 返回 false、无 configure_fn 立即跳变、中断活跃动画并替换、无活跃动画返回 false；56/56 全部通过
+
 - **mine.ui.animation（缓动函数库）**：实现 F2.2 任务 #16 的缓动函数库：
   - 新增 `Duration` 类：时间段描述，内部以秒存储；`milliseconds(ms)` / `seconds(s)` 工厂函数，支持加减乘算术、比较运算、`is_zero()` 查询
   - 新增 10 个缓动函数系列（In / Out / InOut 各变体，共 22 个全局函数指针常量）：

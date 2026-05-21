@@ -26,6 +26,8 @@
 #include <mine/ui/property/DependencyObject.h>
 #include <mine/ui/property/DependencyProperty.h>
 #include <mine/ui/property/ValuePriority.h>
+// Task #17：VSM 动画集成测试所需
+#include <mine/ui/animation/AnimationAll.h>
 
 using namespace mine::ui::style;
 using namespace mine::ui;
@@ -55,6 +57,21 @@ static const DependencyProperty& vsm_test_prop()
             TypeId{},   // owner_type（测试用，不绑定具体类型）
             TypeId{},   // value_type
             Variant{0}  // 默认值为 0
+        );
+    }
+    return *prop;
+}
+
+/// 注册 VSM 动画测试专用 float 依赖属性（全局唯一；默认值 0.0f）
+static const DependencyProperty& vsm_float_prop()
+{
+    static const DependencyProperty* prop = nullptr;
+    if (!prop) {
+        prop = &register_property(
+            "VSM_AnimFloatProp",
+            TypeId{},
+            TypeId{},
+            Variant{0.0f}
         );
     }
     return *prop;
@@ -314,3 +331,219 @@ TEST_SUITE("VisualStateManager - 多状态切换") {
     }
 
 }  // TEST_SUITE
+
+// ════════════════════════════════════════════════════════════════════════════
+// Task #17：VisualStateManager 动画集成测试
+// ════════════════════════════════════════════════════════════════════════════
+
+TEST_SUITE("VisualStateManager - Task #17 动画集成") {
+
+    TEST_CASE("16. add_transition 带 configure_fn 后 has_transition 返回 true")
+    {
+        VsmTestObject obj;
+        const DependencyProperty& prop = vsm_float_prop();
+
+        VisualStateManager vsm{obj};
+        vsm.define_state("Normal");
+        vsm.define_state("Hovered");
+
+        // 传入 configure_fn 重载
+        vsm.add_transition("Normal", "Hovered",
+            Function<void(animation::Storyboard&)>{
+                [&obj, &prop](animation::Storyboard& sb) {
+                    sb.animate_dp_to(obj, prop,
+                                     Variant{1.0f},
+                                     animation::Duration::milliseconds(100.0f));
+                }
+            });
+
+        // 有 configure_fn 的过渡应被 has_transition 识别
+        CHECK(vsm.has_transition("Normal", "Hovered"));
+        CHECK_FALSE(vsm.has_transition("Hovered", "Normal")); // 未注册
+    }
+
+    TEST_CASE("17. go_to_state 带动画过渡时 Animation 优先级写入 from 值")
+    {
+        VsmTestObject obj;
+        const DependencyProperty& prop = vsm_float_prop();
+
+        // 设置 Local 层为 0.0f（from）
+        obj.set_value(prop, Variant{0.0f}, ValuePriority::Local);
+
+        VisualStateManager vsm{obj};
+        vsm.define_state("Normal");
+        vsm.define_state("Hovered");
+
+        // 注册带动画的过渡：Normal → Hovered（to=1.0f，100ms）
+        vsm.add_transition("Normal", "Hovered",
+            Function<void(animation::Storyboard&)>{
+                [&obj, &prop](animation::Storyboard& sb) {
+                    sb.animate_dp_to(obj, prop,
+                                     Variant{1.0f},
+                                     animation::Duration::milliseconds(100.0f));
+                }
+            });
+
+        // 先进入 Normal，再切换到 Hovered（触发动画）
+        vsm.go_to_state("Normal");
+        vsm.go_to_state("Hovered");
+
+        // resolve_and_begin 应已向 Animation 层写入 from = 0.0f
+        CHECK(obj.has_value(prop, ValuePriority::Animation));
+        const Variant& val = obj.get_value(prop);
+        CHECK(val.has<float>());
+        CHECK(val.get<float>() == doctest::Approx(0.0f));  // Animation 层覆盖 Local
+    }
+
+    TEST_CASE("18. tick_animations 推进动画后值在 from-to 之间")
+    {
+        VsmTestObject obj;
+        const DependencyProperty& prop = vsm_float_prop();
+
+        obj.set_value(prop, Variant{0.0f}, ValuePriority::Local);
+
+        VisualStateManager vsm{obj};
+        vsm.define_state("Normal");
+        vsm.define_state("Hovered");
+
+        vsm.add_transition("Normal", "Hovered",
+            Function<void(animation::Storyboard&)>{
+                [&obj, &prop](animation::Storyboard& sb) {
+                    sb.animate_dp_to(obj, prop,
+                                     Variant{1.0f},
+                                     animation::Duration::milliseconds(100.0f),
+                                     animation::Linear);
+                }
+            });
+
+        vsm.go_to_state("Normal");
+        vsm.go_to_state("Hovered");  // 动画开始
+
+        // 推进 50ms = 50% → 仍有活跃动画 → 返回 true
+        bool still_active = vsm.tick_animations(0.05f);
+        CHECK(still_active);
+
+        // 中间值应约为 0.5f（Linear 插值）
+        const Variant& val = obj.get_value(prop);
+        CHECK(val.has<float>());
+        CHECK(val.get<float>() == doctest::Approx(0.5f).epsilon(0.02f));
+    }
+
+    TEST_CASE("19. tick_animations 全部完成后返回 false")
+    {
+        VsmTestObject obj;
+        const DependencyProperty& prop = vsm_float_prop();
+
+        obj.set_value(prop, Variant{0.0f}, ValuePriority::Local);
+
+        VisualStateManager vsm{obj};
+        vsm.define_state("Normal");
+        vsm.define_state("Hovered");
+
+        vsm.add_transition("Normal", "Hovered",
+            Function<void(animation::Storyboard&)>{
+                [&obj, &prop](animation::Storyboard& sb) {
+                    sb.animate_dp_to(obj, prop,
+                                     Variant{1.0f},
+                                     animation::Duration::milliseconds(100.0f));
+                }
+            });
+
+        vsm.go_to_state("Normal");
+        vsm.go_to_state("Hovered");
+
+        // 一次性推进超过整个 duration（200ms > 100ms）
+        bool still_active = vsm.tick_animations(0.2f);
+        CHECK_FALSE(still_active);  // 所有动画已完成，无活跃动画
+    }
+
+    TEST_CASE("20. go_to_state 无 configure_fn 时直接 apply_state（立即跳变）")
+    {
+        VsmTestObject obj;
+        const DependencyProperty& prop = vsm_float_prop();
+
+        // 构建带 "Hovered" setter 的样式（setter 值 = 2.0f）
+        StyleSetter setter;
+        setter.property = &prop;
+        setter.value    = Variant{2.0f};
+
+        VisualStateSetters state_setters;
+        state_setters.state_name = "Hovered";
+        state_setters.setters.push_back(setter);
+
+        Style style;
+        style.add_state_setters(std::move(state_setters));
+
+        // 注意：不设置 Local 层（Local=50 > StyleTrigger=30，会覆盖 apply_state 写入的值）
+        // 默认值（Default 层）低于 StyleTrigger，因此 apply_state 写入后 get_value 可见
+
+        VisualStateManager vsm{obj};
+        vsm.define_state("Normal");
+        vsm.define_state("Hovered");
+        vsm.set_style(&style);
+
+        // 仅用 add_transition（无 configure_fn）注册普通过渡
+        vsm.add_transition("Normal", "Hovered");
+
+        vsm.go_to_state("Normal");
+        vsm.go_to_state("Hovered");  // 应立即跳变，无动画
+
+        // Animation 层不应存在（立即跳变，无 Storyboard 启动）
+        CHECK_FALSE(obj.has_value(prop, ValuePriority::Animation));
+
+        // StyleTrigger 层已写入（apply_state 触发）
+        CHECK(obj.has_value(prop, ValuePriority::StyleTrigger));
+        CHECK(obj.get_value(prop).get<float>() == doctest::Approx(2.0f));
+    }
+
+    TEST_CASE("21. go_to_state 中断活跃动画并启动新动画")
+    {
+        VsmTestObject obj;
+        const DependencyProperty& prop = vsm_float_prop();
+
+        obj.set_value(prop, Variant{0.0f}, ValuePriority::Local);
+
+        VisualStateManager vsm{obj};
+        vsm.define_state("Normal");
+        vsm.define_state("Hovered");
+        vsm.define_state("Pressed");
+
+        auto make_anim_fn = [&obj, &prop](float to_val) {
+            return Function<void(animation::Storyboard&)>{
+                [&obj, &prop, to_val](animation::Storyboard& sb) {
+                    sb.animate_dp_to(obj, prop,
+                                     Variant{to_val},
+                                     animation::Duration::milliseconds(500.0f));
+                }
+            };
+        };
+
+        vsm.add_transition("Normal",  "Hovered", make_anim_fn(1.0f));
+        vsm.add_transition("Hovered", "Pressed", make_anim_fn(0.5f));
+
+        vsm.go_to_state("Normal");
+        vsm.go_to_state("Hovered");  // 动画1：Normal→Hovered（500ms）
+
+        // 推进 100ms（动画1 进行中）
+        CHECK(vsm.tick_animations(0.1f));  // 仍活跃
+
+        // 中途切换到 Pressed（应停止动画1，启动动画2）
+        vsm.go_to_state("Pressed");
+
+        // 动画2 刚启动，Animation 优先级应从新的 from 开始
+        CHECK(obj.has_value(prop, ValuePriority::Animation));
+        CHECK(vsm.current_state() == "Pressed");
+    }
+
+    TEST_CASE("22. tick_animations 无活跃动画时返回 false")
+    {
+        VsmTestObject obj;
+        VisualStateManager vsm{obj};
+        vsm.define_state("Normal");
+
+        // 无任何动画
+        bool still_active = vsm.tick_animations(0.016f);
+        CHECK_FALSE(still_active);
+    }
+
+}  // TEST_SUITE（Task #17 动画集成）
