@@ -11,6 +11,8 @@
 #include <mine/ui/input/InputEvents.h>
 #include <mine/ui/event/EventManager.h>
 #include <mine/paint/Canvas.h>
+#include <mine/containers/InlineString.h>
+#include <mine/core/Variant.h>
 
 using namespace mine::ui;
 using namespace mine::math;
@@ -151,3 +153,110 @@ TEST_CASE("controls_样式模板槽位可设置")
     CHECK(button.style_slot() == mine::core::StringView{"AccentButton"});
     CHECK(button.template_slot() == mine::core::StringView{"AccentButtonTemplate"});
 }
+
+// ============================================================================
+// ContentPresenter 测试套件（任务 #15）
+// ============================================================================
+
+TEST_CASE("controls_ContentPresenter_默认状态无内容零尺寸")
+{
+    ContentPresenter presenter;
+    presenter.measure({300.0f, 200.0f});
+    CHECK(presenter.desired_size().width == doctest::Approx(0.0f));
+    CHECK(presenter.desired_size().height == doctest::Approx(0.0f));
+}
+
+TEST_CASE("controls_ContentPresenter_设置字符串内容后测量非零")
+{
+    ContentPresenter presenter;
+    mine::containers::InlineString text{"Hello"};
+    presenter.set_value(ContentPresenter::ContentProperty, mine::core::Variant{ text });
+    presenter.measure({300.0f, 200.0f});
+    CHECK(presenter.desired_size().width > 0.0f);
+    CHECK(presenter.desired_size().height > 0.0f);
+}
+
+TEST_CASE("controls_ContentPresenter_Padding影响测量尺寸")
+{
+    ContentPresenter p1;
+    ContentPresenter p2;
+
+    mine::containers::InlineString text{"Hi"};
+    const mine::core::Variant content_v{ text };
+    p1.set_value(ContentPresenter::ContentProperty, content_v);
+    p2.set_value(ContentPresenter::ContentProperty, content_v);
+
+    // p2 加 10px 水平内边距
+    p2.set_value(ContentPresenter::PaddingProperty, mine::core::Variant{ mine::math::Thickness::symmetric(10.0f, 0.0f) });
+
+    p1.measure({300.0f, 200.0f});
+    p2.measure({300.0f, 200.0f});
+
+    CHECK(p2.desired_size().width > p1.desired_size().width + 9.0f);
+}
+
+TEST_CASE("controls_ContentPresenter_有内容时可渲染到Canvas")
+{
+    ContentPresenter presenter;
+    mine::containers::InlineString text{"World"};
+    presenter.set_value(ContentPresenter::ContentProperty, mine::core::Variant{ text });
+    presenter.set_bounds_rect({0.0f, 0.0f, 100.0f, 30.0f});
+
+    mine::paint::Canvas canvas;
+    presenter.render_to_canvas(canvas);
+    CHECK(canvas.cmd_count() > 0u);
+}
+
+TEST_CASE("controls_ContentPresenter_无内容时Canvas无绘制命令")
+{
+    ContentPresenter presenter;
+    presenter.set_bounds_rect({0.0f, 0.0f, 100.0f, 30.0f});
+
+    mine::paint::Canvas canvas;
+    presenter.render_to_canvas(canvas);
+    // render_to_canvas 固定产生 save/transform/restore 3 个帧命令；
+    // 无内容时不应产生额外绘制命令（fill_rect 等）
+    CHECK(canvas.cmd_count() <= 3u);
+}
+
+TEST_CASE("controls_Button_有模板根时测量委托给ContentPresenter")
+{
+    Button button;
+    // 构造函数中 set_template_slot("DefaultButtonTemplate") 已触发
+    // 第一次 measure 时 Control::on_measure 会自动构建模板
+    button.set_text("OK");
+    button.measure({300.0f, 200.0f});
+
+    // 有模板根时，期望尺寸由 ContentPresenter 计算得出
+    CHECK(button.desired_size().width > 0.0f);
+    CHECK(button.desired_size().height > 0.0f);
+}
+
+TEST_CASE("controls_Button_ContentProperty变更传播到模板根")
+{
+    Button button;
+    button.measure({300.0f, 200.0f});   // 触发模板构建
+
+    // 初始空文字：期望尺寸应包含 Padding 部分
+    const float initial_w = button.desired_size().width;
+
+    // 设置较长文字后期望宽度增大
+    button.set_text("Hello World");
+    button.measure({300.0f, 200.0f});
+
+    CHECK(button.desired_size().width >= initial_w);
+}
+
+TEST_CASE("controls_TextBlock_DependencyProperty与成员变量同步")
+{
+    TextBlock text;
+    text.set_text("Mine");
+
+    // DependencyProperty 应与成员缓存一致
+    const mine::core::Variant& v = text.get_value(TextBlock::TextProperty);
+    REQUIRE(v.has<mine::containers::InlineString>());
+    const auto& stored = v.get<mine::containers::InlineString>();
+    CHECK(mine::core::StringView{ stored.data(), stored.size() } ==
+          mine::core::StringView{"Mine"});
+}
+

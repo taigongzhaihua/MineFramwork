@@ -7,6 +7,7 @@
 
 #include <mine/ui/controls/Api.h>
 #include <mine/ui/controls/ModuleTag.h>
+#include <mine/ui/controls/ContentPresenter.h>
 #include <mine/ui/controls/TextBlock.h>
 #include <mine/ui/controls/Button.h>
 #include <mine/ui/controls/Border.h>

@@ -8,6 +8,7 @@
 #include <mine/ui/controls/Api.h>
 #include <mine/ui/visual/Control.h>
 #include <mine/ui/event/RoutedEvent.h>
+#include <mine/ui/property/DependencyProperty.h>
 #include <mine/containers/InlineString.h>
 #include <mine/math/Color.h>
 #include <mine/math/Thickness.h>
@@ -25,10 +26,32 @@ namespace mine::ui {
  * 2. 鼠标按下/释放状态切换
  * 3. Click 路由事件
  * 4. 样式/模板/视觉状态挂点（与 mine.ui.style 对接）
+ * 5. ContentProperty / PaddingProperty（DependencyProperty，供 ControlTemplate 绑定）
  */
 class MINE_UI_CONTROLS_API Button : public Control {
 public:
+    // ── 路由事件 ───────────────────────────────────────────────────────────
+
     static const RoutedEvent& ClickEvent();
+
+    // ── 依赖属性 ───────────────────────────────────────────────────────────
+
+    /**
+     * @brief 内容属性（Variant 存储 containers::InlineString，即按钮文字）。
+     *
+     * 与 ContentPresenter::ContentProperty 通过 bind_template 连接，
+     * 使 ContentPresenter 能够在模板树中渲染按钮文字。
+     */
+    static const DependencyProperty& ContentProperty;
+
+    /**
+     * @brief 内边距属性（Variant 存储 math::Thickness）。
+     *
+     * 默认值：{12, 8, 12, 8}（水平 12px，垂直 8px）。
+     */
+    static const DependencyProperty& PaddingProperty;
+
+    // ── 生命周期 ───────────────────────────────────────────────────────────
 
     Button();
     ~Button() override;
@@ -37,6 +60,8 @@ public:
     Button& operator=(const Button&) = delete;
     Button(Button&&)                 = default;
     Button& operator=(Button&&)      = default;
+
+    // ── 属性访问 ───────────────────────────────────────────────────────────
 
     [[nodiscard]] core::StringView text() const noexcept;
     void set_text(core::StringView text);
@@ -68,12 +93,34 @@ protected:
     [[nodiscard]] ControlVisualState compute_visual_state() const override;
 
 private:
+    // ── 依赖属性变更回调 ───────────────────────────────────────────────────
+
+    /**
+     * @brief ContentProperty 变更时同步 text_ 成员缓存。
+     */
+    static void on_content_changed(DependencyObject*         sender,
+                                   const DependencyProperty& prop,
+                                   const core::Variant&      old_v,
+                                   const core::Variant&      new_v) noexcept;
+
+    /**
+     * @brief PaddingProperty 变更时同步 padding_ 成员缓存。
+     */
+    static void on_padding_changed(DependencyObject*         sender,
+                                   const DependencyProperty& prop,
+                                   const core::Variant&      old_v,
+                                   const core::Variant&      new_v) noexcept;
+
+    // ── 鼠标事件路由 ───────────────────────────────────────────────────────
+
     static void on_mouse_down_router(void* sender, RoutedEventArgs& args, void* user_data);
     static void on_mouse_up_router(void* sender, RoutedEventArgs& args, void* user_data);
 
     void on_mouse_down(input::MouseEventArgs& args);
     void on_mouse_up(input::MouseEventArgs& args);
     void raise_click();
+
+    // ── 成员变量 ───────────────────────────────────────────────────────────
 
     containers::InlineString text_;
     bool                     is_enabled_       = true;

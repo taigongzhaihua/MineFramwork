@@ -7,6 +7,7 @@
 
 #include <mine/ui/controls/Api.h>
 #include <mine/ui/visual/Control.h>
+#include <mine/ui/property/DependencyProperty.h>
 #include <mine/containers/InlineString.h>
 #include <mine/math/Color.h>
 #include <mine/math/Thickness.h>
@@ -20,9 +21,29 @@ namespace mine::ui {
  * 1. 文本内容与基础测量
  * 2. 背景色和前景色
  * 3. 样式/模板槽位与视觉状态挂点（继承自 Control）
+ * 4. 关键属性迁移至 DependencyProperty，供样式系统（StyleSetter）控制
  */
 class MINE_UI_CONTROLS_API TextBlock : public Control {
 public:
+    // ── 依赖属性 ───────────────────────────────────────────────────────────
+
+    /** @brief 文字内容属性（Variant 存储 containers::InlineString）。 */
+    static const DependencyProperty& TextProperty;
+
+    /** @brief 字体大小属性（Variant 存储 float，单位像素，默认 14）。 */
+    static const DependencyProperty& FontSizeProperty;
+
+    /** @brief 前景色属性（Variant 存储 math::Color，默认 Black）。 */
+    static const DependencyProperty& ForegroundProperty;
+
+    /** @brief 背景色属性（Variant 存储 math::Color，默认 Transparent）。 */
+    static const DependencyProperty& BackgroundProperty;
+
+    /** @brief 内边距属性（Variant 存储 math::Thickness，默认 {4, 2, 4, 2}）。 */
+    static const DependencyProperty& PaddingProperty;
+
+    // ── 生命周期 ───────────────────────────────────────────────────────────
+
     TextBlock();
     ~TextBlock() override;
 
@@ -30,6 +51,8 @@ public:
     TextBlock& operator=(const TextBlock&) = delete;
     TextBlock(TextBlock&&)                 = default;
     TextBlock& operator=(TextBlock&&)      = default;
+
+    // ── 属性访问 ───────────────────────────────────────────────────────────
 
     [[nodiscard]] core::StringView text() const noexcept;
     void set_text(core::StringView text);
@@ -56,6 +79,35 @@ protected:
     void on_render(paint::Canvas& canvas) override;
 
 private:
+    // ── 依赖属性变更回调 ───────────────────────────────────────────────────
+
+    static void on_text_changed(DependencyObject*         sender,
+                                const DependencyProperty& prop,
+                                const core::Variant&      old_v,
+                                const core::Variant&      new_v) noexcept;
+
+    static void on_font_size_changed(DependencyObject*         sender,
+                                     const DependencyProperty& prop,
+                                     const core::Variant&      old_v,
+                                     const core::Variant&      new_v) noexcept;
+
+    static void on_foreground_changed(DependencyObject*         sender,
+                                      const DependencyProperty& prop,
+                                      const core::Variant&      old_v,
+                                      const core::Variant&      new_v) noexcept;
+
+    static void on_background_changed(DependencyObject*         sender,
+                                      const DependencyProperty& prop,
+                                      const core::Variant&      old_v,
+                                      const core::Variant&      new_v) noexcept;
+
+    static void on_padding_changed(DependencyObject*         sender,
+                                   const DependencyProperty& prop,
+                                   const core::Variant&      old_v,
+                                   const core::Variant&      new_v) noexcept;
+
+    // ── 成员变量（成员缓存，与 DependencyProperty 值保持同步）───────────────
+
     containers::InlineString text_;
     float                    font_size_px_ = 14.0f;
     math::Color              foreground_   = math::Color::Black;

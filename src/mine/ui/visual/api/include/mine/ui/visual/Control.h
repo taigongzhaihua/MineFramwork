@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cstdint>
+#include <type_traits>
 
 #include <mine/ui/visual/Api.h>
 #include <mine/ui/visual/UIElement.h>
@@ -23,6 +24,7 @@
 #include <mine/core/Pimpl.h>
 #include <mine/core/StringView.h>
 #include <mine/containers/InlineString.h>
+#include <mine/core/Memory.h>
 
 namespace mine::ui {
 
@@ -97,7 +99,7 @@ public:
     // ── 控件模板（mine.ui.style 任务 #12）────────────────────────────────
 
     /**
-     * @brief 设置模板根元素，将其加入控件的视觉子树。
+     * @brief 设置模板根元素，将其加入控件的视觉子树（不拥有所有权）。
      *
      * 若此前已有模板根元素，则先将旧根从子树中移除。
      * 通常在 ControlTemplate::BuildFn 内部调用：
@@ -109,6 +111,42 @@ public:
      * @param root 模板根元素指针（nullptr 表示清除模板根）
      */
     void set_template_root(UIElement* root) noexcept;
+
+    /**
+     * @brief 设置模板根元素并转移所有权（OwnedPtr<UIElement> 版本）。
+     *
+     * 同 `set_template_root(UIElement*)` 但接管元素的生命周期，
+     * 元素将在控件析构或模板根被替换时自动释放。
+     *
+     * @param root 已拥有所有权的模板根元素（nullptr 等价于清除模板根）
+     */
+    void set_template_root(core::OwnedPtr<UIElement> root) noexcept;
+
+    /**
+     * @brief 设置模板根元素并转移所有权（子类型重载，含类型擦除）。
+     *
+     * 接受 OwnedPtr<TElement>（TElement 为 UIElement 的子类），
+     * 内部将所有权提升为 OwnedPtr<UIElement> 后委托给基类重载。
+     * 适用于动态分配的 ContentPresenter 等具体控件作为模板根：
+     * @code
+     *   auto presenter = core::make_owned<ContentPresenter>();
+     *   ctrl.set_template_root(std::move(presenter));
+     * @endcode
+     *
+     * @tparam TElement UIElement 的子类型
+     * @param root 已拥有所有权的子类型模板根元素
+     */
+    template<typename TElement,
+             std::enable_if_t<std::is_base_of_v<UIElement, TElement> &&
+                              !std::is_same_v<UIElement, TElement>, int> = 0>
+    void set_template_root(core::OwnedPtr<TElement> root) noexcept
+    {
+        // 类型擦除：保留删除器，将裸指针提升为 UIElement*
+        auto del = root.get_deleter();
+        UIElement* raw = root.release();
+        // 构造 OwnedPtr<UIElement>（删除器仍指向正确的 TElement::~TElement）
+        set_template_root(core::OwnedPtr<UIElement>{ raw, del });
+    }
 
     /**
      * @brief 在模板子树中查找具有指定 template_name 的 UIElement。
@@ -161,6 +199,23 @@ public:
     [[nodiscard]] const style::VisualStateManager* vsm() const noexcept;
 
 protected:
+    /**
+     * @brief 返回当前模板根元素指针（nullptr 表示尚未构建模板）。
+     *
+     * 子类可在 on_measure / on_render 中访问此值，判断是否走模板路径。
+     */
+    [[nodiscard]] UIElement* template_root() const noexcept;
+
+    /**
+     * @brief 计算测量尺寸（含自动模板构建逻辑）。
+     *
+     * 若模板尚未构建（template_root_ == nullptr）且 template_slot_ 非空，
+     * 则自动从 TemplateRegistry 查找并调用 build_fn_。
+     * 构建完成后，将 available_size 传入模板根并采用其期望尺寸。
+     * 若无模板，回退到 UIElement::on_measure（零尺寸）。
+     */
+    void on_measure(math::Size available_size) override;
+
     /**
      * @brief 由子类计算当前视觉状态（枚举）。
      *

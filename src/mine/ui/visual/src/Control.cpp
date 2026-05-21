@@ -10,6 +10,7 @@
 #include <mine/ui/property/ValuePriority.h>
 #include <mine/containers/SmallVector.h>
 #include <mine/ui/style/VisualStateManager.h>
+#include <mine/ui/style/TemplateRegistry.h>
 #include <mine/core/Memory.h>
 
 namespace mine::ui {
@@ -19,8 +20,11 @@ namespace mine::ui {
 // ============================================================================
 
 struct Control::Impl {
-    /// 模板根元素（非拥有指针，生命周期由调用方管理）
+    /// 模板根元素（非拥有指针，生命周期由 owned_template_root_ 或外部管理）
     UIElement* template_root_{nullptr};
+
+    /// 模板根元素的所有权（当通过 OwnedPtr 重载设置时有效，否则为 nullptr）
+    core::OwnedPtr<UIElement> owned_template_root_{nullptr};
 
     /// 模板属性绑定记录（宿主 host_prop → 子元素 child_prop 单向同步）
     struct TemplateBinding {
@@ -187,10 +191,29 @@ void Control::set_template_root(UIElement* root) noexcept
     if (cp_->template_root_) {
         remove_child(cp_->template_root_);
     }
+    // 清除旧的所有权（若有）
+    cp_->owned_template_root_.reset();
+
     cp_->template_root_ = root;
     // 将新模板根加入视觉子树
     if (root) {
         add_child(root);
+    }
+}
+
+void Control::set_template_root(core::OwnedPtr<UIElement> root) noexcept
+{
+    // 先移除旧模板根（如有）
+    if (cp_->template_root_) {
+        remove_child(cp_->template_root_);
+    }
+    // 转移所有权到 Impl（元素生命周期由 Control 管理）
+    cp_->owned_template_root_ = std::move(root);
+    cp_->template_root_ = cp_->owned_template_root_.get();
+
+    // 将新模板根加入视觉子树
+    if (cp_->template_root_) {
+        add_child(cp_->template_root_);
     }
 }
 
@@ -243,6 +266,41 @@ style::VisualStateManager* Control::vsm() noexcept
 const style::VisualStateManager* Control::vsm() const noexcept
 {
     return cp_->vsm_.get();
+}
+
+// ============================================================================
+// 模板根访问器（protected，供子类在 on_measure/on_render 中使用）
+// ============================================================================
+
+UIElement* Control::template_root() const noexcept
+{
+    return cp_->template_root_;
+}
+
+// ============================================================================
+// 自动模板构建的 on_measure 实现
+// ============================================================================
+
+void Control::on_measure(math::Size available_size)
+{
+    // 若模板槽位非空且模板根尚未构建，从 TemplateRegistry 查找并构建模板
+    if (!cp_->template_root_ && !template_slot_.empty()) {
+        const core::StringView slot{ template_slot_.data(), template_slot_.size() };
+        const style::ControlTemplate* tmpl =
+            style::TemplateRegistry::instance().find(slot);
+        if (tmpl && tmpl->build_fn_) {
+            // build_fn_ 内部会调用 set_template_root 将根元素加入视觉子树
+            tmpl->build_fn_(*this);
+        }
+    }
+    // 若模板根已构建，测量模板根并采用其期望尺寸
+    if (cp_->template_root_) {
+        cp_->template_root_->measure(available_size);
+        set_desired_size(cp_->template_root_->desired_size());
+        return;
+    }
+    // 无模板：默认零尺寸
+    UIElement::on_measure(available_size);
 }
 
 }  // namespace mine::ui

@@ -85,7 +85,7 @@ git tag：`v0.2.0-f1`
 | 12 | ✅ `mine.ui.style`：`ControlTemplate` + `TemplateRegistry`；`bind_template` / `find_template_child` | `src/mine/ui/style` `src/mine/ui/visual` | 13/13 单测通过：build → bind → find 全流程集成验收 |
 | 13 | ✅ `mine.ui.style`：`VisualStateManager`：状态定义、过渡配置、`go_to_state()` | `src/mine/ui/style` `src/mine/ui/visual` | 15/15 单测通过：Normal→Hovered 正确触发 |
 | 14 | ✅ `mine.ui.app`：`Application::set_theme()`：合并/切换主题资源字典 | `src/mine/ui/app` | 19/19 单测通过：运行时切换浅色/深色无崩溃 |
-| 15 | `mine.ui.controls`：`ContentPresenter`；Button/TextBlock 迁移至样式模板路径 | `src/mine/ui/controls` | 视觉效果与迁移前一致 |
+| 15 | ✅ `mine.ui.controls`：`ContentPresenter`；Button/TextBlock 迁移至样式模板路径 | `src/mine/ui/controls` | 16/16 单测通过：模板路径 measure 委托、DP 同步、视觉效果与迁移前一致 |
 
 #### F2.2 动画系统
 

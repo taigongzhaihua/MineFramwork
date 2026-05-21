@@ -5,7 +5,31 @@
 ## [Unreleased]
 
 ### Added
-- **mine.ui.app（主题系统）**：实现 F2.1 任务 #14 的应用级主题切换 API：
+- **mine.ui.controls（ContentPresenter）**：实现 F2.1 任务 #15 的模板内容占位控件：
+  - 新增 `ContentPresenter` 类（继承 `Control`），作为 `ControlTemplate` 视觉树中的内容占位元素
+  - `ContentProperty`：`DependencyProperty`，接受 `InlineString`（文字模式）或 `UIElement*`（未来元素模式）；`on_measure` 按内容类型动态计算期望尺寸
+  - `PaddingProperty`：`DependencyProperty`，类型 `math::Thickness`，计入内容区域 measure 结果
+  - M1.1 阶段：文字内容以水平占位线渲染（`fill_rect`），元素模式渲染委托给视觉子树
+  - 新增至 `ControlsAll.h` 伞形头文件
+
+- **mine.ui.controls（Button → 模板路径）**：`Button` 迁移至样式模板渲染路径：
+  - 注册 `ContentProperty`（默认空 Variant）和 `PaddingProperty`（默认 `Thickness::symmetric(12, 8)`）为 `DependencyProperty`
+  - 注册 C++ 默认 `ControlTemplate`（`TemplateRegistry`，键 `"DefaultButtonTemplate"`），内部创建 `ContentPresenter` 并绑定 `Content`/`Padding` 属性
+  - 修改 `on_measure`：有模板根时委托给 `Control::on_measure`（模板路径），无模板根时回退旧路径
+  - 修改 `on_render`：背景/边框始终绘制，有模板根时不再手动绘制文字占位线
+
+- **mine.ui.controls（TextBlock → DependencyProperty）**：`TextBlock` 关键属性迁移至 DP 系统：
+  - 新增 `TextProperty`/`FontSizeProperty`/`ForegroundProperty`/`BackgroundProperty`/`PaddingProperty` 为 `DependencyProperty`
+  - 各 setter 同步更新 DP 值；`changed` 回调同步成员缓存；`on_measure`/`on_render` 仍使用成员缓存（TextBlock 不使用模板路径）
+
+- **mine.ui.visual（Control 模板所有权）**：`Control` 基类强化模板根管理能力：
+  - 新增 `set_template_root(OwnedPtr<UIElement>)` 重载：将模板根元素的生命周期纳入控件管理，模板重建时自动释放旧根
+  - 新增模板辅助 inline 重载 `set_template_root<TElement>(OwnedPtr<TElement>)`：通过 `get_deleter()` + `release()` 类型擦除后委托基类重载，支持 `OwnedPtr<ContentPresenter>` 等子类型直接传入
+  - `on_measure` 首次测量时自动从 `TemplateRegistry` 按 `template_slot_` 查找并构建模板，之后委托给模板根的 `measure()`
+
+- **测试**：新增 8 个 doctest 测试用例（controls 模块），16/16 全部通过，覆盖 ContentPresenter 空/文字内容尺寸与渲染、Padding 影响、Button 模板路径 measure 委托、TextBlock DP 同步
+
+
   - `register_theme(name, ResourceDictionary&&)`：注册命名主题资源字典（堆分配，地址稳定，支持 global_resources_ 弱引用合并）；同名重复注册时覆盖旧字典，若为当前激活主题则重新广播 `resource_changed("*")`
   - `set_theme(name) -> bool`：切换当前激活主题；未注册名称静默返回 false，不改变任何状态；成功则依次：`clear_merged()` → `merge(*theme.dict)` → 更新 `current_theme_name_` → `notify_resource_changed("*")`
   - `current_theme() -> StringView`：返回当前主题名（未设置时为空串）

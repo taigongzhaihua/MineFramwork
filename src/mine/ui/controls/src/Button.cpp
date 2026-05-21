@@ -4,14 +4,115 @@
  */
 
 #include <mine/ui/controls/Button.h>
+#include <mine/ui/controls/ContentPresenter.h>
 
 #include <mine/paint/Canvas.h>
 #include <mine/paint/Brush.h>
 #include <mine/ui/event/EventManager.h>
 #include <mine/ui/input/InputEvents.h>
 #include <mine/ui/input/MouseEventArgs.h>
+#include <mine/ui/property/DependencyProperty.h>
+#include <mine/ui/property/PropertyMetadata.h>
+#include <mine/ui/style/TemplateRegistry.h>
+#include <mine/core/Memory.h>
 
 namespace mine::ui {
+
+// ============================================================================
+// 依赖属性注册
+// ============================================================================
+
+// Button::ContentProperty — 按钮文字内容（InlineString）
+const DependencyProperty& Button::ContentProperty =
+    register_property<Button>(
+        "Content",
+        core::Variant{},
+        PropertyMetadata{
+            .affects_measure = true,
+            .affects_render  = true,
+            .changed         = &Button::on_content_changed,
+        });
+
+// Button::PaddingProperty — 内边距（Thickness，默认水平 12px 垂直 8px）
+const DependencyProperty& Button::PaddingProperty =
+    register_property<Button>(
+        "Padding",
+        core::Variant{ math::Thickness::symmetric(12.0f, 8.0f) },
+        PropertyMetadata{
+            .affects_measure = true,
+            .affects_render  = true,
+            .changed         = &Button::on_padding_changed,
+        });
+
+// ============================================================================
+// 默认 ControlTemplate 构建函数
+// ============================================================================
+
+/**
+ * @brief 默认按钮模板构建函数（无捕获，可作为函数指针传入 register_template）。
+ *
+ * 创建 ContentPresenter 作为模板根，并与 Button 的 Content/Padding 属性建立绑定。
+ */
+static void s_build_default_button_template(DependencyObject& target)
+{
+    auto& button    = static_cast<Button&>(target);
+    auto  presenter = core::make_owned<ContentPresenter>();
+    presenter->set_template_name("content");
+
+    // 建立 TemplateBind：宿主属性 → 模板子元素属性
+    button.bind_template(*presenter,
+                         ContentPresenter::ContentProperty,
+                         Button::ContentProperty);
+    button.bind_template(*presenter,
+                         ContentPresenter::PaddingProperty,
+                         Button::PaddingProperty);
+
+    // 将模板根加入视觉子树，并转移所有权给 Control（避免内存泄漏）
+    button.set_template_root(std::move(presenter));
+}
+
+/**
+ * @brief 注册 "DefaultButtonTemplate"（程序启动时静态初始化，保证仅注册一次）。
+ */
+static const style::ControlTemplate& s_default_button_template =
+    style::TemplateRegistry::instance().register_template(
+        "DefaultButtonTemplate",
+        core::TypeId::of<Button>(),
+        &s_build_default_button_template);
+
+// ============================================================================
+// 依赖属性变更回调
+// ============================================================================
+
+void Button::on_content_changed(DependencyObject*         sender,
+                                const DependencyProperty& /*prop*/,
+                                const core::Variant&      /*old_v*/,
+                                const core::Variant&      new_v) noexcept
+{
+    auto* self = static_cast<Button*>(sender);
+    // 同步文字成员缓存
+    if (new_v.has<containers::InlineString>()) {
+        self->text_ = new_v.get<containers::InlineString>();
+    } else {
+        self->text_ = containers::InlineString{};
+    }
+}
+
+void Button::on_padding_changed(DependencyObject*         sender,
+                                const DependencyProperty& /*prop*/,
+                                const core::Variant&      /*old_v*/,
+                                const core::Variant&      new_v) noexcept
+{
+    auto* self = static_cast<Button*>(sender);
+    // 同步内边距成员缓存
+    if (new_v.has<math::Thickness>()) {
+        self->padding_ = new_v.get<math::Thickness>();
+    }
+}
+
+// ============================================================================
+// 路由事件注册
+// ============================================================================
 
 const RoutedEvent& Button::ClickEvent()
 {
@@ -38,6 +139,8 @@ core::StringView Button::text() const noexcept
 void Button::set_text(core::StringView text)
 {
     text_ = text;
+    // 同步 DependencyProperty，使 bind_template 传播到模板树中的 ContentPresenter
+    set_value(ContentProperty, core::Variant{ text_ });
     invalidate_measure();
     invalidate_render();
 }
@@ -65,6 +168,8 @@ math::Thickness Button::padding() const noexcept
 void Button::set_padding(math::Thickness padding)
 {
     padding_ = padding;
+    // 同步 DependencyProperty，使 bind_template 传播到模板树中的 ContentPresenter
+    set_value(PaddingProperty, core::Variant{ padding_ });
     invalidate_measure();
     invalidate_render();
 }
@@ -124,8 +229,17 @@ void Button::set_border_color(math::Color color)
     invalidate_render();
 }
 
-void Button::on_measure(math::Size /*available_size*/)
+void Button::on_measure(math::Size available_size)
 {
+    // 通过 Control::on_measure 自动构建模板（首次调用）并委托给模板根
+    Control::on_measure(available_size);
+
+    // 模板已构建，Control::on_measure 已采用模板根的期望尺寸，直接返回
+    if (template_root()) {
+        return;
+    }
+
+    // 无模板时的回退路径：按字符数估算宽度
     const float text_w = static_cast<float>(text_.size()) * 14.0f * 0.55f;
     const float text_h = 14.0f * 1.4f;
     set_desired_size({
@@ -150,10 +264,16 @@ void Button::on_render(paint::Canvas& canvas)
         fill = background_hover_;
     }
 
+    // 背景和边框无论是否有模板根都需要绘制（这是 Button 自身的视觉样式）
     canvas.fill_rect(rect, paint::Brush::solid(fill));
     canvas.stroke_bordered_rect(rect, paint::Brush::solid(border_color_), math::Thickness::uniform(1.0f));
 
-    // M1.1 阶段没有默认字体对象时，用居中横条表示文字区域。
+    // 有模板根时，文字由 ContentPresenter 渲染，Button 自身不再绘制文字占位线
+    if (template_root()) {
+        return;
+    }
+
+    // 无模板时的回退路径：用居中横条表示文字区域
     const float line_w = rect.width - padding_.horizontal();
     const float line_y = rect.y + rect.height * 0.5f - 1.0f;
     if (line_w > 0.0f) {
