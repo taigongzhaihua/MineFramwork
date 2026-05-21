@@ -5,6 +5,29 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.style（ControlTemplate + TemplateRegistry）**：实现 F2.1 任务 #12 的控件模板系统：
+  - 新增 `ControlTemplate` 类：封装控件视觉树构建函数（`BuildFn = void(*)(DependencyObject&)`）和元数据（名称、目标类型）
+    - `build(DependencyObject& target)`：调用 `build_fn_`，若为 nullptr 则安全跳过
+    - `set_name()` / `set_target_type()`：构建器接口，返回 `*this` 支持链式调用
+    - `build_fn_` 公开成员：在 build_fn_ 内部通过 `static_cast<Control&>(target)` 还原控件类型（避免 mine.ui.style 对 mine.ui.visual 循环依赖）
+  - 新增 `TemplateRegistry` 类（全局单例 Pimpl 模式）：模板注册与查找中心
+    - `instance()`：函数内静态单例，线程安全（C++11 保证）
+    - `register_template(name, target_type, build_fn)`：注册模板，返回堆上对象的常量引用（引用永久稳定，`Vector<OwnedPtr<ControlTemplate>>` 扩容不影响地址）
+    - `find(name)`：按名称查找（从后往前，返回最后注册的同名模板）
+    - `find_default(type_id)`：按目标 TypeId 查找
+  - 扩展 `UIElement`：新增公开成员 `set_template_name(StringView)` / `template_name()`，用于在模板子树中标识特定元素（供 `Control::find_template_child` 搜索）
+  - 扩展 `Control`：新增控件模板运行时 API：
+    - `set_template_root(UIElement*)`：将模板根元素加入控件的视觉子树（先移除旧根），模板根生命周期由调用方管理
+    - `find_template_child(StringView)`：从模板根开始深度优先搜索，返回第一个匹配 `template_name` 的 UIElement；未找到返回 nullptr；支持任意深度嵌套
+    - `bind_template(child, child_prop, host_prop)`：建立单向 TemplateBinding：立即将宿主属性值以 `ValuePriority::TemplateBind(40)` 同步到子元素，并通过 `subscribe_property_changed` 订阅后续变更（仅订阅一次，所有绑定共享同一订阅 token）
+    - `Control::Impl`（私有 Pimpl）：存储模板根指针、绑定列表（`SmallVector<TemplateBinding, 8>`）、订阅 token
+    - `Control::~Control()`：自动取消属性变更订阅（在 `Impl` 析构前执行，防止悬空回调）
+  - 优先级保证：`TemplateBind(40)` 低于 `Local(50)`，模板绑定值不覆盖控件本地设置值
+  - 更新 `mine.ui.visual/xmake.lua`：追加 `mine.ui.style` 依赖
+  - 更新 `StyleAll.h`：新增 `ControlTemplate.h` / `TemplateRegistry.h` 伞形引入
+  - 修复 `InlineString.h`：新增 `#include <new>`，解决 MSVC C++17 对 dllexport 类的 `operator=(InlineString&&)` 触发 3 参数对齐 placement new 的编译错误
+  - 新增 13 个单元测试（doctest），53/53 全部通过，覆盖：ControlTemplate 构建器接口、build() 触发回调、nullptr build_fn_ 安全、TemplateRegistry 注册+find、find_default、未注册返回 nullptr、UIElement template_name 存取、set_template_root 加入子树、remove_child 清除根、find_template_child 匹配/不存在/嵌套深度、bind_template 立即同步、属性变更传播、**核心验收：build→bind→find 全流程集成测试**
+
 - **mine.ui.style（Style + StyleSetter）**：实现 F2.1 任务 #11 的 `Style` 与 `StyleSetter`：
   - 新增 `StyleSetter` 结构体：描述"将某依赖属性设置为指定值"的操作，支持静态值（`value` 字段）与 DynamicResource 键（`res_key` 字段）两种模式
   - 新增 `VisualStateSetters` 结构体：单个视觉状态下的 setter 集合（`state_name` + `SmallVector<StyleSetter, 8>`）

@@ -2,16 +2,103 @@
  * @file Control.cpp
  * @brief Control 控件基类实现。
  *
- * M1.1 阶段 Control 仅作为继承链节点，不添加额外逻辑。
- * 后续里程碑（mine.ui.style）将在此添加样式属性与控件模板支持。
+ * 任务 #12：ControlTemplate + TemplateRegistry 支持。
+ * 添加 set_template_root / find_template_child / bind_template 实现。
  */
 
 #include <mine/ui/visual/Control.h>
+#include <mine/ui/property/ValuePriority.h>
+#include <mine/containers/SmallVector.h>
 
 namespace mine::ui {
 
-Control::Control()  = default;
-Control::~Control() = default;
+// ============================================================================
+// Control::Impl 私有实现结构体
+// ============================================================================
+
+struct Control::Impl {
+    /// 模板根元素（非拥有指针，生命周期由调用方管理）
+    UIElement* template_root_{nullptr};
+
+    /// 模板属性绑定记录（宿主 host_prop → 子元素 child_prop 单向同步）
+    struct TemplateBinding {
+        DependencyObject*         child;       ///< 模板子元素
+        const DependencyProperty* child_prop;  ///< 子元素目标属性
+        const DependencyProperty* host_prop;   ///< 宿主控件源属性
+    };
+    containers::SmallVector<TemplateBinding, 8> bindings_;
+
+    /// 属性变更订阅 token（0 表示尚未订阅；首次 bind_template 时创建）
+    uint32_t binding_sub_token_{0};
+};
+
+// ============================================================================
+// 文件内部辅助函数
+// ============================================================================
+
+namespace {
+
+/// 在以 node 为根的子树中按 template_name 深度优先搜索
+UIElement* find_child_by_name(UIElement& node, core::StringView name)
+{
+    // 检查当前节点
+    if (node.template_name() == name) {
+        return &node;
+    }
+    // 递归检查所有子节点
+    const uint32_t count = node.child_count();
+    for (uint32_t i = 0; i < count; ++i) {
+        Visual* v = node.child_at(i);
+        UIElement* child = v->as_element();
+        if (child) {
+            UIElement* found = find_child_by_name(*child, name);
+            if (found) return found;
+        }
+    }
+    return nullptr;
+}
+
+}  // namespace
+
+/// 属性变更订阅静态回调：遍历绑定列表，同步匹配的子元素属性
+void Control::on_host_prop_changed(DependencyObject* /*sender*/,
+                                   const DependencyProperty& prop,
+                                   const core::Variant&      /*old_v*/,
+                                   const core::Variant&      new_v,
+                                   void*                     user_data) noexcept
+{
+    // user_data = Control::Impl*（堆分配，地址永久稳定）
+    auto* impl = static_cast<Control::Impl*>(user_data);
+    for (auto& binding : impl->bindings_) {
+        if (binding.host_prop == &prop) {
+            // 以 TemplateBind(40) 优先级写入，低于 Local(50)，不覆盖本地值
+            binding.child->set_value(*binding.child_prop,
+                                     new_v,
+                                     ValuePriority::TemplateBind);
+        }
+    }
+}
+
+// ============================================================================
+// 生命周期
+// ============================================================================
+
+Control::Control()
+    : cp_{ core::make_pimpl<Impl>() }
+{}
+
+Control::~Control()
+{
+    // 取消属性变更订阅，防止 Impl 析构后回调访问已释放内存
+    if (cp_ && cp_->binding_sub_token_ != 0) {
+        unsubscribe_property_changed(cp_->binding_sub_token_);
+        cp_->binding_sub_token_ = 0;
+    }
+}
+
+// ============================================================================
+// 样式槽位
+// ============================================================================
 
 void Control::set_style_slot(core::StringView slot)
 {
@@ -32,6 +119,10 @@ core::StringView Control::template_slot() const noexcept
 {
 	return core::StringView{ template_slot_.data(), template_slot_.size() };
 }
+
+// ============================================================================
+// 视觉状态
+// ============================================================================
 
 ControlVisualState Control::visual_state() const noexcept
 {
@@ -61,4 +152,53 @@ void Control::on_visual_state_changed(ControlVisualState /*old_state*/,
 	invalidate_render();
 }
 
-} // namespace mine::ui
+// ============================================================================
+// 控件模板
+// ============================================================================
+
+void Control::set_template_root(UIElement* root) noexcept
+{
+    // 先移除旧模板根（如有）
+    if (cp_->template_root_) {
+        remove_child(cp_->template_root_);
+    }
+    cp_->template_root_ = root;
+    // 将新模板根加入视觉子树
+    if (root) {
+        add_child(root);
+    }
+}
+
+UIElement* Control::find_template_child(core::StringView name) const noexcept
+{
+    if (!cp_->template_root_) {
+        return nullptr;
+    }
+    return find_child_by_name(*cp_->template_root_, name);
+}
+
+void Control::bind_template(DependencyObject&         child,
+                            const DependencyProperty& child_prop,
+                            const DependencyProperty& host_prop) noexcept
+{
+    // 1. 立即同步当前宿主属性值到子元素（首次同步）
+    child.set_value(child_prop,
+                    get_value(host_prop),
+                    ValuePriority::TemplateBind);
+
+    // 2. 记录绑定（后续变更通过订阅回调传播）
+    cp_->bindings_.push_back(Control::Impl::TemplateBinding{
+        &child, &child_prop, &host_prop
+    });
+
+    // 3. 首次 bind_template 时订阅宿主控件的属性变更（仅订阅一次）
+    if (cp_->binding_sub_token_ == 0) {
+        cp_->binding_sub_token_ = subscribe_property_changed(
+            &on_host_prop_changed,
+            cp_.get()  // user_data = Impl*（堆分配，地址永久稳定）
+        );
+    }
+}
+
+}  // namespace mine::ui
+

@@ -8,3 +8,5 @@
 #include <mine/ui/style/ResourceDictionary.h>
 #include <mine/ui/style/StyleSetter.h>
 #include <mine/ui/style/Style.h>
+#include <mine/ui/style/ControlTemplate.h>
+#include <mine/ui/style/TemplateRegistry.h>

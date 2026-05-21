@@ -19,6 +19,7 @@
 
 #include <mine/ui/visual/Api.h>
 #include <mine/ui/visual/UIElement.h>
+#include <mine/core/Pimpl.h>
 #include <mine/core/StringView.h>
 #include <mine/containers/InlineString.h>
 
@@ -92,6 +93,50 @@ public:
      */
     void update_visual_state();
 
+    // ── 控件模板（mine.ui.style 任务 #12）────────────────────────────────
+
+    /**
+     * @brief 设置模板根元素，将其加入控件的视觉子树。
+     *
+     * 若此前已有模板根元素，则先将旧根从子树中移除。
+     * 通常在 ControlTemplate::BuildFn 内部调用：
+     * @code
+     *   auto& ctrl = static_cast<Control&>(target);
+     *   ctrl.set_template_root(&border_element);
+     * @endcode
+     *
+     * @param root 模板根元素指针（nullptr 表示清除模板根）
+     */
+    void set_template_root(UIElement* root) noexcept;
+
+    /**
+     * @brief 在模板子树中查找具有指定 template_name 的 UIElement。
+     *
+     * 从模板根元素开始深度优先搜索，返回第一个匹配的元素。
+     * 若模板根为空或未找到匹配元素，返回 nullptr。
+     *
+     * @param name 目标元素的模板名称（与 UIElement::set_template_name 对应）
+     * @return     匹配的 UIElement 指针；未找到则返回 nullptr
+     */
+    [[nodiscard]] UIElement* find_template_child(core::StringView name) const noexcept;
+
+    /**
+     * @brief 将模板内子元素绑定到宿主控件属性（TemplateBinding）。
+     *
+     * 建立单向同步绑定：宿主控件的 host_prop 变更时，
+     * 自动以 ValuePriority::TemplateBind 写入子元素的 child_prop。
+     * 调用时立即完成首次同步（当前宿主属性值 → 子元素属性）。
+     *
+     * 所有绑定共享一个属性变更订阅（内部去重），不会重复订阅。
+     *
+     * @param child      模板子元素（须为 DependencyObject 实例）
+     * @param child_prop 子元素上的目标属性
+     * @param host_prop  宿主控件（this）上的源属性
+     */
+    void bind_template(DependencyObject&         child,
+                       const DependencyProperty& child_prop,
+                       const DependencyProperty& host_prop) noexcept;
+
 protected:
     /**
      * @brief 由子类计算当前视觉状态。
@@ -109,6 +154,16 @@ protected:
                                          ControlVisualState new_state);
 
 private:
+    struct Impl;
+    core::Pimpl<Impl> cp_;  ///< Control 私有实现（模板绑定数据）
+
+    /// 宿主属性变更时同步所有绑定的静态回调（raw function pointer，无捕获）
+    static void on_host_prop_changed(DependencyObject*,
+                                     const DependencyProperty&,
+                                     const core::Variant&,
+                                     const core::Variant&,
+                                     void* user_data) noexcept;
+
     containers::InlineString style_slot_;
     containers::InlineString template_slot_;
     ControlVisualState       visual_state_ = ControlVisualState::Normal;

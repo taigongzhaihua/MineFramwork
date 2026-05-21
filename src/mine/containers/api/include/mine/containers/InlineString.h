@@ -23,6 +23,7 @@
 
 #include <cstddef>
 #include <cstring>
+#include <new>        // 对齐 placement new（用于 operator=(InlineString&&)）
 #include <type_traits>
 #include <mine/core/Assert.h>
 #include <mine/core/Allocator.h>

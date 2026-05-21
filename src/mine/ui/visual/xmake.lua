@@ -7,5 +7,6 @@ mine_module("mine.ui.visual", {
         "mine.paint",
         "mine.ui.property",
         "mine.ui.event",
+        "mine.ui.style",  -- Control 依赖 ControlTemplate / TemplateRegistry（任务 #12）
     }
 })
