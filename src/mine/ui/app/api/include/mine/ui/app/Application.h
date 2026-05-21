@@ -39,13 +39,15 @@
 
 #include <mine/ui/app/Api.h>
 #include <mine/core/Pimpl.h>
+#include <mine/core/StringView.h>
 
 // 前向声明，避免将大型头文件拉入公共接口
-namespace mine::platform { class IApplicationHost; struct WindowDesc; }
-namespace mine::gfx       { class IDevice; }
+namespace mine::platform   { class IApplicationHost; struct WindowDesc; }
+namespace mine::gfx        { class IDevice; }
 namespace mine::paint      { class IRenderer; }
 namespace mine::ui         { class Window; }
 namespace mine::core       { template<typename T> class OwnedPtr; }
+namespace mine::ui::style  { class ResourceDictionary; }
 
 namespace mine::ui::app {
 
@@ -119,6 +121,55 @@ public:
      * @pre run() 已开始执行
      */
     void set_main_window(ui::Window* window);
+
+    // ── 主题 / 资源系统 ───────────────────────────────────────────────────────
+
+    /**
+     * @brief 注册命名主题资源字典。
+     *
+     * 将 theme_dict 移入内部堆存储（地址稳定，支持全局字典弱引用合并）。
+     * 若同名主题已存在，以新字典覆盖旧内容，并在该主题当前激活时重新广播
+     * global_resources 的 resource_changed("*") 通知。
+     *
+     * @param name       主题名（如 "Light"、"Dark"）
+     * @param theme_dict 主题资源字典（移入，调用后原对象处于合法但未指定状态）
+     */
+    void register_theme(core::StringView name, style::ResourceDictionary&& theme_dict);
+
+    /**
+     * @brief 切换当前激活主题。
+     *
+     * 若 name 对应的主题已注册，则依次执行：
+     *   1. 清除全局字典的合并层（clear_merged）
+     *   2. 合并新主题字典（merge 弱引用）
+     *   3. 更新 current_theme 记录
+     *   4. 广播 global_resources().notify_resource_changed("*")
+     * 若 name 未注册则静默返回 false，不修改任何状态。
+     *
+     * @param name 主题名（与 register_theme() 中注册的名称相同）
+     * @return 切换成功返回 true；主题不存在返回 false
+     */
+    bool set_theme(core::StringView name) noexcept;
+
+    /**
+     * @brief 获取当前激活的主题名。
+     *
+     * @return 当前主题名（StringView 指向内部稳定存储）；
+     *         未调用 set_theme() 前返回空串。
+     */
+    [[nodiscard]] core::StringView current_theme() const noexcept;
+
+    /**
+     * @brief 获取应用级全局资源字典（根字典）。
+     *
+     * 所有窗口与控件的资源字典可通过 set_parent() 向上连接到此字典，
+     * 形成树形查找链（Application → Window → Page → Control）。
+     * 主题切换后，此字典的 notify_resource_changed("*") 将沿树向下传播。
+     *
+     * @return 对全局资源字典的引用（生命周期与 Application 相同）
+     */
+    [[nodiscard]] style::ResourceDictionary& global_resources() noexcept;
+    [[nodiscard]] const style::ResourceDictionary& global_resources() const noexcept;
 
     // ── 基础设施访问 ─────────────────────────────────────────────────────────
 

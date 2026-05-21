@@ -590,3 +590,181 @@ TEST_SUITE("mine.ui.app — Application") {
     }
 
 } // TEST_SUITE
+
+// ============================================================================
+// 主题系统测试
+// 不依赖 run()，直接在 Application 对象上验证主题 API。
+// ============================================================================
+
+#include <mine/ui/style/ResourceDictionary.h>
+
+using namespace mine::ui::style;
+
+TEST_SUITE("mine.ui.app — 主题系统") {
+
+    // ── 初始状态 ──────────────────────────────────────────────────────────────
+
+    TEST_CASE("current_theme 初始为空串") {
+        Application app;
+        CHECK(app.current_theme().size() == 0);
+    }
+
+    TEST_CASE("set_theme 对未注册主题返回 false") {
+        Application app;
+        CHECK_FALSE(app.set_theme("NonExistent"));
+    }
+
+    TEST_CASE("set_theme 对未注册主题不改变 current_theme") {
+        Application app;
+        CHECK_FALSE(app.set_theme("Light"));
+        CHECK(app.current_theme().size() == 0);
+    }
+
+    // ── 注册与切换 ────────────────────────────────────────────────────────────
+
+    TEST_CASE("register_theme 后 set_theme 返回 true") {
+        Application app;
+        ResourceDictionary dict;
+        app.register_theme("Light", std::move(dict));
+        CHECK(app.set_theme("Light"));
+    }
+
+    TEST_CASE("set_theme 后 current_theme 返回正确名称") {
+        Application app;
+        ResourceDictionary light;
+        ResourceDictionary dark;
+        app.register_theme("Light", std::move(light));
+        app.register_theme("Dark",  std::move(dark));
+
+        app.set_theme("Light");
+        CHECK(app.current_theme() == "Light");
+
+        app.set_theme("Dark");
+        CHECK(app.current_theme() == "Dark");
+    }
+
+    TEST_CASE("多次注册不同主题均可切换") {
+        Application app;
+        for (const char* name : {"Light", "Dark", "HighContrast"}) {
+            ResourceDictionary d;
+            app.register_theme(name, std::move(d));
+        }
+        CHECK(app.set_theme("Light"));
+        CHECK(app.set_theme("Dark"));
+        CHECK(app.set_theme("HighContrast"));
+        CHECK(app.current_theme() == "HighContrast");
+    }
+
+    // ── global_resources 资源查找 ─────────────────────────────────────────────
+
+    TEST_CASE("切换主题后 global_resources 可查找主题资源键") {
+        Application app;
+
+        ResourceDictionary light;
+        light.set("PanelBg", core::Variant{100});  // 浅色背景值
+        ResourceDictionary dark;
+        dark.set("PanelBg", core::Variant{200});   // 深色背景值
+
+        app.register_theme("Light", std::move(light));
+        app.register_theme("Dark",  std::move(dark));
+
+        app.set_theme("Light");
+        auto v = app.global_resources().find("PanelBg");
+        CHECK(v.has_value());
+
+        app.set_theme("Dark");
+        v = app.global_resources().find("PanelBg");
+        CHECK(v.has_value());
+    }
+
+    TEST_CASE("未切换主题时 global_resources 查找主题键返回空") {
+        Application app;
+        ResourceDictionary light;
+        light.set("AccentColor", core::Variant{0xFF1976D2u});
+        app.register_theme("Light", std::move(light));
+        // 未调用 set_theme — 主题尚未合并到 global_resources
+
+        auto v = app.global_resources().find("AccentColor");
+        CHECK_FALSE(v.has_value());
+    }
+
+    // ── 验收测试：运行时切换浅色/深色无崩溃 ──────────────────────────────────
+
+    TEST_CASE("运行时 Light→Dark→Light 多次切换无崩溃（验收测试）") {
+        Application app;
+
+        ResourceDictionary light;
+        light.set("PanelBg",   core::Variant{0xFFFFFFu});
+        light.set("TextColor", core::Variant{0x212121u});
+
+        ResourceDictionary dark;
+        dark.set("PanelBg",   core::Variant{0x1E1E1Eu});
+        dark.set("TextColor", core::Variant{0xFFFFFFu});
+
+        app.register_theme("Light", std::move(light));
+        app.register_theme("Dark",  std::move(dark));
+
+        // 反复切换 10 次，验证无崩溃且状态正确
+        for (int i = 0; i < 10; ++i) {
+            CHECK(app.set_theme("Light"));
+            CHECK(app.current_theme() == "Light");
+            CHECK(app.set_theme("Dark"));
+            CHECK(app.current_theme() == "Dark");
+        }
+    }
+
+    // ── resource_changed 回调 ─────────────────────────────────────────────────
+
+    TEST_CASE("set_theme 触发 resource_changed 回调，key 为 *") {
+        Application app;
+        ResourceDictionary dict;
+        app.register_theme("Light", std::move(dict));
+
+        int              call_count = 0;
+        core::StringView last_key;
+
+        // 订阅全局资源字典的 resource_changed 广播
+        auto h = app.global_resources().on_resource_changed(
+            [&call_count, &last_key](core::StringView key) {
+                ++call_count;
+                last_key = key;
+            });
+
+        app.set_theme("Light");
+        app.global_resources().off_resource_changed(h);
+
+        CHECK(call_count >= 1);
+        CHECK(last_key == "*");
+    }
+
+    // ── 覆盖同名主题 ─────────────────────────────────────────────────────────
+
+    TEST_CASE("register_theme 覆盖同名主题后资源更新不崩溃") {
+        Application app;
+
+        ResourceDictionary d1;
+        d1.set("color", core::Variant{1});
+        app.register_theme("Light", std::move(d1));
+        app.set_theme("Light");
+
+        // 用新字典覆盖 Light 主题
+        ResourceDictionary d2;
+        d2.set("color", core::Variant{2});
+        app.register_theme("Light", std::move(d2));  // 不崩溃
+
+        // 覆盖后 global_resources 仍可查找（内容已更新）
+        auto v = app.global_resources().find("color");
+        CHECK(v.has_value());
+    }
+
+    TEST_CASE("set_theme 未注册名称不改变已激活主题") {
+        Application app;
+        ResourceDictionary d;
+        app.register_theme("Light", std::move(d));
+        app.set_theme("Light");
+
+        CHECK_FALSE(app.set_theme("NonExistent"));
+        CHECK(app.current_theme() == "Light");  // 保持不变
+    }
+
+} // TEST_SUITE

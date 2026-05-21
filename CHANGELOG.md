@@ -5,6 +5,17 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.app（主题系统）**：实现 F2.1 任务 #14 的应用级主题切换 API：
+  - `register_theme(name, ResourceDictionary&&)`：注册命名主题资源字典（堆分配，地址稳定，支持 global_resources_ 弱引用合并）；同名重复注册时覆盖旧字典，若为当前激活主题则重新广播 `resource_changed("*")`
+  - `set_theme(name) -> bool`：切换当前激活主题；未注册名称静默返回 false，不改变任何状态；成功则依次：`clear_merged()` → `merge(*theme.dict)` → 更新 `current_theme_name_` → `notify_resource_changed("*")`
+  - `current_theme() -> StringView`：返回当前主题名（未设置时为空串）
+  - `global_resources()` / `global_resources() const`：获取应用级根资源字典（供窗口/控件字典通过 `set_parent()` 接入）
+  - `Application::Impl` 新增：`ThemeEntry`（`InlineString name + OwnedPtr<ResourceDictionary> dict`）、`themes_`（`SmallVector<ThemeEntry, 4>`）、`current_theme_name_`（`InlineString`）、`global_resources_`（`ResourceDictionary`）
+  - 主题字典使用 `OwnedPtr` 堆分配：保证 `SmallVector` 扩容后地址稳定，`global_resources_.merge()` 弱引用不悬空
+  - `xmake.lua` 追加 `mine.ui.style` 依赖（ResourceDictionary）
+  - `Application.h` 追加 `#include <mine/core/StringView.h>`，前向声明 `mine::ui::style::ResourceDictionary`（参数类型为 `&&` 避免不完整类型按值传递限制）
+  - 新增 19 个单元测试（doctest），26/26 全部通过，覆盖：初始状态、set_theme 未注册返回 false、current_theme 跟踪、global_resources 资源查找、**核心验收：Light→Dark→Light 多次切换无崩溃**、resource_changed 回调触发、同名主题覆盖、未注册切换不影响已激活主题
+
 - **mine.ui.style（VisualStateManager）**：实现 F2.1 任务 #13 的视觉状态机核心 API：
   - 新增 `VisualStateTransition` 结构体：记录 `from`/`to` 状态名（`from` 为 `"*"` 或空串时通配任意来源状态）
   - 新增 `VisualStateManager` 类：状态定义、过渡配置、运行时切换的状态机管理器

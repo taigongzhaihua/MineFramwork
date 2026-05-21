@@ -30,6 +30,9 @@
 // UI 窗口
 #include <mine/ui/window/Window.h>
 
+// 样式系统（主题资源字典）
+#include <mine/ui/style/ResourceDictionary.h>
+
 // Core
 #include <mine/core/Memory.h>
 #include <mine/core/Assert.h>
@@ -37,6 +40,7 @@
 
 // 容器
 #include <mine/containers/SmallVector.h>
+#include <mine/containers/InlineString.h>
 
 namespace mine::ui::app {
 
@@ -119,6 +123,34 @@ struct Application::Impl {
 
     /// 主窗口关闭监听器（订阅主窗口的原生事件源）
     MainWindowCloseSink main_close_sink_;
+
+    // ── 主题 / 资源系统 ───────────────────────────────────────────────────────
+
+    /**
+     * @brief 堆分配的主题条目。
+     *
+     * dict 使用 OwnedPtr 堆分配，保证在 SmallVector 扩容重分配时地址稳定，
+     * 从而使 global_resources_.merge(*dict) 产生的弱引用始终有效。
+     */
+    struct ThemeEntry {
+        containers::InlineString                  name;   ///< 主题名（如 "Light"）
+        core::OwnedPtr<style::ResourceDictionary> dict;   ///< 主题资源字典（堆分配）
+
+        ThemeEntry() = default;
+        ThemeEntry(const ThemeEntry&)            = delete;
+        ThemeEntry& operator=(const ThemeEntry&) = delete;
+        ThemeEntry(ThemeEntry&&) noexcept        = default;
+        ThemeEntry& operator=(ThemeEntry&&) noexcept = default;
+    };
+
+    /// 已注册的主题列表（dict 堆分配，地址稳定）
+    containers::SmallVector<ThemeEntry, 4> themes_;
+
+    /// 当前激活的主题名（空串表示未激活）
+    containers::InlineString               current_theme_name_;
+
+    /// 应用级全局资源字典（根字典）
+    style::ResourceDictionary              global_resources_;
 };
 
 // ============================================================================
@@ -265,6 +297,80 @@ core::OwnedPtr<gfx::IDevice> Application::on_create_device()
 core::OwnedPtr<paint::IRenderer> Application::on_create_renderer(gfx::IDevice* device)
 {
     return paint::create_renderer(device);
+}
+
+// ── 主题 / 资源系统 ───────────────────────────────────────────────────────────
+
+void Application::register_theme(core::StringView               name,
+                                  style::ResourceDictionary&&    theme_dict)
+{
+    // 构造主题名的 StringView，用于比较
+    const core::StringView name_view{name.data(), name.size()};
+
+    // 检查是否已存在同名主题，存在则覆盖
+    for (auto& entry : p_->themes_) {
+        if (entry.name == name_view) {
+            // 将新内容移入已有的堆对象（地址不变，global_resources_ 的弱引用持续有效）
+            *entry.dict = std::move(theme_dict);
+
+            // 若该主题当前正在激活，重新广播全量更新通知
+            const core::StringView cur_name{p_->current_theme_name_.data(),
+                                            p_->current_theme_name_.size()};
+            if (entry.name == cur_name) {
+                p_->global_resources_.notify_resource_changed("*");
+            }
+            return;
+        }
+    }
+
+    // 新主题：堆分配以保证地址稳定
+    Impl::ThemeEntry entry;
+    entry.name = containers::InlineString{name.data(), name.size()};
+    entry.dict = core::make_owned<style::ResourceDictionary>(std::move(theme_dict));
+    p_->themes_.push_back(std::move(entry));
+}
+
+bool Application::set_theme(core::StringView name) noexcept
+{
+    const core::StringView name_view{name.data(), name.size()};
+
+    // 查找已注册主题
+    for (const auto& entry : p_->themes_) {
+        if (entry.name == name_view) {
+            // 1. 清除全局字典的旧合并层
+            p_->global_resources_.clear_merged();
+
+            // 2. 合并新主题字典（弱引用，entry.dict 堆分配地址稳定）
+            p_->global_resources_.merge(*entry.dict);
+
+            // 3. 记录当前主题名
+            p_->current_theme_name_ = containers::InlineString{name.data(), name.size()};
+
+            // 4. 广播全量资源更新（DynamicResource 订阅者均会收到 key="*" 通知）
+            p_->global_resources_.notify_resource_changed("*");
+
+            return true;
+        }
+    }
+
+    // 主题不存在，静默忽略
+    return false;
+}
+
+core::StringView Application::current_theme() const noexcept
+{
+    return core::StringView{p_->current_theme_name_.data(),
+                            p_->current_theme_name_.size()};
+}
+
+style::ResourceDictionary& Application::global_resources() noexcept
+{
+    return p_->global_resources_;
+}
+
+const style::ResourceDictionary& Application::global_resources() const noexcept
+{
+    return p_->global_resources_;
 }
 
 } // namespace mine::ui::app

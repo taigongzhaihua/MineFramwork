@@ -5,6 +5,7 @@
 --       mine.gfx.rhi（IDevice / IQueue / Backend）
 --       mine.paint（IRenderer）
 --       mine.ui.window（Window — UI 窗口包装）
+--       mine.ui.style（ResourceDictionary — 主题资源字典，Task #14）
 
 mine_module("mine.ui.app", {
     short_name = "ui.app",
@@ -15,5 +16,6 @@ mine_module("mine.ui.app", {
         "mine.gfx.rhi",
         "mine.paint",
         "mine.ui.window",
+        "mine.ui.style",   -- 主题资源字典（Application::set_theme / global_resources）
     },
 })
