@@ -10,3 +10,4 @@
 #include <mine/ui/style/Style.h>
 #include <mine/ui/style/ControlTemplate.h>
 #include <mine/ui/style/TemplateRegistry.h>
+#include <mine/ui/style/VisualStateManager.h>

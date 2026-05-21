@@ -5,6 +5,25 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.style（VisualStateManager）**：实现 F2.1 任务 #13 的视觉状态机核心 API：
+  - 新增 `VisualStateTransition` 结构体：记录 `from`/`to` 状态名（`from` 为 `"*"` 或空串时通配任意来源状态）
+  - 新增 `VisualStateManager` 类：状态定义、过渡配置、运行时切换的状态机管理器
+    - `define_state(StringView name)`：注册合法状态名，重复注册安全幂等
+    - `add_transition(from, to)`：注册过渡规则（from 可为 `"*"` 表示任意来源）
+    - `go_to_state(state_name, use_transitions=true)`：切换当前状态；状态未注册 / 已是当前状态返回 false；切换成功后自动调用 `style->apply_state(owner, state_name)`（StyleTrigger 优先级 30）
+    - `current_state()`：返回当前状态名（`StringView`），初始为空串
+    - `has_state(name)` / `has_transition(from, to)`：查询接口
+    - `set_style(style*)` / `attached_style()`：关联 Style 对象，供 go_to_state 回调
+    - 所有者存为指针（`DependencyObject*`）以支持移动语义
+    - `use_transitions` 参数保留但 M2 阶段暂忽略（Task #17 补充 Storyboard 动画）
+  - 扩展 `mine.ui.visual::Control`：
+    - `set_visual_state_manager(VisualStateManager vsm)`：安装状态机实例（`OwnedPtr<VisualStateManager>`）
+    - `vsm()` / `vsm() const`：获取已安装的 VSM 指针（未安装返回 nullptr）
+    - `compute_state_name() const noexcept`：枚举 `ControlVisualState` → 字符串名（Normal / Hovered / Pressed / Focused / Disabled）
+    - 更新 `update_visual_state()`：若 VSM 已安装则先调用 `vsm->go_to_state(compute_state_name())`，再执行原有枚举状态切换逻辑
+  - 更新 `StyleAll.h`：新增 `VisualStateManager.h` 伞形引入
+  - 新增 15 个单元测试（doctest），49/49 全部通过，覆盖：初始化与状态查询、**核心验收 Normal→Hovered 正确触发**、状态定义约束（重复/未注册）、过渡注册与查询（通配 *）、样式 setter 集成（apply_state 实际写属性值）、移动语义、多状态切换
+
 - **mine.ui.style（ControlTemplate + TemplateRegistry）**：实现 F2.1 任务 #12 的控件模板系统：
   - 新增 `ControlTemplate` 类：封装控件视觉树构建函数（`BuildFn = void(*)(DependencyObject&)`）和元数据（名称、目标类型）
     - `build(DependencyObject& target)`：调用 `build_fn_`，若为 nullptr 则安全跳过

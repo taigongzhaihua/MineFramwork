@@ -9,6 +9,8 @@
 #include <mine/ui/visual/Control.h>
 #include <mine/ui/property/ValuePriority.h>
 #include <mine/containers/SmallVector.h>
+#include <mine/ui/style/VisualStateManager.h>
+#include <mine/core/Memory.h>
 
 namespace mine::ui {
 
@@ -30,6 +32,9 @@ struct Control::Impl {
 
     /// 属性变更订阅 token（0 表示尚未订阅；首次 bind_template 时创建）
     uint32_t binding_sub_token_{0};
+
+    /// VisualStateManager 实例（堆分配，影视为可空 nullp——未安装时为 nullptr）
+    core::OwnedPtr<style::VisualStateManager> vsm_;
 };
 
 // ============================================================================
@@ -131,18 +136,38 @@ ControlVisualState Control::visual_state() const noexcept
 
 void Control::update_visual_state()
 {
-	const ControlVisualState next = compute_visual_state();
-	if (next == visual_state_) {
-		return;
-	}
-	const ControlVisualState old = visual_state_;
-	visual_state_ = next;
-	on_visual_state_changed(old, next);
+    const ControlVisualState next = compute_visual_state();
+
+    // VSM 路径：当 VSM 已安装时，通过状态名字符串驱动状态机
+    if (cp_->vsm_) {
+        const core::StringView state_name = compute_state_name();
+        cp_->vsm_->go_to_state(state_name);
+    }
+
+    if (next == visual_state_) {
+        return;
+    }
+    const ControlVisualState old = visual_state_;
+    visual_state_ = next;
+    on_visual_state_changed(old, next);
 }
 
 ControlVisualState Control::compute_visual_state() const
 {
 	return ControlVisualState::Normal;
+}
+
+core::StringView Control::compute_state_name() const noexcept
+{
+    // 默认实现：将 compute_visual_state() 返回的枚举映射为状态名字符串
+    switch (compute_visual_state()) {
+        case ControlVisualState::Normal:   return core::StringView{"Normal",   6};
+        case ControlVisualState::Hovered:  return core::StringView{"Hovered",  7};
+        case ControlVisualState::Pressed:  return core::StringView{"Pressed",  7};
+        case ControlVisualState::Focused:  return core::StringView{"Focused",  7};
+        case ControlVisualState::Disabled: return core::StringView{"Disabled", 8};
+        default:                           return core::StringView{"Normal",   6};
+    }
 }
 
 void Control::on_visual_state_changed(ControlVisualState /*old_state*/,
@@ -198,6 +223,26 @@ void Control::bind_template(DependencyObject&         child,
             cp_.get()  // user_data = Impl*（堆分配，地址永久稳定）
         );
     }
+}
+
+// ============================================================================
+// VisualStateManager
+// ============================================================================
+
+void Control::set_visual_state_manager(style::VisualStateManager vsm) noexcept
+{
+    // 将 VSM 移动到堆上，通过 OwnedPtr 管理生命周期
+    cp_->vsm_ = core::make_owned<style::VisualStateManager>(std::move(vsm));
+}
+
+style::VisualStateManager* Control::vsm() noexcept
+{
+    return cp_->vsm_.get();
+}
+
+const style::VisualStateManager* Control::vsm() const noexcept
+{
+    return cp_->vsm_.get();
 }
 
 }  // namespace mine::ui

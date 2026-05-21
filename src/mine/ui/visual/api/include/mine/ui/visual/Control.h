@@ -19,6 +19,7 @@
 
 #include <mine/ui/visual/Api.h>
 #include <mine/ui/visual/UIElement.h>
+#include <mine/ui/style/VisualStateManager.h>
 #include <mine/core/Pimpl.h>
 #include <mine/core/StringView.h>
 #include <mine/containers/InlineString.h>
@@ -137,13 +138,45 @@ public:
                        const DependencyProperty& child_prop,
                        const DependencyProperty& host_prop) noexcept;
 
+    // ── VisualStateManager（mine.ui.style 任务 #13）────────────────────────
+
+    /**
+     * @brief 安装视觉状态管理器（由 ControlTemplate::BuildFn 调用）。
+     *
+     * VSM 负责管理控件的视觉状态切换（Normal/Hovered/Pressed 等）。
+     * 安装后可通过 vsm() 获取并调用 go_to_state() 驱动状态机。
+     *
+     * @param vsm 已配置好状态和过渡的 VisualStateManager 实例（移动所有权）
+     */
+    void set_visual_state_manager(style::VisualStateManager vsm) noexcept;
+
+    /**
+     * @brief 返回已安装的 VisualStateManager 指针（未安装时返回 nullptr）。
+     */
+    [[nodiscard]] style::VisualStateManager* vsm() noexcept;
+
+    /**
+     * @brief 返回已安装的 VisualStateManager 指针（const 重载）。
+     */
+    [[nodiscard]] const style::VisualStateManager* vsm() const noexcept;
+
 protected:
     /**
-     * @brief 由子类计算当前视觉状态。
+     * @brief 由子类计算当前视觉状态（枚举）。
      *
-     * 默认返回 Normal，Button 等控件可覆盖。
+     * 默认返回 Normal；Button 等控件可覆盖以反映 Hovered/Pressed 等状态。
      */
     [[nodiscard]] virtual ControlVisualState compute_visual_state() const;
+
+    /**
+     * @brief 由子类计算当前视觉状态名字符串（供 VisualStateManager 使用）。
+     *
+     * 默认实现将 compute_visual_state() 返回的枚举映射为字符串：
+     *   Normal→"Normal", Hovered→"Hovered", Pressed→"Pressed",
+     *   Focused→"Focused", Disabled→"Disabled"。
+     * 子类可直接重写此函数以返回自定义状态名。
+     */
+    [[nodiscard]] virtual core::StringView compute_state_name() const noexcept;
 
     /**
      * @brief 视觉状态变更回调。
