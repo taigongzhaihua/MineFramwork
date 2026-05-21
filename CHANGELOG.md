@@ -5,6 +5,14 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.controls（基础控件）**：实现 M1.1 任务 #23 的最小可用基础控件模块：
+  - 新增 `TextBlock`：支持文本内容、字体大小、前景/背景色、内边距和基础测量；支持可选字体对象绘制（未设置字体时使用占位线保证可见输出）
+  - 新增 `Button`：支持文本、启用状态、按下态、基础外观绘制（背景/边框）与 `Click` 路由事件；接入 `MouseDown/MouseUp` 输入事件触发点击
+  - 新增 `Border`：支持单子元素容器、边框厚度/颜色、背景色，完成子元素测量与排列传递
+  - 新增 `mine.ui.controls` 模块伞形头 `ControlsAll.h`，并复用 `mine.ui.layout` 中的 `StackPanel/Grid`
+  - 在 `mine.ui.visual::Control` 预留样式/模板/视觉状态挂点：`style_slot`、`template_slot`、`update_visual_state()`，为后续 `mine.ui.style`（任务 #38）接入做接口准备
+  - 新增 8 个单元测试（doctest）并全部通过，覆盖 TextBlock 测量与渲染、Button 点击行为、Border 布局传递、伞形头可用性及样式模板槽位
+
 - **mine.ui.app（应用程序宿主与主循环管理）**：实现 Application 基类（M1.1 任务 #22）：
   - `Application`（Pimpl 模式）：整合平台宿主、图形基础设施和窗口生命周期的完整应用层容器
     - `run(argc, argv)`：按顺序初始化 `IApplicationHost` → `IDevice` → `IQueue(Graphics)` → `IRenderer`，调用 `on_startup`，进入 `IApplicationHost::run()` 主循环，返回后调用 `on_exit`，完成清理（取消主窗口订阅 → 销毁所有窗口）

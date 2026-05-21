@@ -17,6 +17,18 @@
 
 ---
 
+## 执行顺序调整（2026-05-21）
+
+在不破坏分层依赖（L0→L9）的前提下，执行策略调整为“先夯实基础能力，再接入上层系统”，以减少后期大规模重构风险。
+
+1. **M1 阶段优先完成基础控件可用性**：先完成 #23（`mine.ui.controls.basic`），确保布局、渲染、命中、输入链路稳定。
+2. **基础控件实现必须前置扩展挂点**：在 `Control/Button/TextBlock` 中预留样式值入口、视觉状态入口、模板根入口，禁止写死不可替换逻辑。
+3. **样式与主题按 #38-A → #38-B → #38-C 落地**：先资源字典和主题切换，再样式系统，最后控件模板与状态机渲染迁移。
+4. **MML `states` 与模板状态机联动交付**：#37 中 `states` 子能力与 #38-C / #39 联合验收，其余 `<=>`、事件订阅、`if/for` 可先行推进。
+5. **迁移要求“外部 API 稳定、内部实现替换”**：后续从手绘路径迁移到模板路径时，不得破坏既有控件公开接口与样例行为。
+
+---
+
 ## M0 — 框架骨架（最小闭环：手写 C++ 弹一个矩形窗口）
 
 ### M0.1 基础设施（L0）
@@ -89,7 +101,7 @@ git tag：`v0.1.0-m0`
 | 20 | ✅ `mine.ui.layout`：`Measure/Arrange` 协议、`StackPanel`、`Grid` | `src/mine/ui/layout` | 经典布局算法 |
 | 21 | ✅ `mine.ui.window`：`Window` 类、生命周期、与 PAL 桥接 | `src/mine/ui/window` | 多实例支持 |
 | 22 | ✅ `mine.ui.app`：`Application`、主循环、退出码 | `src/mine/ui/app` | `MINE_APPLICATION_MAIN` 宏 |
-| 23 | `mine.ui.controls.basic`：`TextBlock`、`Button`、`Border`、`StackPanel`、`Grid` | `src/mine/ui/controls` | 渲染 + 命中测试通过 |
+| 23 | ✅ `mine.ui.controls.basic`：`TextBlock`、`Button`、`Border`、`StackPanel`、`Grid` | `src/mine/ui/controls` | 渲染 + 命中测试通过；预留样式/模板/状态挂点 |
 
 ### M1.2 MML 编译器最小子集（L8 + L9）
 
@@ -128,6 +140,9 @@ git tag：`v0.2.0-m1`
 | 36 | `mine.logging`：文件/控制台 sink、级别过滤、对接 `mine.diag` | `src/mine/logging` |
 
 ### M2.2 MML 进阶 + 控件 + 样式 + 动画
+
+> 执行约束：先完成 #38-A（资源与主题）和 #38-B（样式系统）后，再推进 #38-C（模板与状态机）；
+> #37 的 `states` 子能力与 #38-C、#39 联动验收。
 
 | # | 任务 | 模块 |
 |---|------|------|
