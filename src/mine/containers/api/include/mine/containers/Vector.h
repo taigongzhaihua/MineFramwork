@@ -262,8 +262,8 @@ public:
         size_ = 0;
     }
 
-    /// 尾部追加元素（拷贝）
-    void push_back(const T& value) {
+    /// 尾部追加元素（拷贝），仅当 T 可拷贝构造时可用，避免 MSVC 即时模板实例化错误
+    void push_back(const T& value) requires std::is_copy_constructible_v<T> {
         ensure_capacity();
         ::new (data_ + size_) T(value);
         ++size_;

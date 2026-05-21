@@ -88,7 +88,7 @@ git tag：`v0.1.0-m0`
 | 19 | `mine.ui.visual`：`Visual` 基类、视觉树、变换、剪裁 | `src/mine/ui/visual` | 渲染管线接入 paint |
 | 20 | ✅ `mine.ui.layout`：`Measure/Arrange` 协议、`StackPanel`、`Grid` | `src/mine/ui/layout` | 经典布局算法 |
 | 21 | ✅ `mine.ui.window`：`Window` 类、生命周期、与 PAL 桥接 | `src/mine/ui/window` | 多实例支持 |
-| 22 | `mine.ui.app`：`Application`、主循环、退出码 | `src/mine/ui/app` | `MINE_APPLICATION_MAIN` 宏 |
+| 22 | ✅ `mine.ui.app`：`Application`、主循环、退出码 | `src/mine/ui/app` | `MINE_APPLICATION_MAIN` 宏 |
 | 23 | `mine.ui.controls.basic`：`TextBlock`、`Button`、`Border`、`StackPanel`、`Grid` | `src/mine/ui/controls` | 渲染 + 命中测试通过 |
 
 ### M1.2 MML 编译器最小子集（L8 + L9）

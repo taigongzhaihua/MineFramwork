@@ -299,7 +299,8 @@ public:
         size_ = 0;
     }
 
-    void push_back(const T& value) {
+    /// 仅当 T 可拷贝构造时才提供此重载，避免移动专属类型触发 MSVC 的即时模板实例化错误。
+    void push_back(const T& value) requires std::is_copy_constructible_v<T> {
         ensure_capacity();
         ::new (data_ + size_) T(value);
         ++size_;

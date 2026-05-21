@@ -5,6 +5,19 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.app（应用程序宿主与主循环管理）**：实现 Application 基类（M1.1 任务 #22）：
+  - `Application`（Pimpl 模式）：整合平台宿主、图形基础设施和窗口生命周期的完整应用层容器
+    - `run(argc, argv)`：按顺序初始化 `IApplicationHost` → `IDevice` → `IQueue(Graphics)` → `IRenderer`，调用 `on_startup`，进入 `IApplicationHost::run()` 主循环，返回后调用 `on_exit`，完成清理（取消主窗口订阅 → 销毁所有窗口）
+    - `quit(int)`：委托到 `IApplicationHost::quit()`
+    - `create_window(WindowDesc)`：通过宿主创建原生 IWindow，包装为 `ui::Window`（创建 ISwapchain、订阅事件），存入内部 `SmallVector<WindowEntry, 4>`
+    - `set_main_window(Window*)`：取消旧主窗口订阅 → 订阅新主窗口原生 Closed 事件，Closed 时自动调用 `IApplicationHost::quit(0)`
+    - `host() / device() / renderer()`：在 `on_startup` 中访问基础设施引用
+    - 受保护生命周期扩展点（可在子类覆盖）：`on_startup / on_exit / on_create_host / on_create_device / on_create_renderer`
+  - `MINE_APPLICATION_MAIN(AppClass)` 宏：展开为标准 `int main(int argc, char** argv)`，一行声明应用入口
+  - 便捷总头文件 `AppAll.h`：一次 include 覆盖全部 API
+  - 14 个单元测试（doctest），覆盖：run() 前未调用 on_startup、on_startup 在主循环前被调用、on_exit 在 run() 后被调用、on_exit 接收正确退出码、run() 返回值等于宿主退出码、on_startup 收到正确 argc、quit() 委托到宿主、create_window() 返回非空指针、create_window() 创建的窗口初始 is_closed=false、set_main_window() 订阅后 sink 非空、主窗口 Closed 不触发（run() 已结束）、消息循环中窗口关闭触发 quit(0)、on_startup 中可访问 host/device/renderer
+  - 同步修复 `SmallVector<T>::push_back(const T&)` 和 `Vector<T>::push_back(const T&)` 添加 `requires std::is_copy_constructible_v<T>` 约束，避免移动专属类型触发 MSVC 即时模板实例化错误
+
 - **mine.ui.window（平台窗口与视觉树桥接）**：实现 Window 类，将 `platform::IWindow`、`gfx::IDevice/IQueue`、`paint::IRenderer` 与 UIElement 视觉树整合（M1.1 任务 #21）：
   - `Window`（Pimpl 模式）：封装平台窗口与渲染管线的完整生命周期
     - 构造时自动创建 `ISwapchain`（按逻辑尺寸×DPI 缩放因子得到物理像素分辨率）并订阅平台窗口事件（`IWindowEventSink`）
