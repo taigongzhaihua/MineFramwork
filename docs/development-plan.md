@@ -91,7 +91,7 @@ git tag：`v0.2.0-f1`
 
 | # | 模块 | 路径 | 验收 |
 |---|------|------|------|
-| 16 | `mine.ui.animation`：缓动函数库（Linear / Ease / Spring） | `src/mine/ui/animation` | 单测：帧序列值正确 |
+| 16 | ✅ `mine.ui.animation`：缓动函数库（Linear / Ease / Spring） | `src/mine/ui/animation` | 单测：40 测试 316 断言全部通过 |
 | 17 | `mine.ui.animation`：`Storyboard`、`Timeline`、属性动画 | `src/mine/ui/animation` | 与 `VisualStateManager` 过渡集成 |
 
 git tag：`v0.3.0-f2`

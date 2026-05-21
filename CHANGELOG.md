@@ -5,6 +5,21 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.animation（缓动函数库）**：实现 F2.2 任务 #16 的缓动函数库：
+  - 新增 `Duration` 类：时间段描述，内部以秒存储；`milliseconds(ms)` / `seconds(s)` 工厂函数，支持加减乘算术、比较运算、`is_zero()` 查询
+  - 新增 10 个缓动函数系列（In / Out / InOut 各变体，共 22 个全局函数指针常量）：
+    `Linear`（1）、`Quad`（3）、`Cubic`（3）、`Quart`（3）、`Quint`（3）、`Expo`（3）、
+    `Sine`（3）、`Back`（3）、`Elastic`（3）、`Bounce`（3）
+  - 新增 `CubicBezier` 类：参数化三次贝塞尔缓动曲线；牛顿迭代逆映射（最多 8 次，精度 1e-6）；
+    静态预置常量 `Ease` / `EaseIn` / `EaseOut` / `EaseInOut`（与 CSS 规范一致）
+  - 新增 `SpringEasing` 类：有状态弹簧物理缓动模拟器；半隐式欧拉积分（先速度后位置，能量守恒好）；
+    支持 `retarget(new_target)` 中途改变目标而保持当前速度；`is_settled()` 检测稳定；
+    `damping_ratio()` / `natural_frequency()` / `estimated_settle_time()` 参数查询
+  - 新增 `AnimationAll.h` 伞形头文件，一键引入所有公共类型
+  - 新增 40 个单元测试（316 个断言）覆盖：端点与帧序列值精确性、Back/Elastic/Bounce 超调特征、
+    CubicBezier 线性退化与 CSS 预置方向性、SpringEasing 欠阻尼振荡稳定 / 临界阻尼无振荡 /
+    过阻尼单调性 / retarget 保持速度 / is_settled 零偏移零速度判定；全部通过
+
 - **mine.ui.controls（ContentPresenter）**：实现 F2.1 任务 #15 的模板内容占位控件：
   - 新增 `ContentPresenter` 类（继承 `Control`），作为 `ControlTemplate` 视觉树中的内容占位元素
   - `ContentProperty`：`DependencyProperty`，接受 `InlineString`（文字模式）或 `UIElement*`（未来元素模式）；`on_measure` 按内容类型动态计算期望尺寸
