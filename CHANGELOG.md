@@ -5,6 +5,21 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.style（树形资源字典）**：实现 F2.1 任务 #10 的 `ResourceDictionary`：
+  - 新增 `ResourceDictionary`（Pimpl 模式）：多层键值资源存储，支持树形查找链
+    - `set(key, value)`：写入静态值（不触发通知，适用于批量初始化 / 主题加载）
+    - `set_dynamic(key, value)`：写入动态值，触发特定 key 的 `subscribe()` 回调并广播 `resource_changed`
+    - `merge(other)` / `clear_merged()`：合并外部字典（弱引用）；查找时按本层 → 合并层 → 父层的顺序
+    - `find(key)`：树形查找，未命中返回空 `Variant`（调用方用 `has_value()` 判断）
+    - `find_local(key)`：仅查本层
+    - `subscribe(key, cb)` / `unsubscribe(id)`：订阅特定键的值变更（DynamicResource 场景）
+    - `set_parent(parent)`：连接父字典，自动订阅父层的 `resource_changed` 以传播变更
+    - `on_resource_changed(cb)` / `off_resource_changed(id)`：订阅任意键的广播通知
+    - `notify_resource_changed(key)`：手动广播（主题切换后调用，`key="*"` 表示全量刷新）
+  - 内部存储：`Vector<Entry>`（本层）、`SmallVector<const ResourceDictionary*, 4>`（合并层）、`Vector<KeySub>`（move-only Function 订阅）、`SmallVector<ChangedSub, 4>`（广播订阅），均避免使用未特化的 `Hash<InlineString>`
+  - 新增 `HandlerId`（`uint32_t`）、`kInvalidHandlerId = 0`、伞形头 `StyleAll.h`
+  - 新增 17 个单元测试（doctest），全部通过，覆盖：本层写入/查找、未命中返回空 Variant、三层树形查找、合并层查找、优先级顺序（本层 > 合并层 > 父层）、clear_merged、set 不触发通知、set_dynamic 触发订阅、unsubscribe、resource_changed 广播/取消、父层变更传播到子层、子层本层覆盖时父层不触发、析构自动断开父层订阅、notify_resource_changed 手动广播
+
 - **mine.ui.controls（基础控件）**：实现 M1.1 任务 #23 的最小可用基础控件模块：
   - 新增 `TextBlock`：支持文本内容、字体大小、前景/背景色、内边距和基础测量；支持可选字体对象绘制（未设置字体时使用占位线保证可见输出）
   - 新增 `Button`：支持文本、启用状态、按下态、基础外观绘制（背景/边框）与 `Click` 路由事件；接入 `MouseDown/MouseUp` 输入事件触发点击
