@@ -217,6 +217,15 @@ protected:
     void on_measure(math::Size available_size) override;
 
     /**
+     * @brief 布局第二遍回调：将模板根排列至与控件相同的矩形区域。
+     *
+     * UIElement::set_bounds_rect 在确定控件自身的 bounds_rect 后会调用此方法。
+     * 若控件有模板根，将 final_rect 作为模板根的 arrange 槽位，
+     * 确保 ContentPresenter 等模板子元素拥有正确的 bounds_rect。
+     */
+    void on_arrange(math::Rect final_rect) override;
+
+    /**
      * @brief 由子类计算当前视觉状态（枚举）。
      *
      * 默认返回 Normal；Button 等控件可覆盖以反映 Hovered/Pressed 等状态。

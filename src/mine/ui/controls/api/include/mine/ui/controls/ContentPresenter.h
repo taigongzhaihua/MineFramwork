@@ -27,6 +27,7 @@
 #include <mine/ui/controls/Api.h>
 #include <mine/ui/visual/Control.h>
 #include <mine/math/Thickness.h>
+#include <mine/math/Color.h>
 #include <mine/containers/InlineString.h>
 
 namespace mine::paint { class Canvas; }
@@ -69,6 +70,26 @@ public:
     ContentPresenter& operator=(const ContentPresenter&) = delete;
     ContentPresenter(ContentPresenter&&)                 = default;
     ContentPresenter& operator=(ContentPresenter&&)      = default;
+
+    // ── 字体与前景色 ───────────────────────────────────────────────────────
+
+    /**
+     * @brief 设置渲染文字时使用的字体对象（由宿主控件传入）。
+     * @param font_face 字体对象指针（nullptr 表示不渲染文字，仅显示占位线）
+     */
+    void set_font_face(void* font_face) noexcept;
+
+    /**
+     * @brief 设置文字渲染字号（逻辑像素）。
+     * @param size_px 字号，单位为逻辑像素（默认 14.0f）
+     */
+    void set_font_size(float size_px) noexcept;
+
+    /**
+     * @brief 设置文字前景色。
+     * @param color 前景色（默认黑色）
+     */
+    void set_foreground(math::Color color) noexcept;
 
 protected:
     // ── 布局与渲染虚方法 ───────────────────────────────────────────────────
@@ -126,6 +147,15 @@ private:
 
     /// true 表示文字模式；false 表示元素模式或无内容
     bool                     is_text_mode_{false};
+
+    /// 字体对象（nullptr 时不渲染文字，回退到占位线）
+    void*                    font_face_{nullptr};
+
+    /// 文字字号（逻辑像素，默认 14.0f）
+    float                    font_size_px_{14.0f};
+
+    /// 文字前景色（默认黑色）
+    math::Color              foreground_{math::Color::Black};
 };
 
 } // namespace mine::ui

@@ -87,6 +87,18 @@ public:
     [[nodiscard]] math::Color border_color() const noexcept;
     void set_border_color(math::Color color);
 
+    /**
+     * @brief 设置文字渲染字体（同步传播到模板树内的 ContentPresenter）。
+     * @param font_face 字体对象指针（nullptr 时 ContentPresenter 回退到占位线）
+     */
+    void set_font_face(void* font_face) noexcept;
+
+    /**
+     * @brief 设置文字渲染字号（逻辑像素，默认 14.0f）。
+     * @param size_px 字号
+     */
+    void set_font_size(float size_px) noexcept;
+
 protected:
     void on_measure(math::Size available_size) override;
     void on_render(paint::Canvas& canvas) override;
@@ -131,6 +143,8 @@ private:
     math::Color              background_hover_ = math::Color::from_rgb_u32(0xDCDCDC);
     math::Color              background_press_ = math::Color::from_rgb_u32(0xC8C8C8);
     math::Color              border_color_     = math::Color::from_rgb_u32(0x707070);
+    void*                    font_face_        = nullptr;
+    float                    font_size_px_     = 14.0f;
 };
 
 } // namespace mine::ui

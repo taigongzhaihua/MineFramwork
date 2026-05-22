@@ -229,13 +229,44 @@ void Button::set_border_color(math::Color color)
     invalidate_render();
 }
 
+void Button::set_font_face(void* font_face) noexcept
+{
+    font_face_ = font_face;
+    // 若模板已构建，立即将字体传播到 ContentPresenter
+    UIElement* child = find_template_child("content");
+    if (child != nullptr) {
+        auto* presenter = static_cast<ContentPresenter*>(child);
+        presenter->set_font_face(font_face_);
+        presenter->set_foreground(foreground_);
+    }
+}
+
+void Button::set_font_size(float size_px) noexcept
+{
+    font_size_px_ = size_px;
+    // 若模板已构建，立即将字号传播到 ContentPresenter
+    UIElement* child = find_template_child("content");
+    if (child != nullptr) {
+        auto* presenter = static_cast<ContentPresenter*>(child);
+        presenter->set_font_size(font_size_px_);
+    }
+}
+
 void Button::on_measure(math::Size available_size)
 {
     // 通过 Control::on_measure 自动构建模板（首次调用）并委托给模板根
     Control::on_measure(available_size);
 
-    // 模板已构建，Control::on_measure 已采用模板根的期望尺寸，直接返回
+    // 模板已构建，Control::on_measure 已采用模板根的期望尺寸
     if (template_root()) {
+        // 每次 measure 时将字体属性同步到 ContentPresenter（幂等，确保动态设置生效）
+        UIElement* child = find_template_child("content");
+        if (child != nullptr && font_face_ != nullptr) {
+            auto* presenter = static_cast<ContentPresenter*>(child);
+            presenter->set_font_face(font_face_);
+            presenter->set_foreground(foreground_);
+            presenter->set_font_size(font_size_px_);
+        }
         return;
     }
 

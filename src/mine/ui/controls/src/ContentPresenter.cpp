@@ -84,6 +84,28 @@ ContentPresenter::ContentPresenter() = default;
 ContentPresenter::~ContentPresenter() = default;
 
 // ============================================================================
+// 字体与前景色 setter
+// ============================================================================
+
+void ContentPresenter::set_font_face(void* font_face) noexcept
+{
+    font_face_ = font_face;
+    invalidate_render();
+}
+
+void ContentPresenter::set_font_size(float size_px) noexcept
+{
+    font_size_px_ = size_px;
+    invalidate_render();
+}
+
+void ContentPresenter::set_foreground(math::Color color) noexcept
+{
+    foreground_ = color;
+    invalidate_render();
+}
+
+// ============================================================================
 // 布局（测量）
 // ============================================================================
 
@@ -130,17 +152,28 @@ void ContentPresenter::on_render(paint::Canvas& canvas)
         return;
     }
 
-    // M1.1 阶段：以水平占位线替代真实文字渲染（与 TextBlock 无字体时行为一致）
     const float content_area_w = rect.width - padding_cache_.horizontal();
     if (content_area_w <= 0.0f) {
         return;
     }
 
-    // 文字行居中于内容区域
-    const float line_y = rect.y + rect.height * 0.5f - 1.0f;
-    canvas.fill_rect(
-        { rect.x + padding_cache_.left, line_y, content_area_w, 2.0f },
-        paint::Brush::solid(math::Color::Black));
+    if (font_face_ != nullptr) {
+        // 有字体时：使用 draw_text 渲染真实文字
+        // 基线 y = rect.y + padding.top + font_size（与 TextBlock 保持一致）
+        const math::Vec2 text_origin{
+            rect.x + padding_cache_.left,
+            rect.y + padding_cache_.top + font_size_px_
+        };
+        const core::StringView sv{ content_text_.data(), content_text_.size() };
+        canvas.draw_text(sv, text_origin, font_face_, font_size_px_,
+                         paint::Brush::solid(foreground_));
+    } else {
+        // 无字体时：以水平占位线替代（与 M1.1 行为一致，保持向后兼容）
+        const float line_y = rect.y + rect.height * 0.5f - 1.0f;
+        canvas.fill_rect(
+            { rect.x + padding_cache_.left, line_y, content_area_w, 2.0f },
+            paint::Brush::solid(math::Color::Black));
+    }
 }
 
 } // namespace mine::ui

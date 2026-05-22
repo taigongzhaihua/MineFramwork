@@ -300,6 +300,7 @@ struct DemoApp : public platform::IWindowEventSink {
         root.btn_count.set_background(math::Color::from_rgb_u32(0x1976D2));
         root.btn_count.set_background_pressed(math::Color::from_rgb_u32(0x0D47A1));
         root.btn_count.set_border_color(math::Color::from_rgb_u32(0x0D47A1));
+        if (font) { root.btn_count.set_font_face(font); }
         root.btn_count.add_handler(ui::Button::ClickEvent(), &DemoApp::on_click_count, this);
 
         // ── 4. "重  置" 灰色辅助按钮 ─────────────────────────────────────
@@ -309,6 +310,7 @@ struct DemoApp : public platform::IWindowEventSink {
         root.btn_reset.set_background(math::Color::from_rgb_u32(0x455A64));
         root.btn_reset.set_background_pressed(math::Color::from_rgb_u32(0x263238));
         root.btn_reset.set_border_color(math::Color::from_rgb_u32(0x263238));
+        if (font) { root.btn_reset.set_font_face(font); }
         root.btn_reset.add_handler(ui::Button::ClickEvent(), &DemoApp::on_click_reset, this);
 
         // ── 5. "退  出" 红色危险操作按钮 ─────────────────────────────────
@@ -318,6 +320,7 @@ struct DemoApp : public platform::IWindowEventSink {
         root.btn_quit.set_background(math::Color::from_rgb_u32(0xC62828));
         root.btn_quit.set_background_pressed(math::Color::from_rgb_u32(0x7F0000));
         root.btn_quit.set_border_color(math::Color::from_rgb_u32(0x7F0000));
+        if (font) { root.btn_quit.set_font_face(font); }
         root.btn_quit.add_handler(ui::Button::ClickEvent(), &DemoApp::on_click_quit, this);
 
         // ── 6. 状态计数标签 ───────────────────────────────────────────────
