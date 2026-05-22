@@ -14,6 +14,7 @@ target("sample.02-controls-demo")
         "mine.gfx.d3d11",        -- D3D11 渲染后端
         "mine.paint",            -- 2D 渲染器（Canvas / Brush）
         "mine.text",             -- 字体光栅化（FontFace）
+        "mine.ui.app",           -- mine::ui::app::Application 应用基类
         "mine.ui.window",        -- mine::ui::Window（UI 窗口包装）
         "mine.ui.layout",        -- StackPanel / FrameworkElement
         "mine.ui.controls",      -- Button / TextBlock / Border
