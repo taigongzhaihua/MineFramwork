@@ -22,6 +22,11 @@
  *   - 鼠标事件（悬停/按压/点击）：DemoApp → InputRouter 处理后手动调用 render()。
  */
 
+// Win32 API：用于设置控制台 UTF-8 代码页，必须放在其他包含之前
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+
 #include <mine/platform/PlatformAbi.h>
 #include <mine/gfx/Gfx.h>
 #include <mine/paint/Paint.h>
@@ -336,6 +341,10 @@ struct DemoApp : public platform::IWindowEventSink {
 
 int main(int /*argc*/, char* /*argv*/[])
 {
+    // 0. 设置控制台输出为 UTF-8，避免中文日志乱码
+    //    （/utf-8 编译标志保证字符串字面量为 UTF-8，但控制台默认代码页为 GBK）
+    SetConsoleOutputCP(CP_UTF8);
+
     // 1. 创建应用宿主（Win32 实现由链接库注入）
     auto host = mine::platform::create_application_host();
     if (!host) {
@@ -364,14 +373,17 @@ int main(int /*argc*/, char* /*argv*/[])
         return 1;
     }
 
-    // 5. 加载字体（优先 Segoe UI，回退 Arial，最终回退为占位线渲染）
+    // 5. 加载字体（优先微软雅黑以支持中文，回退到西文字体，最终回退为占位线渲染）
     core::OwnedPtr<text::FontFace> font_face;
     {
         // 候选字体路径（Windows 系统字体目录）
+        // 注意：msyh.ttc 为 Windows 10/11 格式，msyh.ttf 为 Windows 7/8 格式
         const char* candidates[] = {
-            "C:\\Windows\\Fonts\\segoeui.ttf",
-            "C:\\Windows\\Fonts\\arial.ttf",
-            "C:\\Windows\\Fonts\\calibri.ttf",
+            "C:\\Windows\\Fonts\\msyh.ttc",    // 微软雅黑（Windows 10/11，支持中文）
+            "C:\\Windows\\Fonts\\msyh.ttf",    // 微软雅黑（Windows 7/8，支持中文）
+            "C:\\Windows\\Fonts\\simhei.ttf",  // 黑体（备用中文字体）
+            "C:\\Windows\\Fonts\\segoeui.ttf", // Segoe UI（西文回退）
+            "C:\\Windows\\Fonts\\arial.ttf",   // Arial（西文回退）
         };
         for (const char* path : candidates) {
             font_face = text::FontFace::load_from_file(path);
@@ -383,6 +395,7 @@ int main(int /*argc*/, char* /*argv*/[])
         if (!font_face) {
             std::fprintf(stdout, "警告：未找到系统字体，TextBlock 将以占位线展示文字\n");
         }
+        std::fflush(stdout);  // 确保初始化日志立即可见（stdout 重定向时默认块缓冲）
     }
 
     // 6. 创建原生平台窗口
