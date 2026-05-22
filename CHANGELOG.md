@@ -5,6 +5,17 @@
 ## [Unreleased]
 
 ### Added
+- **samples/01-vsm-animation（VSM 属性动画演示示例）**：新增交互式演示程序，展示 VisualStateManager + Storyboard 属性动画端到端工作流：
+  - 注册 `AnimDemo_ButtonBgColor`（`math::Color` 类型 `DependencyProperty`）
+  - 配置 VSM 三状态（Normal / Hovered / Pressed）及带动画过渡：
+    - `* → Normal`：300ms CubicEaseOut（蓝 → 深灰）
+    - `* → Hovered`：180ms CubicEaseOut（深灰 → 蓝）
+    - `* → Pressed`：100ms Linear（蓝 → 深蓝）
+  - 鼠标悬停 / 按压交互通过 `IWindowEventSink` 接收 MouseMove / MouseDown / MouseUp 事件
+  - 使用 Win32 `PeekMessage` 非阻塞消息循环，配合 `QueryPerformanceCounter` 计算帧间隔 dt，驱动连续帧动画
+  - 绘制：按钮主体（SDF 圆角矩形 + 投影）+ 三个状态指示器（活跃者有白色描边），颜色随动画平滑插值
+  - 中途状态切换时动画从当前插值颜色续接新动画，无跳变
+
 - **mine.ui.animation（Storyboard 属性动画）**：实现 F2.2 任务 #17 的属性动画与 VSM 过渡集成：
   - 新增 `PropertyAnimation` 结构体：描述单个依赖属性动画（target/prop/from/to/duration/easing/elapsed/complete）；`to_is_resolved` 标志区分显式 to（`animate_dp_to`）与状态采样（`animate_dp`）两条路径
   - 新增 `Storyboard` 类：属性动画时间线容器，支持多属性并行动画：
