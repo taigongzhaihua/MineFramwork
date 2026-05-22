@@ -127,6 +127,7 @@ git tag：`v0.3.0-f2`
 | # | 样例 | 路径 |
 |---|------|------|
 | 28 | `samples/01-pure-cpp`：纯 C++ 实现的 MVVM Todo 应用（无 MML 依赖） | `samples/01-pure-cpp` |
+| 28.1 | ✅ `samples/02-controls-demo`：窗口+控件交互演示（Button 点击计数、TextBlock 文字渲染、InputRouter 路由；DemoRoot : FrameworkElement 手动布局） | `samples/02-controls-demo` |
 
 git tag：`v0.4.0-f3`
 
