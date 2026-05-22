@@ -96,6 +96,8 @@ void ContentPresenter::set_font_face(void* font_face) noexcept
 void ContentPresenter::set_font_size(float size_px) noexcept
 {
     font_size_px_ = size_px;
+    // 字号影响测量尺寸，同时需令布局重新计算
+    invalidate_measure();
     invalidate_render();
 }
 
@@ -113,11 +115,10 @@ void ContentPresenter::on_measure(math::Size available_size)
 {
     // ContentPresenter 本身不包含 ControlTemplate，直接计算内容尺寸
     if (is_text_mode_) {
-        // 按字符数估算文字宽度（与 TextBlock/Button 的占位算法一致）
-        constexpr float k_font_size_px    = 14.0f;
+        // 按字符数估算文字宽度（使用实际字号，与 on_render 居中计算保持一致）
         constexpr float k_char_width_rate = 0.55f;
-        const float content_w = static_cast<float>(content_text_.size()) * k_font_size_px * k_char_width_rate;
-        const float content_h = k_font_size_px * 1.4f;
+        const float content_w = static_cast<float>(content_text_.size()) * font_size_px_ * k_char_width_rate;
+        const float content_h = font_size_px_ * 1.4f;
         set_desired_size({
             content_w + padding_cache_.horizontal(),
             content_h + padding_cache_.vertical(),
@@ -152,26 +153,25 @@ void ContentPresenter::on_render(paint::Canvas& canvas)
         return;
     }
 
-    const float content_area_w = rect.width - padding_cache_.horizontal();
-    if (content_area_w <= 0.0f) {
-        return;
-    }
-
     if (font_face_ != nullptr) {
-        // 有字体时：使用 draw_text 渲染真实文字
-        // 基线 y = rect.y + padding.top + font_size（与 TextBlock 保持一致）
-        const math::Vec2 text_origin{
-            rect.x + padding_cache_.left,
-            rect.y + padding_cache_.top + font_size_px_
-        };
+        // 估算文字宽度（与 on_measure 保持同一算法，确保居中计算一致）
+        const float estimated_w = static_cast<float>(content_text_.size())
+                                  * font_size_px_ * 0.55f;
+        // 水平居中：在 bounds_rect 内居中，可用宽度不足时左对齐以防裁剪
+        const float text_x = rect.x + std::max(0.0f, (rect.width - estimated_w) * 0.5f);
+        // 垂直居中：基线 = 竖向中点 + 字帽高度近似值（约 0.35 × 字号）
+        // （draw_text 的 y 参数为基线位置；字帽顶端约在基线上方 0.7 × font_size 处）
+        const float text_y = rect.y + rect.height * 0.5f + font_size_px_ * 0.35f;
         const core::StringView sv{ content_text_.data(), content_text_.size() };
-        canvas.draw_text(sv, text_origin, font_face_, font_size_px_,
+        canvas.draw_text(sv, { text_x, text_y }, font_face_, font_size_px_,
                          paint::Brush::solid(foreground_));
     } else {
-        // 无字体时：以水平占位线替代（与 M1.1 行为一致，保持向后兼容）
+        // 无字体时：居中水平占位线（向后兼容）
+        const float line_w = rect.width - padding_cache_.horizontal();
+        if (line_w <= 0.0f) { return; }
         const float line_y = rect.y + rect.height * 0.5f - 1.0f;
         canvas.fill_rect(
-            { rect.x + padding_cache_.left, line_y, content_area_w, 2.0f },
+            { rect.x + padding_cache_.left, line_y, line_w, 2.0f },
             paint::Brush::solid(math::Color::Black));
     }
 }

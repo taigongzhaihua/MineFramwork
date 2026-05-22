@@ -122,16 +122,18 @@ protected:
         subtitle.arrange(math::Rect{ margin, y, W - 2.0f * margin, subtitle_h });
         y += subtitle_h + 16.0f;
 
-        // 按钮行：三个按钮横向排列，宽 120px、高 42px、间距 10px
-        const float btn_w   = 120.0f;
-        const float btn_h   =  42.0f;
-        const float btn_gap =  10.0f;
+        // 按钮行：宽度由内容期望尺寸决定，高度对齐到三者最大值，间距 10px
+        const float btn_gap     = 10.0f;
+        const math::Size bsz_count = btn_count.desired_size();
+        const math::Size bsz_reset = btn_reset.desired_size();
+        const math::Size bsz_quit  = btn_quit.desired_size();
+        const float btn_h = std::max({ bsz_count.height, bsz_reset.height, bsz_quit.height });
         float bx = margin;
-        btn_count.arrange(math::Rect{ bx, y, btn_w, btn_h });
-        bx += btn_w + btn_gap;
-        btn_reset.arrange(math::Rect{ bx, y, btn_w, btn_h });
-        bx += btn_w + btn_gap;
-        btn_quit.arrange(math::Rect{ bx, y, btn_w, btn_h });
+        btn_count.arrange(math::Rect{ bx, y, bsz_count.width, btn_h });
+        bx += bsz_count.width + btn_gap;
+        btn_reset.arrange(math::Rect{ bx, y, bsz_reset.width, btn_h });
+        bx += bsz_reset.width + btn_gap;
+        btn_quit.arrange(math::Rect{ bx, y, bsz_quit.width, btn_h });
         y += btn_h + 24.0f;
 
         // 状态标签：两侧留边距，高 44px（大字体）
