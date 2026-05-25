@@ -22,6 +22,7 @@
 
 #include <mine/ui/app/AppAll.h>         // Application + MINE_APPLICATION_MAIN
 
+#include <mine/core/Memory.h>               // core::OwnedPtr
 #include <mine/text/FontFace.h>
 
 #include <mine/ui/window/Window.h>
@@ -161,6 +162,9 @@ struct DemoApp : public mine::ui::app::Application,
     // ── UI 控件树根节点 ───────────────────────────────────────────────────
     DemoRoot            root;
 
+    // ── 字体资源（生命周期与 DemoApp 一致，避免悬空指针）─────────────────────
+    core::OwnedPtr<text::FontFace> font_face_;  ///< 已加载的字体，所有控件共享
+
     // ── 运行时状态 ────────────────────────────────────────────────────────
     int          click_count = 0;    ///< 点击计数器
     ui::Window*  ui_win_     = nullptr;  ///< 主窗口（由 on_startup 赋值）
@@ -175,8 +179,9 @@ struct DemoApp : public mine::ui::app::Application,
         // 设置控制台输出为 UTF-8，避免中文日志乱码
         SetConsoleOutputCP(CP_UTF8);
 
-        // 加载字体（优先微软雅黑以支持中文）
-        core::OwnedPtr<text::FontFace> font_face;
+        // 加载字体（优先微软雅黑以支持中文）。
+        // 注意：font_face_ 是 DemoApp 成员，生命周期覆盖全部渲染周期，
+        // 避免 on_startup 返回后局部变量被销毁导致后续渲染访问悬空指针。
         {
             const char* candidates[] = {
                 "C:\\Windows\\Fonts\\msyh.ttc",    // 微软雅黑（Windows 10/11）
@@ -186,13 +191,13 @@ struct DemoApp : public mine::ui::app::Application,
                 "C:\\Windows\\Fonts\\arial.ttf",   // Arial（西文回退）
             };
             for (const char* path : candidates) {
-                font_face = text::FontFace::load_from_file(path);
-                if (font_face) {
+                font_face_ = text::FontFace::load_from_file(path);
+                if (font_face_) {
                     std::fprintf(stdout, "信息：已加载字体 %s\n", path);
                     break;
                 }
             }
-            if (!font_face) {
+            if (!font_face_) {
                 std::fprintf(stdout, "警告：未找到系统字体，将以占位线展示文字\n");
             }
             std::fflush(stdout);
@@ -210,7 +215,7 @@ struct DemoApp : public mine::ui::app::Application,
         set_main_window(ui_win_);
 
         // 构建 UI 控件树并连接事件
-        build_ui(font_face.get());
+        build_ui(font_face_.get());
 
         // 订阅原生窗口输入事件（鼠标/键盘 → InputRouter）
         ui_win_->native_window().events().subscribe(this);

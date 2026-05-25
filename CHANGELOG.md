@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **samples/02-controls-demo 崩溃修复（0xC0000005 悬空指针）**：`on_startup` 中 `font_face` 原为局部 `OwnedPtr`，`on_startup` 返回后字体对象被销毁，后续鼠标事件触发第二次渲染时各控件的 `font_face_` 成为悬空指针（use-after-free），导致 STATUS_ACCESS_VIOLATION 崩溃。修复方法：将字体资源提升为 `DemoApp::font_face_` 成员变量（`OwnedPtr<text::FontFace>`），生命周期与 `DemoApp` 一致，覆盖全部渲染周期，彻底消除悬空指针。
+
 ### Added
 - **samples/02-controls-demo（控件交互演示示例）**：新增窗口+控件交互演示程序（F3.3 任务 #28.1）：
   - 采用 `DemoRoot : FrameworkElement` 方案，在 `measure_override` / `arrange_override` 中对 6 个控件（2 个 TextBlock + 3 个 Button + 1 个状态 TextBlock）实施手动绝对坐标布局
