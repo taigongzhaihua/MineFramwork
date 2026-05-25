@@ -12,11 +12,13 @@
 #include <mine/containers/InlineString.h>
 #include <mine/math/Color.h>
 #include <mine/math/Thickness.h>
+#include <mine/core/Memory.h>
 
 #include <chrono>
 
 namespace mine::paint { class Canvas; }
 namespace mine::ui::input { class MouseEventArgs; }
+namespace mine::ui::animation { class Storyboard; }
 
 namespace mine::ui {
 
@@ -45,6 +47,15 @@ public:
      * 使 ContentPresenter 能够在模板树中渲染按钮文字。
      */
     static const DependencyProperty& ContentProperty;
+
+    /**
+     * @brief 当前渲染背景色属性（Variant 存储 math::Color，由 Storyboard 动画驱动）。
+     *
+     * 视觉状态切换时，on_visual_state_changed 通过 Storyboard::animate_dp_to 在此属性
+     * 上写入插值色（Animation 优先级=60），on_render 读取该属性作为填充色，从而实现
+     * Normal / Hovered / Pressed 之间的平滑过渡。动画结束后值保留在 Animation 槽。
+     */
+    static const DependencyProperty& BackgroundProperty;
 
     /**
      * @brief 内边距属性（Variant 存储 math::Thickness）。
@@ -94,6 +105,17 @@ public:
      * @return 任一动画仍在播放中则返回 true，全部结束后返回 false。
      */
     [[nodiscard]] bool has_active_animation() const noexcept;
+
+    /**
+     * @brief 推进背景色过渡动画（Storyboard::tick）。
+     *
+     * 由外部渲染驱动定时器（Win32 SetTimer）每帧调用。tick 内部写入 BackgroundProperty
+     * 的 Animation 优先级插值色，触发 affects_render 回调，再经 ui_win_->render()
+     * 刷新屏幕。
+     *
+     * @param dt 帧时长（秒），通常为 0.016（约 60fps）
+     */
+    void tick_bg_animation(float dt);
 
     /**
      * @brief 设置文字渲染字体（同步传播到模板树内的 ContentPresenter）。
@@ -171,14 +193,8 @@ private:
     };
     RippleState              ripple_;           ///< 当前涟漪状态
 
-    /// MD3 背景色过渡动画状态（视觉状态切换时触发）
-    struct BgTransState {
-        math::Color from;          ///< 过渡起始颜色（可能是上一次过渡中断时的插值色）
-        math::Color to;            ///< 过渡目标颜色
-        std::chrono::steady_clock::time_point start; ///< 过渡开始时刻
-        bool        active = false; ///< 是否正在过渡
-    };
-    BgTransState             bg_trans_;         ///< 当前背景色过渡状态
+    /// MD3 背景色过渡动画（Storyboard 驱动 BackgroundProperty 在 Animation 优先级插值）
+    core::OwnedPtr<animation::Storyboard> bg_storyboard_;
 };
 
 } // namespace mine::ui

@@ -13,7 +13,11 @@
 #include <mine/ui/input/MouseEventArgs.h>
 #include <mine/ui/property/DependencyProperty.h>
 #include <mine/ui/property/PropertyMetadata.h>
+#include <mine/ui/property/ValuePriority.h>
 #include <mine/ui/style/TemplateRegistry.h>
+#include <mine/ui/animation/Storyboard.h>
+#include <mine/ui/animation/EasingFunction.h>
+#include <mine/ui/animation/Duration.h>
 #include <mine/core/Memory.h>
 
 #include <cmath>
@@ -44,6 +48,17 @@ const DependencyProperty& Button::PaddingProperty =
             .affects_measure = true,
             .affects_render  = true,
             .changed         = &Button::on_padding_changed,
+        });
+
+// Button::BackgroundProperty — 当前渲染背景色（由 Storyboard 在 Animation 优先级写入插值色）
+// 默认值为 MD3 Primary（#6750A4），on_visual_state_changed 启动时先将当前色写入 Local 槽，
+// 之后 Storyboard 在 Animation 槽（优先级 60）写入帧间插值，on_render 通过 get_value 读取。
+const DependencyProperty& Button::BackgroundProperty =
+    register_property<Button>(
+        "Background",
+        core::Variant{ math::Color::from_rgb_u32(0x6750A4) },  // MD3 Primary
+        PropertyMetadata{
+            .affects_render = true,  // 属性变更时自动触发 invalidate_render
         });
 
 // ============================================================================
@@ -294,33 +309,15 @@ void Button::on_render(paint::Canvas& canvas)
         return;
     }
 
-    // Material Design 3 Filled Button：背景颜色按视觉状态选取（支持过渡插值）
+    // Material Design 3 Filled Button：背景色从 BackgroundProperty DP 读取
+    // 动画期间 Storyboard 写入 Animation 优先级（60）的插值色，get_value 自动返回最高优先级值
     math::Color fill;
     if (!is_enabled_) {
-        // MD3 Disabled：OnSurface(#1C1B1F) at 12% opacity
+        // MD3 Disabled：OnSurface(#1C1B1F) at 12% opacity，不参与过渡
         fill = math::Color{0.11f, 0.11f, 0.12f, 0.12f};
-    } else if (bg_trans_.active) {
-        // 过渡动画进行中：用 ease-out 插值计算中间颜色
-        using Clock = std::chrono::steady_clock;
-        using Msf   = std::chrono::duration<float, std::milli>;
-        const float elapsed_ms = std::chrono::duration_cast<Msf>(
-            Clock::now() - bg_trans_.start).count();
-        constexpr float kBgTransDurationMs = 100.0f;  // 背景色过渡时长
-        const float t = elapsed_ms / kBgTransDurationMs;
-        if (t >= 1.0f) {
-            bg_trans_.active = false;
-            fill = bg_trans_.to;
-        } else {
-            // ease-out quad：视觉上更自然的减速曲线
-            const float ease = 1.0f - (1.0f - t) * (1.0f - t);
-            fill = bg_trans_.from + (bg_trans_.to - bg_trans_.from) * ease;
-        }
     } else {
-        switch (visual_state()) {
-        case ControlVisualState::Pressed: fill = background_press_; break;
-        case ControlVisualState::Hovered: fill = background_hover_; break;
-        default:                          fill = background_;        break;
-        }
+        const core::Variant& bg_var = get_value(BackgroundProperty);
+        fill = bg_var.has<math::Color>() ? bg_var.get<math::Color>() : background_;
     }
 
     // Material Design 3 Filled Button：完全圆角（胶囊形，radius = height / 2）
@@ -442,35 +439,46 @@ void Button::raise_click()
 
 bool Button::has_active_animation() const noexcept
 {
-    return ripple_.active || bg_trans_.active;
+    // ripple 使用手动 chrono 计时；背景色过渡通过 Storyboard 驱动
+    return ripple_.active || (bg_storyboard_ && !bg_storyboard_->is_complete());
 }
 
-void Button::on_visual_state_changed(ControlVisualState old_state,
+void Button::tick_bg_animation(float dt)
+{
+    if (!bg_storyboard_ || bg_storyboard_->is_complete()) {
+        return;
+    }
+    // tick 内部调用 set_value(BackgroundProperty, interpolated, Animation)
+    // PropertyMetadata.affects_render = true → 触发 invalidate_render（由外部 timer 驱动刷帧）
+    bg_storyboard_->tick(dt);
+}
+
+void Button::on_visual_state_changed(ControlVisualState /*old_state*/,
                                      ControlVisualState new_state)
 {
-    // 计算过渡起始颜色：若过渡正在进行则从当前插值位置开始（防止过渡闪跳）
-    math::Color from_color;
+    // ── 1. 采样当前渲染色作为新动画的起始色 ────────────────────────────────
+    // get_value 在 Storyboard 活跃时返回 Animation 优先级的插值色，
+    // 确保中断旧过渡时从当前可见色开始，而非从目标色跳变。
+    math::Color from_color = background_;  // 默认 fallback
     if (!is_enabled_) {
         from_color = math::Color{0.11f, 0.11f, 0.12f, 0.12f};
-    } else if (bg_trans_.active) {
-        using Clock = std::chrono::steady_clock;
-        using Msf   = std::chrono::duration<float, std::milli>;
-        const float elapsed_ms = std::chrono::duration_cast<Msf>(
-            Clock::now() - bg_trans_.start).count();
-        constexpr float kBgTransDurationMs = 100.0f;
-        const float t = std::min(elapsed_ms / kBgTransDurationMs, 1.0f);
-        const float ease = 1.0f - (1.0f - t) * (1.0f - t);
-        from_color = bg_trans_.from + (bg_trans_.to - bg_trans_.from) * ease;
     } else {
-        // 无过渡中：从旧状态的目标颜色开始
-        switch (old_state) {
-        case ControlVisualState::Pressed:  from_color = background_press_; break;
-        case ControlVisualState::Hovered:  from_color = background_hover_; break;
-        default:                           from_color = background_;        break;
+        const core::Variant& cur = get_value(BackgroundProperty);
+        if (cur.has<math::Color>()) {
+            from_color = cur.get<math::Color>();
         }
     }
 
-    // 计算过渡目标颜色
+    // ── 2. 停止上一个 Storyboard（清除 Animation 槽）────────────────────────
+    if (bg_storyboard_) {
+        bg_storyboard_->stop();
+    }
+
+    // ── 3. 将采样色写入 Local 槽，使 capture_from_values 读到正确起始色 ────
+    // （stop() 已清除 Animation 槽，若不写 Local 则 capture 会读到 Default 色）
+    set_value(BackgroundProperty, core::Variant{from_color}, ValuePriority::Local);
+
+    // ── 4. 计算目标颜色 ───────────────────────────────────────────────────
     math::Color to_color;
     switch (new_state) {
     case ControlVisualState::Pressed:  to_color = background_press_; break;
@@ -479,12 +487,16 @@ void Button::on_visual_state_changed(ControlVisualState old_state,
     default:                           to_color = background_;        break;
     }
 
-    bg_trans_.from   = from_color;
-    bg_trans_.to     = to_color;
-    bg_trans_.start  = std::chrono::steady_clock::now();
-    bg_trans_.active = true;
-
-    invalidate_render();
+    // ── 5. 构建新 Storyboard 并启动 ─────────────────────────────────────
+    bg_storyboard_ = core::make_owned<animation::Storyboard>();
+    bg_storyboard_->animate_dp_to(
+        *this,
+        BackgroundProperty,
+        core::Variant{to_color},
+        animation::Duration::milliseconds(100.0f),  // MD3 状态切换过渡时长
+        animation::QuadEaseOut);                     // ease-out quad：末尾减速感更自然
+    bg_storyboard_->capture_from_values();  // 读取 Local 槽中的 from_color
+    bg_storyboard_->resolve_and_begin();    // 写入 Animation=from，启动插值
 }
 
 } // namespace mine::ui

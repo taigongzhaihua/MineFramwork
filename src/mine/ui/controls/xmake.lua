@@ -16,6 +16,7 @@ mine_module("mine.ui.controls", {
         "mine.ui.property",
         "mine.ui.visual",
         "mine.ui.layout",
-        "mine.ui.style",  -- ContentPresenter 和 Button 模板注册依赖 TemplateRegistry
+        "mine.ui.style",      -- ContentPresenter 和 Button 模板注册依赖 TemplateRegistry
+        "mine.ui.animation",  -- Button 背景色过渡动画（Storyboard + EasingFunction）
     },
 })

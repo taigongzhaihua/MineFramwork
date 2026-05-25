@@ -399,22 +399,32 @@ static VOID CALLBACK ripple_timer_proc(
 {
     if (!g_demo_app) { return; }
 
-    // 检查是否仍有活跃的动画（ripple 或背景色过渡）
+    auto& root = g_demo_app->root;
+
+    // 推进每个按钮的背景色过渡 Storyboard（~60fps，dt = 16ms）
+    // Storyboard::tick 内部将插值色写入 BackgroundProperty 的 Animation 优先级槽，
+    // PropertyMetadata.affects_render = true → 触发 invalidate_render（由下方 render 刷新）
+    constexpr float kDt = 16.0f / 1000.0f;
+    root.btn_count.tick_bg_animation(kDt);
+    root.btn_reset.tick_bg_animation(kDt);
+    root.btn_quit.tick_bg_animation(kDt);
+
+    // 检查是否仍有活跃的动画（ripple 或背景色过渡 Storyboard）
     const bool any_active =
-        g_demo_app->root.btn_count.has_active_animation() ||
-        g_demo_app->root.btn_reset.has_active_animation() ||
-        g_demo_app->root.btn_quit.has_active_animation();
+        root.btn_count.has_active_animation() ||
+        root.btn_reset.has_active_animation() ||
+        root.btn_quit.has_active_animation();
 
     if (any_active) {
-        // 驱动当前帧渲染（on_render 会根据时间戳绘制最新 ripple 状态）
+        // 驱动当前帧渲染
         if (g_demo_app->ui_win_) {
             g_demo_app->ui_win_->render();
         }
     } else {
-        // 所有 ripple 动画已结束，停止定时器
+        // 所有动画已结束，停止定时器
         KillTimer(nullptr, g_demo_app->ripple_timer_id_);
         g_demo_app->ripple_timer_id_ = 0;
-        // 触发最后一帧以清除残余 ripple 痕迹
+        // 触发最后一帧以确保最终状态正确显示
         if (g_demo_app->ui_win_) {
             g_demo_app->ui_win_->render();
         }
