@@ -1,10 +1,10 @@
 /**
  * @file ContentPresenter.h
- * @brief ContentPresenter —— 模板树内容占位元素（F2.1 任务 #15）。
+ * @brief ContentPresenter —— 控件模板内容占位元素（F2.1 任务 #15）。
  *
  * ContentPresenter 是 ControlTemplate 视觉树中的"内容槽"，
- * 根据 ContentProperty 的值类型选择渲染方式：
- *   - InlineString / StringView：以文字行占位线展示（字体系统尚未就绪时的替代方案）
+ * 根据 ContentProperty 的值类型决定渲染方式：
+ *   - InlineString / StringView：自动创建内联 TextBlock 渲染文本
  *   - UIElement*               ：将该元素加入视觉子树并委托其测量/渲染
  *   - 空值                     ：不渲染
  *
@@ -34,11 +34,19 @@ namespace mine::paint { class Canvas; }
 
 namespace mine::ui {
 
+// 前向声明：TextBlock 完整定义仅在 ContentPresenter.cpp 中引入
+class TextBlock;
+
 /**
- * @brief 控件模板内容占位元素。
+ * @brief 控件模板内容占位元素（单子项容器）。
  *
  * 继承自 Control 以获得依赖属性系统、模板绑定和视觉树支持。
- * ContentProperty 可通过 bind_template 连接到宿主控件的文字/内容属性。
+ *
+ * 内部行为：
+ *   - content 为字符串时，自动创建并持有一个 TextBlock 子元素渲染文字。
+ *   - content 为 UIElement* 时，将该元素原位放入视觉子树（不持有所有权）。
+ *
+ * ContentProperty 可通过 bind_template 连接到宿主控件的内容属性。
  */
 class MINE_UI_CONTROLS_API ContentPresenter : public Control {
 public:
@@ -48,7 +56,7 @@ public:
      * @brief 内容属性（Variant 存储 InlineString 或 UIElement*）。
      *
      * 值类型：
-     *   - containers::InlineString：文字内容，以占位线渲染
+     *   - containers::InlineString：文字内容，自动创建内联 TextBlock 渲染
      *   - UIElement*              ：元素内容，将其加入视觉子树
      *   - 空值                   ：无内容
      */
@@ -57,7 +65,7 @@ public:
     /**
      * @brief 内边距属性（Variant 存储 math::Thickness）。
      *
-     * 用于在内容周围留出间距，默认值为 {0, 0, 0, 0}。
+     * 转发给内联 TextBlock 的 PaddingProperty，默认值 {0, 0, 0, 0}。
      */
     static const DependencyProperty& PaddingProperty;
 
@@ -71,55 +79,47 @@ public:
     ContentPresenter(ContentPresenter&&)                 = default;
     ContentPresenter& operator=(ContentPresenter&&)      = default;
 
-    // ── 字体与前景色 ───────────────────────────────────────────────────────
+    // ── 字体与前景色（代理到内联 TextBlock）────────────────────────────────
 
     /**
      * @brief 设置渲染文字时使用的字体对象（由宿主控件传入）。
-     * @param font_face 字体对象指针（nullptr 表示不渲染文字，仅显示占位线）
+     * @param font_face FontFace 指针（void* 以避免公开 FontFace 头文件依赖）
      */
     void set_font_face(void* font_face) noexcept;
 
     /**
-     * @brief 设置文字渲染字号（逻辑像素）。
-     * @param size_px 字号，单位为逻辑像素（默认 14.0f）
+     * @brief 设置文字渲染字号（逻辑像素，默认 14.0f）。
      */
     void set_font_size(float size_px) noexcept;
 
     /**
-     * @brief 设置文字前景色。
-     * @param color 前景色（默认黑色）
+     * @brief 设置文字前景色（默认黑色）。
      */
     void set_foreground(math::Color color) noexcept;
 
 protected:
-    // ── 布局与渲染虚方法 ───────────────────────────────────────────────────
+    // ── 布局虚方法 ────────────────────────────────────────────────────────
 
     /**
-     * @brief 根据内容类型计算期望尺寸。
-     *
-     * - 文字内容：按字符数估算宽度（占位算法，与 TextBlock 相同）
-     * - 元素内容：委托给内容元素的 measure
-     * - 无内容：返回 {0, 0}
+     * @brief 测量内容尺寸，委托给内联 TextBlock 或外部元素。
      */
     void on_measure(math::Size available_size) override;
 
     /**
-     * @brief 渲染内容。
+     * @brief 排列内容子元素至给定矩形（覆盖 Control::on_arrange）。
      *
-     * - 文字内容：绘制水平占位线（无真实字体时的视觉替代）
-     * - 元素内容：元素作为子节点自动渲染，此处无需操作
-     * - 无内容：空操作
+     * ContentPresenter 自身无模板根，需手动排列内联 TextBlock 或外部元素。
      */
-    void on_render(paint::Canvas& canvas) override;
+    void on_arrange(math::Rect final_rect) override;
 
 private:
     // ── 依赖属性变更回调 ───────────────────────────────────────────────────
 
     /**
-     * @brief ContentProperty 变更时同步内部状态。
-     *
-     * 根据新值类型更新 content_text_、content_element_、is_text_mode_。
-     * 若新值为 UIElement*，将其加入/替换视觉子树中的内容元素。
+     * @brief ContentProperty 变更时：
+     *   - 字符串 → 创建（或复用）内联 TextBlock 并更新文字；
+     *   - UIElement* → 将其加入视觉子树（暂未实现，预留）；
+     *   - 空值 → 清空文字内容。
      */
     static void on_content_changed(DependencyObject*         sender,
                                    const DependencyProperty& prop,
@@ -127,7 +127,7 @@ private:
                                    const core::Variant&      new_v) noexcept;
 
     /**
-     * @brief PaddingProperty 变更时同步内部 padding 缓存。
+     * @brief PaddingProperty 变更时同步缓存并转发给内联 TextBlock。
      */
     static void on_padding_changed(DependencyObject*         sender,
                                    const DependencyProperty& prop,
@@ -136,37 +136,24 @@ private:
 
     // ── 内部状态 ───────────────────────────────────────────────────────────
 
-    /// 文字内容缓存（当 ContentProperty 为 InlineString 时有效）
-    containers::InlineString content_text_;
+    /// 内联 TextBlock（content 为字符串时自动创建并由 ContentPresenter 拥有）。
+    /// 首次设置字符串 content 时构造，析构时销毁。
+    TextBlock*      inline_text_block_{nullptr};
 
-    /// 元素内容（非拥有指针，生命周期由外部控制）
-    UIElement*               content_element_{nullptr};
+    /// 外部元素内容（非拥有指针，生命周期由调用方控制）
+    UIElement*      content_element_{nullptr};
 
-    /// 内边距缓存（从 PaddingProperty 同步）
-    math::Thickness          padding_cache_{};
+    /// 内边距缓存（同步自 PaddingProperty，并转发给 inline_text_block_）
+    math::Thickness padding_cache_{};
 
-    /// true 表示文字模式；false 表示元素模式或无内容
-    bool                     is_text_mode_{false};
+    /// 字体对象缓存（inline_text_block_ 未创建时暂存，创建后立即传入）
+    void*           font_face_{nullptr};
 
-    /// 字体对象（nullptr 时不渲染文字，回退到占位线）
-    void*                    font_face_{nullptr};
+    /// 文字字号缓存（逻辑像素，默认 14.0f）
+    float           font_size_px_{14.0f};
 
-    /// 文字字号（逻辑像素，默认 14.0f）
-    float                    font_size_px_{14.0f};
-
-    /// 文字前景色（默认黑色）
-    math::Color              foreground_{math::Color::Black};
-
-    // ── 测量缓存（on_measure 更新，on_render 读取）─────────────────────────
-
-    /// 最近一次 on_measure 计算所得文字实际宽度（不含 Padding，逻辑像素）
-    float                    measured_text_width_{0.0f};
-
-    /// 最近一次 on_measure 从字体获取的上行距（ascender，基线上方，正值，像素）
-    int32_t                  cached_ascender_{0};
-
-    /// 最近一次 on_measure 从字体获取的下行距（descender，基线下方，负值，像素）
-    int32_t                  cached_descender_{0};
+    /// 文字前景色缓存（默认黑色）
+    math::Color     foreground_{math::Color::Black};
 };
 
 } // namespace mine::ui

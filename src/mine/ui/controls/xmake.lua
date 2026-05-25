@@ -10,7 +10,6 @@ mine_module("mine.ui.controls", {
         "mine.containers",
         "mine.math",
         "mine.paint",
-        "mine.text",          -- ContentPresenter 调用 FontFace::measure_text() 需要
         "mine.ui.event",
         "mine.ui.input",
         "mine.ui.property",

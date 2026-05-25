@@ -1,14 +1,16 @@
 /**
  * @file ContentPresenter.cpp
  * @brief ContentPresenter 实现 —— 控件模板内容占位元素。
+ *
+ * 设计要点：
+ *   - content 为字符串时，自动创建内联 TextBlock 并委托全部测量/渲染；
+ *   - content 为 UIElement* 时，原位放入视觉子树（预留，当前里程碑暂不完整实现）；
+ *   - ContentPresenter 自身不直接绘制任何内容。
  */
 
 #include <mine/ui/controls/ContentPresenter.h>
+#include <mine/ui/controls/TextBlock.h>       // 内联 TextBlock 创建
 
-#include <mine/text/FontFace.h>       // 用于 measure_text() 真实测量
-
-#include <mine/paint/Canvas.h>
-#include <mine/paint/Brush.h>
 #include <mine/ui/property/DependencyProperty.h>
 #include <mine/ui/property/PropertyMetadata.h>
 #include <mine/core/StringView.h>
@@ -55,14 +57,30 @@ void ContentPresenter::on_content_changed(DependencyObject*         sender,
     auto* self = static_cast<ContentPresenter*>(sender);
 
     if (new_v.has<containers::InlineString>()) {
-        // 字符串内容：缓存文字并进入文字模式
-        self->content_text_    = new_v.get<containers::InlineString>();
-        self->is_text_mode_    = true;
+        // ── 字符串内容：创建或复用内联 TextBlock ──────────────────────────────
+        if (!self->inline_text_block_) {
+            // 首次设置字符串内容：创建内联 TextBlock 并配置字体/颜色/内边距
+            self->inline_text_block_ = MINE_NEW(TextBlock);
+            self->inline_text_block_->set_font_face(self->font_face_);
+            self->inline_text_block_->set_font_size(self->font_size_px_);
+            self->inline_text_block_->set_foreground(self->foreground_);
+            self->inline_text_block_->set_padding(self->padding_cache_);
+            // 将 TextBlock 加入视觉子树，后续由视觉树驱动其测量和渲染
+            self->add_child(self->inline_text_block_);
+        }
+        // 更新文字内容（TextBlock 内部会触发自身 invalidate）
+        const auto& str = new_v.get<containers::InlineString>();
+        self->inline_text_block_->set_text(
+            core::StringView{ str.data(), str.size() });
+        // 元素内容指针置空（与字符串模式互斥）
         self->content_element_ = nullptr;
+
     } else {
-        // 空值或其他类型：清空内容
-        self->content_text_    = containers::InlineString{};
-        self->is_text_mode_    = false;
+        // ── 空值或其他类型：清空文字内容 ─────────────────────────────────────
+        if (self->inline_text_block_) {
+            // 保留 TextBlock 结构但清空文字（避免频繁分配/销毁）
+            self->inline_text_block_->set_text({});
+        }
         self->content_element_ = nullptr;
     }
 }
@@ -75,6 +93,10 @@ void ContentPresenter::on_padding_changed(DependencyObject*         sender,
     auto* self = static_cast<ContentPresenter*>(sender);
     if (new_v.has<math::Thickness>()) {
         self->padding_cache_ = new_v.get<math::Thickness>();
+        // 将新的内边距同步到内联 TextBlock（如果已创建）
+        if (self->inline_text_block_) {
+            self->inline_text_block_->set_padding(self->padding_cache_);
+        }
     }
 }
 
@@ -83,30 +105,51 @@ void ContentPresenter::on_padding_changed(DependencyObject*         sender,
 // ============================================================================
 
 ContentPresenter::ContentPresenter() = default;
-ContentPresenter::~ContentPresenter() = default;
+
+ContentPresenter::~ContentPresenter()
+{
+    // 析构内联 TextBlock：先从视觉树移除，再释放内存
+    if (inline_text_block_) {
+        remove_child(inline_text_block_);
+        MINE_DELETE(inline_text_block_);
+        inline_text_block_ = nullptr;
+    }
+}
 
 // ============================================================================
-// 字体与前景色 setter
+// 字体与前景色 setter（代理到内联 TextBlock）
 // ============================================================================
 
 void ContentPresenter::set_font_face(void* font_face) noexcept
 {
     font_face_ = font_face;
-    invalidate_render();
+    if (inline_text_block_) {
+        inline_text_block_->set_font_face(font_face);
+    }
+    // 字体变更影响文字宽度，需重新测量
+    invalidate_measure();
 }
 
 void ContentPresenter::set_font_size(float size_px) noexcept
 {
     font_size_px_ = size_px;
-    // 字号影响测量尺寸，同时需令布局重新计算
-    invalidate_measure();
-    invalidate_render();
+    if (inline_text_block_) {
+        // TextBlock::set_font_size 内部已调用 invalidate_measure
+        inline_text_block_->set_font_size(size_px);
+    } else {
+        invalidate_measure();
+    }
 }
 
 void ContentPresenter::set_foreground(math::Color color) noexcept
 {
     foreground_ = color;
-    invalidate_render();
+    if (inline_text_block_) {
+        // TextBlock::set_foreground 内部已调用 invalidate_render
+        inline_text_block_->set_foreground(color);
+    } else {
+        invalidate_render();
+    }
 }
 
 // ============================================================================
@@ -115,47 +158,10 @@ void ContentPresenter::set_foreground(math::Color color) noexcept
 
 void ContentPresenter::on_measure(math::Size available_size)
 {
-    // ContentPresenter 本身不包含 ControlTemplate，直接计算内容尺寸
-    if (is_text_mode_) {
-        if (font_face_ != nullptr) {
-            // ── 有字体：调用 FreeType 真实测量 ──────────────────────────────────
-            auto* face = static_cast<text::FontFace*>(font_face_);
-
-            // measure_text 内部会临时调用 FT_Set_Pixel_Sizes，
-            // 调用完成后 ascender()/descender() 返回对应字号的真实行高度量
-            const float text_w = face->measure_text(
-                content_text_.data(),
-                content_text_.size(),
-                font_size_px_);
-
-            // 缓存宽度和行高度量，on_render 直接使用，避免渲染时重复查询 FreeType
-            measured_text_width_ = text_w;
-            cached_ascender_     = face->ascender();    // 正值，基线上方像素数
-            cached_descender_    = face->descender();   // 负值，基线下方像素数
-
-            // 真实行高 = ascender + |descender|（descender 为负，相减即相加）
-            const float text_h = static_cast<float>(cached_ascender_ - cached_descender_);
-            set_desired_size({
-                text_w + padding_cache_.horizontal(),
-                text_h + padding_cache_.vertical(),
-            });
-        } else {
-            // ── 无字体：按字符数估算（向后兼容回退路径）──────────────────────────
-            constexpr float k_char_width_rate = 0.55f;
-            const float text_w = static_cast<float>(content_text_.size())
-                                  * font_size_px_ * k_char_width_rate;
-            const float text_h = font_size_px_ * 1.4f;
-
-            // 估算行高度量（近似 Latin 字体比例）
-            measured_text_width_ = text_w;
-            cached_ascender_     = static_cast<int32_t>(font_size_px_ * 0.8f);
-            cached_descender_    = -static_cast<int32_t>(font_size_px_ * 0.2f);
-
-            set_desired_size({
-                text_w + padding_cache_.horizontal(),
-                text_h + padding_cache_.vertical(),
-            });
-        }
+    if (inline_text_block_) {
+        // 字符串内容：委托给内联 TextBlock 测量，取其期望尺寸
+        inline_text_block_->measure(available_size);
+        set_desired_size(inline_text_block_->desired_size());
         return;
     }
 
@@ -171,47 +177,21 @@ void ContentPresenter::on_measure(math::Size available_size)
 }
 
 // ============================================================================
-// 渲染
+// 布局（排列）
 // ============================================================================
 
-void ContentPresenter::on_render(paint::Canvas& canvas)
+void ContentPresenter::on_arrange(math::Rect final_rect)
 {
-    if (!is_text_mode_) {
-        // 元素内容由视觉子树自动渲染；无内容时无操作
+    // ContentPresenter 自身无模板根，直接排列内容子元素
+    if (inline_text_block_) {
+        inline_text_block_->arrange(final_rect);
         return;
     }
 
-    const math::Rect rect = bounds_rect();
-    if (rect.empty()) {
-        return;
-    }
-
-    if (font_face_ != nullptr) {
-        // 水平居中：使用 on_measure 缓存的真实文字宽度，可用宽度不足时左对齐防裁剪
-        const float text_x = rect.x + std::max(0.0f, (rect.width - measured_text_width_) * 0.5f);
-
-        // 垂直居中：
-        //   设文字视觉中心 = 基线上方 ascender、下方 |descender| 的中间位置
-        //   视觉中心 Y = baseline - (ascender + descender) / 2
-        //              （descender 为负值，(a+d)/2 = (a-|d|)/2 > 0 → 视觉中心在基线上方）
-        //   令视觉中心 = rect 竖向中点：
-        //     baseline = rect.center_y + (ascender + descender) / 2
-        const float asc        = static_cast<float>(cached_ascender_);
-        const float dsc        = static_cast<float>(cached_descender_); // 负值
-        const float baseline_y = rect.y + rect.height * 0.5f + (asc + dsc) * 0.5f;
-
-        const core::StringView sv{ content_text_.data(), content_text_.size() };
-        canvas.draw_text(sv, { text_x, baseline_y }, font_face_, font_size_px_,
-                         paint::Brush::solid(foreground_));
-    } else {
-        // 无字体时：居中水平占位线（向后兼容）
-        const float line_w = rect.width - padding_cache_.horizontal();
-        if (line_w <= 0.0f) { return; }
-        const float line_y = rect.y + rect.height * 0.5f - 1.0f;
-        canvas.fill_rect(
-            { rect.x + padding_cache_.left, line_y, line_w, 2.0f },
-            paint::Brush::solid(math::Color::Black));
+    if (content_element_) {
+        content_element_->arrange(final_rect);
     }
 }
 
 } // namespace mine::ui
+
