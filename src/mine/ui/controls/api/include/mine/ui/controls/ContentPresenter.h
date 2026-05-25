@@ -156,6 +156,17 @@ private:
 
     /// 文字前景色（默认黑色）
     math::Color              foreground_{math::Color::Black};
+
+    // ── 测量缓存（on_measure 更新，on_render 读取）─────────────────────────
+
+    /// 最近一次 on_measure 计算所得文字实际宽度（不含 Padding，逻辑像素）
+    float                    measured_text_width_{0.0f};
+
+    /// 最近一次 on_measure 从字体获取的上行距（ascender，基线上方，正值，像素）
+    int32_t                  cached_ascender_{0};
+
+    /// 最近一次 on_measure 从字体获取的下行距（descender，基线下方，负值，像素）
+    int32_t                  cached_descender_{0};
 };
 
 } // namespace mine::ui

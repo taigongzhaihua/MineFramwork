@@ -5,6 +5,8 @@
 
 #include <mine/ui/controls/ContentPresenter.h>
 
+#include <mine/text/FontFace.h>       // 用于 measure_text() 真实测量
+
 #include <mine/paint/Canvas.h>
 #include <mine/paint/Brush.h>
 #include <mine/ui/property/DependencyProperty.h>
@@ -115,14 +117,45 @@ void ContentPresenter::on_measure(math::Size available_size)
 {
     // ContentPresenter 本身不包含 ControlTemplate，直接计算内容尺寸
     if (is_text_mode_) {
-        // 按字符数估算文字宽度（使用实际字号，与 on_render 居中计算保持一致）
-        constexpr float k_char_width_rate = 0.55f;
-        const float content_w = static_cast<float>(content_text_.size()) * font_size_px_ * k_char_width_rate;
-        const float content_h = font_size_px_ * 1.4f;
-        set_desired_size({
-            content_w + padding_cache_.horizontal(),
-            content_h + padding_cache_.vertical(),
-        });
+        if (font_face_ != nullptr) {
+            // ── 有字体：调用 FreeType 真实测量 ──────────────────────────────────
+            auto* face = static_cast<text::FontFace*>(font_face_);
+
+            // measure_text 内部会临时调用 FT_Set_Pixel_Sizes，
+            // 调用完成后 ascender()/descender() 返回对应字号的真实行高度量
+            const float text_w = face->measure_text(
+                content_text_.data(),
+                content_text_.size(),
+                font_size_px_);
+
+            // 缓存宽度和行高度量，on_render 直接使用，避免渲染时重复查询 FreeType
+            measured_text_width_ = text_w;
+            cached_ascender_     = face->ascender();    // 正值，基线上方像素数
+            cached_descender_    = face->descender();   // 负值，基线下方像素数
+
+            // 真实行高 = ascender + |descender|（descender 为负，相减即相加）
+            const float text_h = static_cast<float>(cached_ascender_ - cached_descender_);
+            set_desired_size({
+                text_w + padding_cache_.horizontal(),
+                text_h + padding_cache_.vertical(),
+            });
+        } else {
+            // ── 无字体：按字符数估算（向后兼容回退路径）──────────────────────────
+            constexpr float k_char_width_rate = 0.55f;
+            const float text_w = static_cast<float>(content_text_.size())
+                                  * font_size_px_ * k_char_width_rate;
+            const float text_h = font_size_px_ * 1.4f;
+
+            // 估算行高度量（近似 Latin 字体比例）
+            measured_text_width_ = text_w;
+            cached_ascender_     = static_cast<int32_t>(font_size_px_ * 0.8f);
+            cached_descender_    = -static_cast<int32_t>(font_size_px_ * 0.2f);
+
+            set_desired_size({
+                text_w + padding_cache_.horizontal(),
+                text_h + padding_cache_.vertical(),
+            });
+        }
         return;
     }
 
@@ -154,16 +187,21 @@ void ContentPresenter::on_render(paint::Canvas& canvas)
     }
 
     if (font_face_ != nullptr) {
-        // 估算文字宽度（与 on_measure 保持同一算法，确保居中计算一致）
-        const float estimated_w = static_cast<float>(content_text_.size())
-                                  * font_size_px_ * 0.55f;
-        // 水平居中：在 bounds_rect 内居中，可用宽度不足时左对齐以防裁剪
-        const float text_x = rect.x + std::max(0.0f, (rect.width - estimated_w) * 0.5f);
-        // 垂直居中：基线 = 竖向中点 + 字帽高度近似值（约 0.35 × 字号）
-        // （draw_text 的 y 参数为基线位置；字帽顶端约在基线上方 0.7 × font_size 处）
-        const float text_y = rect.y + rect.height * 0.5f + font_size_px_ * 0.35f;
+        // 水平居中：使用 on_measure 缓存的真实文字宽度，可用宽度不足时左对齐防裁剪
+        const float text_x = rect.x + std::max(0.0f, (rect.width - measured_text_width_) * 0.5f);
+
+        // 垂直居中：
+        //   设文字视觉中心 = 基线上方 ascender、下方 |descender| 的中间位置
+        //   视觉中心 Y = baseline - (ascender + descender) / 2
+        //              （descender 为负值，(a+d)/2 = (a-|d|)/2 > 0 → 视觉中心在基线上方）
+        //   令视觉中心 = rect 竖向中点：
+        //     baseline = rect.center_y + (ascender + descender) / 2
+        const float asc        = static_cast<float>(cached_ascender_);
+        const float dsc        = static_cast<float>(cached_descender_); // 负值
+        const float baseline_y = rect.y + rect.height * 0.5f + (asc + dsc) * 0.5f;
+
         const core::StringView sv{ content_text_.data(), content_text_.size() };
-        canvas.draw_text(sv, { text_x, text_y }, font_face_, font_size_px_,
+        canvas.draw_text(sv, { text_x, baseline_y }, font_face_, font_size_px_,
                          paint::Brush::solid(foreground_));
     } else {
         // 无字体时：居中水平占位线（向后兼容）

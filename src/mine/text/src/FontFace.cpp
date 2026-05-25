@@ -230,4 +230,103 @@ int32_t FontFace::line_height() const noexcept {
     return static_cast<int32_t>(impl_->face->size->metrics.height >> 6);
 }
 
+// ── 文件内部：UTF-8 单字符解码辅助 ───────────────────────────────────────────
+
+/**
+ * @brief 从 UTF-8 缓冲区解码下一个 Unicode 码点，并将 p 向前推进。
+ *
+ * 支持 1~4 字节序列，涵盖完整 Unicode 范围（包含 CJK 统一表意字符）。
+ * 遇到非法字节序列时返回替换字符 U+FFFD 并尽力向前推进，
+ * 调用方可选择跳过或累计替换字符的宽度。
+ *
+ * @param p    当前读指针（按引用更新，每次调用后指向下一字符起始位置）
+ * @param end  缓冲区末端（不可读）
+ * @return 解码所得 Unicode 码点；非法序列返回 0xFFFD
+ */
+static uint32_t utf8_decode_one(const char*& p, const char* end) noexcept
+{
+    const auto c0 = static_cast<uint8_t>(*p++);
+
+    // 1 字节 ASCII（0xxxxxxx）
+    if (c0 < 0x80u) {
+        return static_cast<uint32_t>(c0);
+    }
+
+    // 延续字节出现在起始位置 → 非法
+    if (c0 < 0xC0u) {
+        return 0xFFFDu;
+    }
+
+    // 2 字节序列（110xxxxx 10xxxxxx）
+    if (c0 < 0xE0u) {
+        if (p >= end) { return 0xFFFDu; }
+        const auto c1 = static_cast<uint8_t>(*p++);
+        if ((c1 & 0xC0u) != 0x80u) { return 0xFFFDu; }
+        return ((c0 & 0x1Fu) << 6) | (c1 & 0x3Fu);
+    }
+
+    // 3 字节序列（1110xxxx 10xxxxxx 10xxxxxx），涵盖 BMP（含 CJK）
+    if (c0 < 0xF0u) {
+        if (p + 1 >= end) { return 0xFFFDu; }   // 需再读 2 字节
+        const auto c1 = static_cast<uint8_t>(*p++);
+        const auto c2 = static_cast<uint8_t>(*p++);
+        if ((c1 & 0xC0u) != 0x80u || (c2 & 0xC0u) != 0x80u) { return 0xFFFDu; }
+        return ((c0 & 0x0Fu) << 12) | ((c1 & 0x3Fu) << 6) | (c2 & 0x3Fu);
+    }
+
+    // 4 字节序列（11110xxx 10xxxxxx 10xxxxxx 10xxxxxx），补充平面
+    if (p + 2 >= end) { return 0xFFFDu; }        // 需再读 3 字节
+    const auto c1 = static_cast<uint8_t>(*p++);
+    const auto c2 = static_cast<uint8_t>(*p++);
+    const auto c3 = static_cast<uint8_t>(*p++);
+    if ((c1 & 0xC0u) != 0x80u || (c2 & 0xC0u) != 0x80u || (c3 & 0xC0u) != 0x80u) {
+        return 0xFFFDu;
+    }
+    return ((c0 & 0x07u) << 18) | ((c1 & 0x3Fu) << 12) | ((c2 & 0x3Fu) << 6) | (c3 & 0x3Fu);
+}
+
+// ── measure_text ──────────────────────────────────────────────────────────────
+
+float FontFace::measure_text(const char* utf8,
+                              size_t      len,
+                              float       font_size_px) const
+{
+    if (impl_ == nullptr || impl_->face == nullptr || utf8 == nullptr || len == 0) {
+        return 0.0f;
+    }
+
+    FT_Face face = impl_->face;
+
+    // 设置字号（浮点四舍五入到整像素；width=0 表示由 height 等比推算）
+    const FT_UInt pixel_h = static_cast<FT_UInt>(font_size_px + 0.5f);
+    if (FT_Set_Pixel_Sizes(face, 0, pixel_h) != 0) {
+        FT_LOG("measure_text：FT_Set_Pixel_Sizes 失败");
+        return 0.0f;
+    }
+
+    float total_width = 0.0f;
+    const char* p   = utf8;
+    const char* end = utf8 + len;
+
+    while (p < end) {
+        const uint32_t cp = utf8_decode_one(p, end);
+        if (cp == 0xFFFDu) {
+            continue;   // 跳过无效字节序列，不累加宽度
+        }
+
+        const FT_UInt glyph_idx = FT_Get_Char_Index(face, static_cast<FT_ULong>(cp));
+
+        // FT_LOAD_DEFAULT 加载字形轮廓/位图到字形槽（不调用 FT_Render_Glyph），
+        // advance.x 在加载完成后即可读取，无需光栅化
+        if (FT_Load_Glyph(face, glyph_idx, FT_LOAD_DEFAULT) != 0) {
+            continue;
+        }
+
+        // advance.x 单位为 1/64 像素，转换为逻辑像素
+        total_width += static_cast<float>(face->glyph->advance.x) / 64.0f;
+    }
+
+    return total_width;
+}
+
 } // namespace mine::text
