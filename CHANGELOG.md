@@ -15,6 +15,11 @@
   - 新增至 `AnimationAll.h` 伞形头文件
 
 ### Changed
+- **mine.ui.layout（迁移第一步）**：布局容器子元素类型从 `FrameworkElement*` 放宽为 `UIElement*`，打通现有 `Button/TextBlock` 直接接入 `StackPanel/Grid` 的能力：
+  - `Panel::add_child/remove_child/child_at` 与 `children_` 改为 `UIElement*`
+  - `Grid` 附加属性便捷接口（`get_row/set_row/get_column/...`）参数从 `FrameworkElement` 放宽为 `UIElement`
+  - `StackPanel/Grid` 内部布局循环统一按 `UIElement*` 处理子元素
+
 - **mine.ui.controls / Button（F2 技术债清理）**：完成 §21.8 全部技术债清理：
   - **新增 4 个 DependencyProperty**：`ForegroundProperty`（白色默认值）、`BorderColorProperty`（透明默认值）、`HoveredBackgroundProperty`（MD3 Primary+8% state layer）、`PressedBackgroundProperty`（MD3 Primary+12% state layer）
   - **移除 4 个 plain member**：`foreground_`、`background_hover_`、`background_press_`、`border_color_` 全部替换为对应 DP 的 `get_value()`/`set_value()` 读写

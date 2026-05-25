@@ -2,7 +2,7 @@
  * @file Panel.cpp
  * @brief Panel 布局面板基类实现。
  *
- * Panel 管理 FrameworkElement* 子元素集合：
+ * Panel 管理 UIElement* 子元素集合：
  *   - add_child：同时加入 children_ 列表和 Visual 视觉树
  *   - remove_child：从两处同时移除
  */
@@ -24,7 +24,7 @@ Panel::~Panel() = default;
 // 子元素管理
 // ============================================================================
 
-void Panel::add_child(FrameworkElement* child)
+void Panel::add_child(UIElement* child)
 {
     MINE_ASSERT_MSG(child != nullptr, "Panel::add_child: child 不能为 nullptr");
 
@@ -42,7 +42,7 @@ void Panel::add_child(FrameworkElement* child)
     invalidate_measure();
 }
 
-void Panel::remove_child(FrameworkElement* child)
+void Panel::remove_child(UIElement* child)
 {
     if (child == nullptr) {
         return;
@@ -64,7 +64,7 @@ void Panel::remove_child(FrameworkElement* child)
     // child 不存在时静默忽略
 }
 
-FrameworkElement* Panel::child_at(uint32_t index) const noexcept
+UIElement* Panel::child_at(uint32_t index) const noexcept
 {
     MINE_ASSERT_MSG(index < static_cast<uint32_t>(children_.size()),
                     "Panel::child_at: 索引越界");

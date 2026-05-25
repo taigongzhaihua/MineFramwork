@@ -81,42 +81,42 @@ const DependencyProperty& Grid::ColumnSpanProperty =
 // 附加属性便捷静态方法
 // ============================================================================
 
-int Grid::get_row(const FrameworkElement& elem) noexcept
+int Grid::get_row(const UIElement& elem) noexcept
 {
     return elem.get_value(RowProperty).get<int>();
 }
 
-void Grid::set_row(FrameworkElement& elem, int row)
+void Grid::set_row(UIElement& elem, int row)
 {
     elem.set_value(RowProperty, core::Variant{row});
 }
 
-int Grid::get_column(const FrameworkElement& elem) noexcept
+int Grid::get_column(const UIElement& elem) noexcept
 {
     return elem.get_value(ColumnProperty).get<int>();
 }
 
-void Grid::set_column(FrameworkElement& elem, int col)
+void Grid::set_column(UIElement& elem, int col)
 {
     elem.set_value(ColumnProperty, core::Variant{col});
 }
 
-int Grid::get_row_span(const FrameworkElement& elem) noexcept
+int Grid::get_row_span(const UIElement& elem) noexcept
 {
     return elem.get_value(RowSpanProperty).get<int>();
 }
 
-void Grid::set_row_span(FrameworkElement& elem, int span)
+void Grid::set_row_span(UIElement& elem, int span)
 {
     elem.set_value(RowSpanProperty, core::Variant{span});
 }
 
-int Grid::get_column_span(const FrameworkElement& elem) noexcept
+int Grid::get_column_span(const UIElement& elem) noexcept
 {
     return elem.get_value(ColumnSpanProperty).get<int>();
 }
 
-void Grid::set_column_span(FrameworkElement& elem, int span)
+void Grid::set_column_span(UIElement& elem, int span)
 {
     elem.set_value(ColumnSpanProperty, core::Variant{span});
 }
@@ -291,7 +291,7 @@ math::Size Grid::measure_override(math::Size available)
     // 简化：对所有子元素先提供 available（足够保守），收集 Auto 最大值
     const uint32_t child_cnt = children_count();
     for (uint32_t i = 0; i < child_cnt; ++i) {
-        FrameworkElement* child = child_at(i);
+        UIElement* child = child_at(i);
 
         // 读取附加属性（若无行/列定义，则固定为 0）
         const int row      = (row_count() == 0) ? 0 : get_row(*child);
@@ -368,7 +368,7 @@ math::Size Grid::arrange_override(math::Size final_size)
     // 收集 Auto 行/列的子元素 desiredSize（复用 Measure 后的缓存结果）
     const uint32_t child_cnt = children_count();
     for (uint32_t i = 0; i < child_cnt; ++i) {
-        FrameworkElement* child = child_at(i);
+        UIElement* child = child_at(i);
         const int row      = (row_count() == 0) ? 0 : get_row(*child);
         const int col      = (column_count() == 0) ? 0 : get_column(*child);
         const int row_span = (row_count() == 0) ? 1 : get_row_span(*child);
@@ -425,7 +425,7 @@ math::Size Grid::arrange_override(math::Size final_size)
 
     // ── 安排每个子元素 ────────────────────────────────────────────────────
     for (uint32_t i = 0; i < child_cnt; ++i) {
-        FrameworkElement* child = child_at(i);
+        UIElement* child = child_at(i);
 
         const int row      = (row_count() == 0) ? 0 : get_row(*child);
         const int col      = (column_count() == 0) ? 0 : get_column(*child);

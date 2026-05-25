@@ -66,7 +66,7 @@ math::Size StackPanel::measure_override(math::Size available)
 
     const uint32_t count = children_count();
     for (uint32_t i = 0; i < count; ++i) {
-        FrameworkElement* child = child_at(i);
+        UIElement* child = child_at(i);
 
         // 对主轴方向传入无限制（StackPanel 不限制主轴方向的子元素尺寸）
         math::Size child_avail = available;
@@ -107,7 +107,7 @@ math::Size StackPanel::arrange_override(math::Size final_size)
     const uint32_t count = children_count();
 
     for (uint32_t i = 0; i < count; ++i) {
-        FrameworkElement* child = child_at(i);
+        UIElement* child = child_at(i);
         const math::Size ds = child->desired_size();
 
         math::Rect slot;

@@ -54,17 +54,17 @@ public:
 
     // ── 便捷静态方法（等价于在子元素上 get/set 对应附加属性）──────────────
 
-    static int  get_row(const FrameworkElement& elem) noexcept;
-    static void set_row(FrameworkElement& elem, int row);
+    static int  get_row(const UIElement& elem) noexcept;
+    static void set_row(UIElement& elem, int row);
 
-    static int  get_column(const FrameworkElement& elem) noexcept;
-    static void set_column(FrameworkElement& elem, int col);
+    static int  get_column(const UIElement& elem) noexcept;
+    static void set_column(UIElement& elem, int col);
 
-    static int  get_row_span(const FrameworkElement& elem) noexcept;
-    static void set_row_span(FrameworkElement& elem, int span);
+    static int  get_row_span(const UIElement& elem) noexcept;
+    static void set_row_span(UIElement& elem, int span);
 
-    static int  get_column_span(const FrameworkElement& elem) noexcept;
-    static void set_column_span(FrameworkElement& elem, int span);
+    static int  get_column_span(const UIElement& elem) noexcept;
+    static void set_column_span(UIElement& elem, int span);
 
     // ── 生命周期 ──────────────────────────────────────────────────────────
 
