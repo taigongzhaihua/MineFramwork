@@ -22,6 +22,7 @@
 #include <mine/ui/event/RoutedEvent.h>
 #include <mine/ui/property/DependencyProperty.h>
 #include <mine/containers/InlineString.h>
+#include <mine/paint/Brush.h>
 #include <mine/math/Color.h>
 #include <mine/math/Thickness.h>
 #include <mine/core/Memory.h>
@@ -54,9 +55,9 @@ public:
     static const DependencyProperty& ContentProperty;
 
     /**
-     * @brief 当前渲染背景色（由 Storyboard 在 Animation 槽写入插值色）。
+     * @brief 当前渲染背景画刷（由 Storyboard 在 Animation 槽写入插值画刷）。
      *
-     * Default = MD3 Primary (#6750A4)。用户设定的 Normal 态色通过 set_background()
+     * Default = MD3 Primary Brush::solid(#6750A4)。用户设定的 Normal 态画刷通过 set_background()
      * 写入 Local 槽；Storyboard 在 Animation 槽（优先级 60）覆盖，on_render 读取最高优先级。
      */
     static const DependencyProperty& BackgroundProperty;
@@ -69,32 +70,32 @@ public:
     static const DependencyProperty& PaddingProperty;
 
     /**
-     * @brief 前景色（文字颜色，Variant 存储 Color）。
+     * @brief 前景画刷（文字颜色，Variant 存储 paint::Brush）。
      *
-     * Default = White（MD3 On Primary）。
+     * Default = Brush::solid(White)（MD3 On Primary）。
      * 变更时自动传播到模板树中的 ContentPresenter。
      */
     static const DependencyProperty& ForegroundProperty;
 
     /**
-     * @brief 边框颜色（Variant 存储 Color）。
+     * @brief 边框画刷（Variant 存储 paint::Brush）。
      *
-     * Default = Transparent（MD3 Filled Button 无外边框）。
+     * Default = Brush::solid(Transparent)（MD3 Filled Button 无外边框）。
      */
     static const DependencyProperty& BorderColorProperty;
 
     /**
-     * @brief Hovered 状态目标背景色（Variant 存储 Color）。
+     * @brief Hovered 状态目标背景画刷（Variant 存储 paint::Brush）。
      *
-     * Default = MD3 Primary + OnPrimary * 8%（≈ #735BAC）。
+     * Default = Brush::solid(MD3 Primary + OnPrimary * 8%，≈ #735BAC)。
      * set_background_hovered() 写入 Local 槽；on_visual_state_changed 读取作为过渡终值。
      */
     static const DependencyProperty& HoveredBackgroundProperty;
 
     /**
-     * @brief Pressed 状态目标背景色（Variant 存储 Color）。
+     * @brief Pressed 状态目标背景画刷（Variant 存储 paint::Brush）。
      *
-     * Default = MD3 Primary + OnPrimary * 12%（≈ #7A65AF）。
+     * Default = Brush::solid(MD3 Primary + OnPrimary * 12%，≈ #7A65AF)。
      * set_background_pressed() 写入 Local 槽；on_visual_state_changed 读取作为过渡终值。
      */
     static const DependencyProperty& PressedBackgroundProperty;
@@ -121,29 +122,29 @@ public:
     void set_padding(math::Thickness padding);
 
     /// 读取 ForegroundProperty（最高优先级生效值）
-    [[nodiscard]] math::Color foreground() const noexcept;
+    [[nodiscard]] paint::Brush foreground() const noexcept;
     /// 写入 ForegroundProperty Local 槽，并传播到 ContentPresenter
-    void set_foreground(math::Color color);
+    void set_foreground(paint::Brush brush);
 
-    /// 读取 BackgroundProperty（当前渲染色，含动画插值）
-    [[nodiscard]] math::Color background() const noexcept;
+    /// 读取 BackgroundProperty（当前渲染画刷，含动画插值）
+    [[nodiscard]] paint::Brush background() const noexcept;
     /// 写入 BackgroundProperty Local 槽（同时停止进行中的 Storyboard）
-    void set_background(math::Color color);
+    void set_background(paint::Brush brush);
 
     /// 读取 HoveredBackgroundProperty
-    [[nodiscard]] math::Color background_hovered() const noexcept;
+    [[nodiscard]] paint::Brush background_hovered() const noexcept;
     /// 写入 HoveredBackgroundProperty Local 槽
-    void set_background_hovered(math::Color color);
+    void set_background_hovered(paint::Brush brush);
 
     /// 读取 PressedBackgroundProperty
-    [[nodiscard]] math::Color background_pressed() const noexcept;
+    [[nodiscard]] paint::Brush background_pressed() const noexcept;
     /// 写入 PressedBackgroundProperty Local 槽
-    void set_background_pressed(math::Color color);
+    void set_background_pressed(paint::Brush brush);
 
     /// 读取 BorderColorProperty
-    [[nodiscard]] math::Color border_color() const noexcept;
+    [[nodiscard]] paint::Brush border_color() const noexcept;
     /// 写入 BorderColorProperty Local 槽
-    void set_border_color(math::Color color);
+    void set_border_color(paint::Brush brush);
 
     /**
      * @brief 设置文字渲染字体（同步传播到 ContentPresenter）。
@@ -218,10 +219,10 @@ private:
     bool                     is_pressed_   = false;
     /// 内边距缓存（由 on_padding_changed 从 PaddingProperty 同步）
     math::Thickness          padding_      = math::Thickness::symmetric(24.0f, 10.0f);
-    /// Normal 态目标背景色（用户通过 set_background() 设定的语义值）
-    /// F2 临时保留：用于 on_visual_state_changed 中 Normal 态目标色查找，
+    /// Normal 态目标背景画刷（用户通过 set_background() 设定的语义値）
+    /// F2 临时保留：用于 on_visual_state_changed 中 Normal 态目标画刷查找，
     /// F3 将改为从 BackgroundProperty Local 槽读取（配合 StyleSetter）
-    math::Color              background_   = math::Color::from_rgb_u32(0x6750A4);
+    paint::Brush             background_   = paint::Brush::solid_rgb(0x6750A4);
     void*                    font_face_    = nullptr;
     float                    font_size_px_ = 14.0f;
 

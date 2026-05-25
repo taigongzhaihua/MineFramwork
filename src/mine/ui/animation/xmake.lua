@@ -9,5 +9,6 @@ mine_module("mine.ui.animation", {
         "mine.core",         -- Variant / Function / OwnedPtr 等核心类型
         "mine.containers",   -- SmallVector
         "mine.ui.property",  -- DependencyObject + DependencyProperty + ValuePriority
+        "mine.paint",        -- Brush 类型插值（lerp_variant 支持 paint::Brush）
     },
 })

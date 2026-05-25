@@ -51,53 +51,53 @@ const DependencyProperty& Button::PaddingProperty =
             .changed         = &Button::on_padding_changed,
         });
 
-// Button::BackgroundProperty — 当前渲染背景色（由 Storyboard 在 Animation 优先级写入插值色）
-// 默认值为 MD3 Primary（#6750A4），on_visual_state_changed 启动时先将当前色写入 Local 槽，
-// 之后 Storyboard 在 Animation 槽（优先级 60）写入帧间插值，on_render 通过 get_value 读取。
+// Button::BackgroundProperty — 当前渲染背景画刷（由 Storyboard 在 Animation 优先级写入插値画刷）
+// 默认値为 MD3 Primary（#6750A4）的纯色画刷，on_visual_state_changed 启动时先将当前画刷写入 Local 槽，
+// 之后 Storyboard 在 Animation 槽（优先级 60）写入帧间插値，on_render 通过 get_value 读取。
 const DependencyProperty& Button::BackgroundProperty =
     register_property<Button>(
         "Background",
-        core::Variant{ math::Color::from_rgb_u32(0x6750A4) },  // MD3 Primary
+        core::Variant{ paint::Brush::solid_rgb(0x6750A4) },  // MD3 Primary
         PropertyMetadata{
             .affects_render = true,  // 属性变更时自动触发 invalidate_render
         });
 
-// Button::ForegroundProperty — 文字前景色（MD3 On Primary 白色）
+// Button::ForegroundProperty — 文字前景画刷（MD3 On Primary 白色）
 // 变更时通过 on_foreground_changed 自动传播到 ContentPresenter
 const DependencyProperty& Button::ForegroundProperty =
     register_property<Button>(
         "Foreground",
-        core::Variant{ math::Color::White },  // MD3 On Primary
+        core::Variant{ paint::Brush::solid(math::Color::White) },  // MD3 On Primary
         PropertyMetadata{
             .affects_render = true,
             .changed        = &Button::on_foreground_changed,
         });
 
-// Button::BorderColorProperty — 边框颜色（MD3 Filled Button 无外边框，默认透明）
+// Button::BorderColorProperty — 边框画刷（MD3 Filled Button 无外边框，默认透明）
 const DependencyProperty& Button::BorderColorProperty =
     register_property<Button>(
         "BorderColor",
-        core::Variant{ math::Color::Transparent },
+        core::Variant{ paint::Brush::solid(math::Color::Transparent) },
         PropertyMetadata{
             .affects_render = true,
         });
 
-// Button::HoveredBackgroundProperty — Hovered 状态目标背景色
+// Button::HoveredBackgroundProperty — Hovered 状态目标背景画刷
 // MD3 Primary + OnPrimary * 8%（hover state layer = 8% of OnPrimary）
 const DependencyProperty& Button::HoveredBackgroundProperty =
     register_property<Button>(
         "HoveredBackground",
-        core::Variant{ math::Color{0.452f, 0.369f, 0.672f, 1.0f} },  // ≈ #735BAC
+        core::Variant{ paint::Brush::solid(math::Color{0.452f, 0.369f, 0.672f, 1.0f}) },  // ≈ #735BAC
         PropertyMetadata{
             .affects_render = true,
         });
 
-// Button::PressedBackgroundProperty — Pressed 状态目标背景色
+// Button::PressedBackgroundProperty — Pressed 状态目标背景画刷
 // MD3 Primary + OnPrimary * 12%（pressed state layer = 12% of OnPrimary）
 const DependencyProperty& Button::PressedBackgroundProperty =
     register_property<Button>(
         "PressedBackground",
-        core::Variant{ math::Color{0.476f, 0.396f, 0.686f, 1.0f} },  // ≈ #7A65AF
+        core::Variant{ paint::Brush::solid(math::Color{0.476f, 0.396f, 0.686f, 1.0f}) },  // ≈ #7A65AF
         PropertyMetadata{
             .affects_render = true,
         });
@@ -174,10 +174,10 @@ void Button::on_foreground_changed(DependencyObject*         sender,
                                    const core::Variant&      new_v) noexcept
 {
     auto* self = static_cast<Button*>(sender);
-    // 若模板已构建，将新前景色推送到 ContentPresenter（幂等，template_root 为 nullptr 则跳过）
+    // 若模板已构建，将新前景画刷推送到 ContentPresenter（幂等，template_root 为 nullptr 则跳过）
     UIElement* child = self->find_template_child("content");
-    if (child != nullptr && new_v.has<math::Color>()) {
-        static_cast<ContentPresenter*>(child)->set_foreground(new_v.get<math::Color>());
+    if (child != nullptr && new_v.has<paint::Brush>()) {
+        static_cast<ContentPresenter*>(child)->set_foreground(new_v.get<paint::Brush>());
     }
 }
 
@@ -254,85 +254,85 @@ void Button::set_padding(math::Thickness padding)
     invalidate_render();
 }
 
-math::Color Button::foreground() const noexcept
+paint::Brush Button::foreground() const noexcept
 {
     const core::Variant& v = get_value(ForegroundProperty);
-    return v.has<math::Color>() ? v.get<math::Color>() : math::Color::White;
+    return v.has<paint::Brush>() ? v.get<paint::Brush>() : paint::Brush::solid(math::Color::White);
 }
 
-void Button::set_foreground(math::Color color)
+void Button::set_foreground(paint::Brush brush)
 {
     // 写入 ForegroundProperty Local 槽；on_foreground_changed 回调负责传播到 ContentPresenter
     // affects_render=true → set_value 内部自动触发 invalidate_render
-    set_value(ForegroundProperty, core::Variant{color}, ValuePriority::Local);
+    set_value(ForegroundProperty, core::Variant{brush}, ValuePriority::Local);
 }
 
-math::Color Button::background() const noexcept
+paint::Brush Button::background() const noexcept
 {
     return background_;
 }
 
-void Button::set_background(math::Color color)
+void Button::set_background(paint::Brush brush)
 {
-    background_ = color;
+    background_ = brush;
     // 若有进行中的背景过渡动画，先停止并释放，防止 Animation 槽(60) 遮盖 Local 槽(50)
     if (bg_storyboard_ && !bg_storyboard_->is_complete()) {
         bg_storyboard_->stop();
         bg_storyboard_ = nullptr;
     }
-    // 将新颜色写入 BackgroundProperty Local 槽：on_render 通过 get_value 读取此属性，
+    // 将新画刷写入 BackgroundProperty Local 槽：on_render 通过 get_value 读取此属性，
     // affects_render=true → set_value 内部自动触发 invalidate_render，无需额外调用
-    set_value(BackgroundProperty, core::Variant{color}, ValuePriority::Local);
+    set_value(BackgroundProperty, core::Variant{brush}, ValuePriority::Local);
 }
 
-math::Color Button::background_hovered() const noexcept
+paint::Brush Button::background_hovered() const noexcept
 {
     const core::Variant& v = get_value(HoveredBackgroundProperty);
-    return v.has<math::Color>() ? v.get<math::Color>() : math::Color{};
+    return v.has<paint::Brush>() ? v.get<paint::Brush>() : paint::Brush{};
 }
 
-void Button::set_background_hovered(math::Color color)
+void Button::set_background_hovered(paint::Brush brush)
 {
     // 写入 HoveredBackgroundProperty Local 槽；affects_render=true → 自动触发 invalidate_render
-    set_value(HoveredBackgroundProperty, core::Variant{color}, ValuePriority::Local);
+    set_value(HoveredBackgroundProperty, core::Variant{brush}, ValuePriority::Local);
 }
 
-math::Color Button::background_pressed() const noexcept
+paint::Brush Button::background_pressed() const noexcept
 {
     const core::Variant& v = get_value(PressedBackgroundProperty);
-    return v.has<math::Color>() ? v.get<math::Color>() : math::Color{};
+    return v.has<paint::Brush>() ? v.get<paint::Brush>() : paint::Brush{};
 }
 
-void Button::set_background_pressed(math::Color color)
+void Button::set_background_pressed(paint::Brush brush)
 {
     // 写入 PressedBackgroundProperty Local 槽；affects_render=true → 自动触发 invalidate_render
-    set_value(PressedBackgroundProperty, core::Variant{color}, ValuePriority::Local);
+    set_value(PressedBackgroundProperty, core::Variant{brush}, ValuePriority::Local);
 }
 
-math::Color Button::border_color() const noexcept
+paint::Brush Button::border_color() const noexcept
 {
     const core::Variant& v = get_value(BorderColorProperty);
-    return v.has<math::Color>() ? v.get<math::Color>() : math::Color::Transparent;
+    return v.has<paint::Brush>() ? v.get<paint::Brush>() : paint::Brush::solid(math::Color::Transparent);
 }
 
-void Button::set_border_color(math::Color color)
+void Button::set_border_color(paint::Brush brush)
 {
     // 写入 BorderColorProperty Local 槽；affects_render=true → 自动触发 invalidate_render
-    set_value(BorderColorProperty, core::Variant{color}, ValuePriority::Local);
+    set_value(BorderColorProperty, core::Variant{brush}, ValuePriority::Local);
 }
 
 void Button::set_font_face(void* font_face) noexcept
 {
     font_face_ = font_face;
-    // 若模板已构建，立即将字体与当前前景色传播到 ContentPresenter
+    // 若模板已构建，立即将字体与当前前景画刷传播到 ContentPresenter
     UIElement* child = find_template_child("content");
     if (child != nullptr) {
         auto* presenter = static_cast<ContentPresenter*>(child);
         presenter->set_font_face(font_face_);
-        // 从 ForegroundProperty（唯一真相源）读取当前前景色并同步
+        // 从 ForegroundProperty（唯一真相源）读取当前前景画刷并同步
         const core::Variant& fg_var = get_value(ForegroundProperty);
-        if (fg_var.has<math::Color>()) {
-            presenter->set_foreground(fg_var.get<math::Color>());
+        if (fg_var.has<paint::Brush>()) {
+            presenter->set_foreground(fg_var.get<paint::Brush>());
         }
     }
 }
@@ -360,14 +360,14 @@ void Button::on_measure(math::Size available_size)
         if (child != nullptr && font_face_ != nullptr) {
             auto* presenter = static_cast<ContentPresenter*>(child);
             presenter->set_font_face(font_face_);
-            // 从 ForegroundProperty（唯一真相源）读取前景色
+            // 从 ForegroundProperty（唯一真相源）读取前景画刷
             const core::Variant& fg_var = get_value(ForegroundProperty);
-            const math::Color base_fg = fg_var.has<math::Color>()
-                ? fg_var.get<math::Color>() : math::Color::White;
+            const paint::Brush base_fg = fg_var.has<paint::Brush>()
+                ? fg_var.get<paint::Brush>() : paint::Brush::solid(math::Color::White);
             // MD3 Disabled 状态：OnSurface 38% opacity（暗灰半透明文字）
-            const math::Color effective_fg = is_enabled_
+            const paint::Brush effective_fg = is_enabled_
                 ? base_fg
-                : math::Color{0.11f, 0.11f, 0.12f, 0.38f};
+                : paint::Brush::solid(math::Color{0.11f, 0.11f, 0.12f, 0.38f});
             presenter->set_foreground(effective_fg);
             presenter->set_font_size(font_size_px_);
         }
@@ -390,20 +390,20 @@ void Button::on_render(paint::Canvas& canvas)
         return;
     }
 
-    // Material Design 3 Filled Button：背景色从 BackgroundProperty DP 读取
-    // 动画期间 Storyboard 写入 Animation 优先级（60）的插值色，get_value 自动返回最高优先级值
-    math::Color fill;
+    // Material Design 3 Filled Button：背景画刷从 BackgroundProperty DP 读取
+    // 动画期间 Storyboard 写入 Animation 优先级（60）的插値画刷，get_value 自动返回最高优先级値
+    paint::Brush fill;
     if (!is_enabled_) {
         // MD3 Disabled：OnSurface(#1C1B1F) at 12% opacity，不参与过渡
-        fill = math::Color{0.11f, 0.11f, 0.12f, 0.12f};
+        fill = paint::Brush::solid(math::Color{0.11f, 0.11f, 0.12f, 0.12f});
     } else {
         const core::Variant& bg_var = get_value(BackgroundProperty);
-        fill = bg_var.has<math::Color>() ? bg_var.get<math::Color>() : background_;
+        fill = bg_var.has<paint::Brush>() ? bg_var.get<paint::Brush>() : background_;
     }
 
     // Material Design 3 Filled Button：完全圆角（胶囊形，radius = height / 2）
     const float radius = rect.height * 0.5f;
-    canvas.fill_rounded_rect(math::RoundedRect{rect, radius}, paint::Brush::solid(fill));
+    canvas.fill_rounded_rect(math::RoundedRect{rect, radius}, fill);
 
     // MD3 Ripple 涟漪动画：在背景之上、文字之下绘制涟漪圆
     // elapsed_ms 由 AnimationClock 驱动的 anim_tick_callback 每帧累加
@@ -438,15 +438,17 @@ void Button::on_render(paint::Canvas& canvas)
 
     // 无模板时的回退路径：用居中横条表示文字区域
     const core::Variant& fg_var = get_value(ForegroundProperty);
-    const math::Color base_fg  = fg_var.has<math::Color>() ? fg_var.get<math::Color>() : math::Color::White;
-    const float fallback_fg_a = is_enabled_ ? 1.0f : 0.38f;
-    const math::Color fallback_fg = base_fg.with_alpha(fallback_fg_a);
+    paint::Brush base_fg = fg_var.has<paint::Brush>() ? fg_var.get<paint::Brush>() : paint::Brush::solid(math::Color::White);
+    // Disabled 状态降低前景画刷不透明度
+    if (!is_enabled_ && base_fg.kind() == paint::BrushKind::SolidColor) {
+        base_fg = paint::Brush::solid(base_fg.color().with_alpha(0.38f));
+    }
     const float line_w = rect.width - padding_.horizontal();
     const float line_y = rect.y + rect.height * 0.5f - 1.0f;
     if (line_w > 0.0f) {
         canvas.fill_rect(
             { rect.x + padding_.left, line_y, line_w, 2.0f },
-            paint::Brush::solid(fallback_fg));
+            base_fg);
     }
 }
 
@@ -613,16 +615,16 @@ bool Button::anim_tick_callback(void* user_data, float dt) noexcept
 void Button::on_visual_state_changed(ControlVisualState /*old_state*/,
                                      ControlVisualState new_state)
 {
-    // ── 1. 采样当前渲染色作为新动画的起始色 ────────────────────────────────
-    // get_value 在 Storyboard 活跃时返回 Animation 优先级的插值色，
-    // 确保中断旧过渡时从当前可见色开始，而非从目标色跳变。
-    math::Color from_color = background_;  // 默认 fallback
+    // ── 1. 采样当前渲染画刷作为新动画的起始画刷 ────────────────────────────
+    // get_value 在 Storyboard 活跃时返回 Animation 优先级的插值画刷，
+    // 确保中断旧过渡时从当前可见画刷开始，而非从目标画刷跳变。
+    paint::Brush from_brush = background_;  // 默认 fallback
     if (!is_enabled_) {
-        from_color = math::Color{0.11f, 0.11f, 0.12f, 0.12f};
+        from_brush = paint::Brush::solid(math::Color{0.11f, 0.11f, 0.12f, 0.12f});
     } else {
         const core::Variant& cur = get_value(BackgroundProperty);
-        if (cur.has<math::Color>()) {
-            from_color = cur.get<math::Color>();
+        if (cur.has<paint::Brush>()) {
+            from_brush = cur.get<paint::Brush>();
         }
     }
 
@@ -631,30 +633,30 @@ void Button::on_visual_state_changed(ControlVisualState /*old_state*/,
         bg_storyboard_->stop();
     }
 
-    // ── 3. 将采样色写入 Local 槽，使 capture_from_values 读到正确起始色 ────
-    // （stop() 已清除 Animation 槽，若不写 Local 则 capture 会读到 Default 色）
-    set_value(BackgroundProperty, core::Variant{from_color}, ValuePriority::Local);
+    // ── 3. 将采样画刷写入 Local 槽，使 capture_from_values 读到正确起始画刷 ─
+    // （stop() 已清除 Animation 槽，若不写 Local 则 capture 会读到 Default 画刷）
+    set_value(BackgroundProperty, core::Variant{from_brush}, ValuePriority::Local);
 
-    // ── 4. 从对应 DP 读取目标颜色（唯一真相源）────────────────────────────
+    // ── 4. 从对应 DP 读取目标画刷（唯一真相源）────────────────────────────
     // HoveredBackgroundProperty / PressedBackgroundProperty 已通过
     // set_background_hovered/pressed() 写入 Local 槽，默认为 MD3 规范值。
-    math::Color to_color;
+    paint::Brush to_brush;
     switch (new_state) {
     case ControlVisualState::Pressed: {
         const core::Variant& v = get_value(PressedBackgroundProperty);
-        to_color = v.has<math::Color>() ? v.get<math::Color>() : background_;
+        to_brush = v.has<paint::Brush>() ? v.get<paint::Brush>() : background_;
         break;
     }
     case ControlVisualState::Hovered: {
         const core::Variant& v = get_value(HoveredBackgroundProperty);
-        to_color = v.has<math::Color>() ? v.get<math::Color>() : background_;
+        to_brush = v.has<paint::Brush>() ? v.get<paint::Brush>() : background_;
         break;
     }
     case ControlVisualState::Disabled:
-        to_color = math::Color{0.11f, 0.11f, 0.12f, 0.12f};
+        to_brush = paint::Brush::solid(math::Color{0.11f, 0.11f, 0.12f, 0.12f});
         break;
     default:
-        to_color = background_;
+        to_brush = background_;
         break;
     }
 
@@ -663,7 +665,7 @@ void Button::on_visual_state_changed(ControlVisualState /*old_state*/,
     bg_storyboard_->animate_dp_to(
         *this,
         BackgroundProperty,
-        core::Variant{to_color},
+        core::Variant{to_brush},
         animation::Duration::milliseconds(100.0f),  // MD3 状态切换过渡时长
         animation::QuadEaseOut);                     // ease-out quad：末尾减速感更自然
     bg_storyboard_->capture_from_values();  // 读取 Local 槽中的 from_color

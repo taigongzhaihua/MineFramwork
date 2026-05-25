@@ -10,6 +10,7 @@
 
 #include <mine/ui/controls/ContentPresenter.h>
 #include <mine/ui/controls/TextBlock.h>       // 内联 TextBlock 创建
+#include <mine/paint/Brush.h>                 // BrushKind（前景画刷类型判断）
 
 #include <mine/ui/property/DependencyProperty.h>
 #include <mine/ui/property/PropertyMetadata.h>
@@ -63,7 +64,10 @@ void ContentPresenter::on_content_changed(DependencyObject*         sender,
             self->inline_text_block_ = MINE_NEW(TextBlock);
             self->inline_text_block_->set_font_face(self->font_face_);
             self->inline_text_block_->set_font_size(self->font_size_px_);
-            self->inline_text_block_->set_foreground(self->foreground_);
+            // 提取纯色分量传给 TextBlock（非纯色 Brush 降级为白色）
+            const math::Color init_color = (self->foreground_.kind() == paint::BrushKind::SolidColor)
+                ? self->foreground_.color() : math::Color::White;
+            self->inline_text_block_->set_foreground(init_color);
             self->inline_text_block_->set_padding(self->padding_cache_);
             // 将 TextBlock 加入视觉子树，后续由视觉树驱动其测量和渲染
             self->add_child(self->inline_text_block_);
@@ -141,12 +145,15 @@ void ContentPresenter::set_font_size(float size_px) noexcept
     }
 }
 
-void ContentPresenter::set_foreground(math::Color color) noexcept
+void ContentPresenter::set_foreground(paint::Brush brush) noexcept
 {
-    foreground_ = color;
+    foreground_ = brush;
     if (inline_text_block_) {
-        // TextBlock::set_foreground 内部已调用 invalidate_render
-        inline_text_block_->set_foreground(color);
+        // TextBlock 当前仅支持纯色前景色；提取 SolidColor 分量传入，
+        // 渐变、亚克力等非纯色画刷降级为白色（F3+ 阶段再扩展）。
+        const math::Color text_color = (brush.kind() == paint::BrushKind::SolidColor)
+            ? brush.color() : math::Color::White;
+        inline_text_block_->set_foreground(text_color);
     } else {
         invalidate_render();
     }

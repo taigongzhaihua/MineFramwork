@@ -28,6 +28,7 @@
 #include <mine/ui/visual/Control.h>
 #include <mine/math/Thickness.h>
 #include <mine/math/Color.h>
+#include <mine/paint/Brush.h>
 #include <mine/containers/InlineString.h>
 
 namespace mine::paint { class Canvas; }
@@ -93,9 +94,12 @@ public:
     void set_font_size(float size_px) noexcept;
 
     /**
-     * @brief 设置文字前景色（默认黑色）。
+     * @brief 设置文字前景画刷（默认为白色纯色画刷）。
+     *
+     * 仅支持纯色画刷（SolidColor）的文字渲染（当前文字渲染层限制）。
+     * 渐变、亚克力等非纯色画刷降级为白色。
      */
-    void set_foreground(math::Color color) noexcept;
+    void set_foreground(paint::Brush brush) noexcept;
 
 protected:
     // ── 布局虚方法 ────────────────────────────────────────────────────────
@@ -152,8 +156,8 @@ private:
     /// 文字字号缓存（逻辑像素，默认 14.0f）
     float           font_size_px_{14.0f};
 
-    /// 文字前景色缓存（默认黑色）
-    math::Color     foreground_{math::Color::Black};
+    /// 文字前景画刷缓存（默认白色纯色画刷）
+    paint::Brush    foreground_{paint::Brush::solid(math::Color::White)};
 };
 
 } // namespace mine::ui

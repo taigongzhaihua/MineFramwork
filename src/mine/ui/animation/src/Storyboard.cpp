@@ -3,7 +3,7 @@
  * @brief Storyboard 属性动画时间线容器实现。
  *
  * 实现包含：
- *   - lerp_variant()  ：支持 float / math::Color / math::Thickness 的线性插值；
+ *   - lerp_variant()  ：支持 float / math::Color / math::Thickness / paint::Brush 的线性插值；
  *                       其他类型在 t >= 1.0f 时直接 snap 到终止值。
  *   - animate_dp / animate_dp_to ：向 animations_ 注册 PropertyAnimation。
  *   - capture_from_values()       ：在状态切换前采样所有目标属性的当前生效值。
@@ -22,6 +22,7 @@
 #include <mine/math/Color.h>
 #include <mine/math/Thickness.h>
 #include <mine/math/Common.h>
+#include <mine/paint/Brush.h>
 
 namespace mine::ui::animation {
 
@@ -36,6 +37,7 @@ namespace mine::ui::animation {
  *   - float           ：标量线性插值
  *   - math::Color     ：RGBA 四分量各自线性插值
  *   - math::Thickness ：left/top/right/bottom 四边各自线性插值
+ *   - paint::Brush    ：双端均为 SolidColor 时插值颜色分量；否则离散跳变
  *
  * 其他类型：t >= 1.0f 时返回 to，否则返回 from（离散跳变）。
  *
@@ -75,6 +77,25 @@ static core::Variant lerp_variant(const core::Variant& from,
             math::lerp(f.right,  t2.right,  t),
             math::lerp(f.bottom, t2.bottom, t),
         };
+    }
+
+    // paint::Brush：双端均为 SolidColor 时插值颜色分量，其他种类离散跳变
+    if (from.has<paint::Brush>() && to.has<paint::Brush>()) {
+        const paint::Brush& fb = from.get<paint::Brush>();
+        const paint::Brush& tb = to.get<paint::Brush>();
+        if (fb.kind() == paint::BrushKind::SolidColor &&
+            tb.kind() == paint::BrushKind::SolidColor) {
+            const math::Color fc = fb.color();
+            const math::Color tc = tb.color();
+            return paint::Brush::solid(math::Color{
+                math::lerp(fc.r, tc.r, t),
+                math::lerp(fc.g, tc.g, t),
+                math::lerp(fc.b, tc.b, t),
+                math::lerp(fc.a, tc.a, t),
+            });
+        }
+        // 非纯色 Brush（渐变/亚克力）：离散跳变
+        return (t >= 1.0f) ? to : from;
     }
 
     // 其他类型：离散跳变

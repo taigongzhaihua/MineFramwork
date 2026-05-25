@@ -38,6 +38,7 @@
 #include <mine/math/Color.h>
 #include <mine/math/Rect.h>
 #include <mine/math/Thickness.h>
+#include <mine/paint/Brush.h>
 
 #include <cstdio>
 #include <cmath>
@@ -52,6 +53,7 @@ namespace ui       = mine::ui;
 namespace input    = mine::ui::input;
 namespace core     = mine::core;
 namespace anim     = mine::ui::animation;  // 动画时钟命名空间别名
+namespace paint    = mine::paint;          // 画刷命名空间别名
 
 // ── Ripple 动画驱动：Win32 Timer 回调 ────────────────────────────────────────
 
@@ -349,30 +351,30 @@ struct DemoApp : public mine::ui::app::Application,
         // ── 3. "计数 +1" 蓝色主操作按钮 ─────────────────────────────────
         root.btn_count.set_text("计数 +1");
         root.btn_count.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
-        root.btn_count.set_foreground(math::Color::from_rgb_u32(0xFFFFFF));
-        root.btn_count.set_background(math::Color::from_rgb_u32(0x1976D2));
-        root.btn_count.set_background_pressed(math::Color::from_rgb_u32(0x0D47A1));
-        root.btn_count.set_border_color(math::Color::from_rgb_u32(0x0D47A1));
+        root.btn_count.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
+        root.btn_count.set_background(paint::Brush::solid_rgb(0x1976D2));
+        root.btn_count.set_background_pressed(paint::Brush::solid_rgb(0x0D47A1));
+        root.btn_count.set_border_color(paint::Brush::solid_rgb(0x0D47A1));
         if (font) { root.btn_count.set_font_face(font); }
         root.btn_count.add_handler(ui::Button::ClickEvent(), &DemoApp::on_click_count, this);
 
         // ── 4. "重  置" 灰色辅助按钮 ─────────────────────────────────────
         root.btn_reset.set_text("重  置");
         root.btn_reset.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
-        root.btn_reset.set_foreground(math::Color::from_rgb_u32(0xFFFFFF));
-        root.btn_reset.set_background(math::Color::from_rgb_u32(0x455A64));
-        root.btn_reset.set_background_pressed(math::Color::from_rgb_u32(0x263238));
-        root.btn_reset.set_border_color(math::Color::from_rgb_u32(0x263238));
+        root.btn_reset.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
+        root.btn_reset.set_background(paint::Brush::solid_rgb(0x455A64));
+        root.btn_reset.set_background_pressed(paint::Brush::solid_rgb(0x263238));
+        root.btn_reset.set_border_color(paint::Brush::solid_rgb(0x263238));
         if (font) { root.btn_reset.set_font_face(font); }
         root.btn_reset.add_handler(ui::Button::ClickEvent(), &DemoApp::on_click_reset, this);
 
         // ── 5. "退  出" 红色危险操作按钮 ─────────────────────────────────
         root.btn_quit.set_text("退  出");
         root.btn_quit.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
-        root.btn_quit.set_foreground(math::Color::from_rgb_u32(0xFFFFFF));
-        root.btn_quit.set_background(math::Color::from_rgb_u32(0xC62828));
-        root.btn_quit.set_background_pressed(math::Color::from_rgb_u32(0x7F0000));
-        root.btn_quit.set_border_color(math::Color::from_rgb_u32(0x7F0000));
+        root.btn_quit.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
+        root.btn_quit.set_background(paint::Brush::solid_rgb(0xC62828));
+        root.btn_quit.set_background_pressed(paint::Brush::solid_rgb(0x7F0000));
+        root.btn_quit.set_border_color(paint::Brush::solid_rgb(0x7F0000));
         if (font) { root.btn_quit.set_font_face(font); }
         root.btn_quit.add_handler(ui::Button::ClickEvent(), &DemoApp::on_click_quit, this);
 
