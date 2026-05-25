@@ -212,7 +212,14 @@ math::Color Button::background() const noexcept
 void Button::set_background(math::Color color)
 {
     background_ = color;
-    invalidate_render();
+    // 若有进行中的背景过渡动画，先停止并释放，防止 Animation 槽(60) 遮盖 Local 槽(50)
+    if (bg_storyboard_ && !bg_storyboard_->is_complete()) {
+        bg_storyboard_->stop();
+        bg_storyboard_ = nullptr;
+    }
+    // 将新颜色写入 BackgroundProperty Local 槽：on_render 通过 get_value 读取此属性，
+    // affects_render=true → set_value 内部自动触发 invalidate_render，无需额外调用
+    set_value(BackgroundProperty, core::Variant{color}, ValuePriority::Local);
 }
 
 math::Color Button::background_hovered() const noexcept
@@ -450,7 +457,15 @@ void Button::tick_bg_animation(float dt)
     }
     // tick 内部调用 set_value(BackgroundProperty, interpolated, Animation)
     // PropertyMetadata.affects_render = true → 触发 invalidate_render（由外部 timer 驱动刷帧）
-    bg_storyboard_->tick(dt);
+    const bool done = bg_storyboard_->tick(dt);
+    if (done) {
+        // 动画完成：将最终插值色（Animation 槽当前值）持久化到 Local 槽，
+        // 再调用 stop() 清除 Animation 槽（complete_ 不变，仍为 true）。
+        // 这样后续 set_background() 写 Local(50) 能立即生效，不被残留 Animation(60) 遮盖。
+        const core::Variant& final_val = get_value(BackgroundProperty);
+        set_value(BackgroundProperty, final_val, ValuePriority::Local);
+        bg_storyboard_->stop();
+    }
 }
 
 void Button::on_visual_state_changed(ControlVisualState /*old_state*/,
