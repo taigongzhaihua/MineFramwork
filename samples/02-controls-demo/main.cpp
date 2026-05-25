@@ -51,6 +51,21 @@ namespace ui       = mine::ui;
 namespace input    = mine::ui::input;
 namespace core     = mine::core;
 
+// ── Ripple 动画驱动：Win32 Timer 回调 ────────────────────────────────────────
+
+// 前向声明（TimerProc 需要访问 DemoApp，DemoApp 定义在后面）
+struct DemoApp;
+
+/// 全局 DemoApp 实例指针，供 TimerProc 访问（由 on_startup 赋值，单实例保证）
+static DemoApp* g_demo_app = nullptr;
+
+/// Win32 Ripple 定时器 ID（任意非零值，与其他 SetTimer 区分）
+static constexpr UINT_PTR kRippleTimerId = 42u;
+
+/// Win32 TimerProc 回调：每 ~16ms 驱动一帧 ripple 渲染，无活跃 ripple 时自动停止
+static VOID CALLBACK ripple_timer_proc(
+    HWND /*hwnd*/, UINT /*msg*/, UINT_PTR /*id*/, DWORD /*time*/) noexcept;
+
 // ── 演示根面板（自定义 FrameworkElement，绝对坐标布局）──────────────────────
 
 /**
@@ -166,8 +181,9 @@ struct DemoApp : public mine::ui::app::Application,
     core::OwnedPtr<text::FontFace> font_face_;  ///< 已加载的字体，所有控件共享
 
     // ── 运行时状态 ────────────────────────────────────────────────────────
-    int          click_count = 0;    ///< 点击计数器
-    ui::Window*  ui_win_     = nullptr;  ///< 主窗口（由 on_startup 赋值）
+    int          click_count      = 0;       ///< 点击计数器
+    ui::Window*  ui_win_          = nullptr; ///< 主窗口（由 on_startup 赋值）
+    UINT_PTR     ripple_timer_id_ = 0;       ///< Ripple 动画驱动定时器 ID（0 = 未启动）
 
     // ── Application 生命周期扩展点 ───────────────────────────────────────
 
@@ -176,6 +192,9 @@ struct DemoApp : public mine::ui::app::Application,
      */
     void on_startup(int /*argc*/, char** /*argv*/) override
     {
+        // 设置全局实例指针（供 Ripple TimerProc 访问）
+        g_demo_app = this;
+
         // 设置控制台输出为 UTF-8，避免中文日志乱码
         SetConsoleOutputCP(CP_UTF8);
 
@@ -227,6 +246,13 @@ struct DemoApp : public mine::ui::app::Application,
 
     void on_exit(int /*exit_code*/) override
     {
+        // 停止 Ripple 定时器（防止应用退出后回调访问已释放内存）
+        if (ripple_timer_id_ != 0) {
+            KillTimer(nullptr, ripple_timer_id_);
+            ripple_timer_id_ = 0;
+        }
+        g_demo_app = nullptr;
+
         // 取消输入事件订阅，防止窗口析构后回调访问已释放内存
         if (ui_win_) {
             ui_win_->native_window().events().unsubscribe(this);
@@ -240,13 +266,22 @@ struct DemoApp : public mine::ui::app::Application,
         using Kind = platform::WindowEventKind;
         switch (event.kind) {
         case Kind::MouseMove:
-        case Kind::MouseDown:
         case Kind::MouseUp:
         case Kind::MouseWheel:
         case Kind::KeyDown:
         case Kind::KeyUp:
             router.on_window_event(event);
             if (ui_win_) { ui_win_->render(); }
+            break;
+        case Kind::MouseDown:
+            router.on_window_event(event);
+            if (ui_win_) {
+                ui_win_->render();
+                // 鼠标按下后启动 Ripple 驱动定时器（约 60fps，HWND=nullptr 使用 TimerProc 回调）
+                if (ripple_timer_id_ == 0) {
+                    ripple_timer_id_ = SetTimer(nullptr, 0, 16, ripple_timer_proc);
+                }
+            }
             break;
         default:
             break;
@@ -354,6 +389,35 @@ struct DemoApp : public mine::ui::app::Application,
         router.set_keyboard_focus(&root);
     }
 };
+
+// ── Ripple TimerProc 实现（定义于 DemoApp 之后以访问完整类型）───────────────
+
+static VOID CALLBACK ripple_timer_proc(
+    HWND /*hwnd*/, UINT /*msg*/, UINT_PTR /*id*/, DWORD /*time*/) noexcept
+{
+    if (!g_demo_app) { return; }
+
+    // 检查是否仍有活跃的 ripple 动画
+    const bool any_active =
+        g_demo_app->root.btn_count.has_active_ripple() ||
+        g_demo_app->root.btn_reset.has_active_ripple() ||
+        g_demo_app->root.btn_quit.has_active_ripple();
+
+    if (any_active) {
+        // 驱动当前帧渲染（on_render 会根据时间戳绘制最新 ripple 状态）
+        if (g_demo_app->ui_win_) {
+            g_demo_app->ui_win_->render();
+        }
+    } else {
+        // 所有 ripple 动画已结束，停止定时器
+        KillTimer(nullptr, g_demo_app->ripple_timer_id_);
+        g_demo_app->ripple_timer_id_ = 0;
+        // 触发最后一帧以清除残余 ripple 痕迹
+        if (g_demo_app->ui_win_) {
+            g_demo_app->ui_win_->render();
+        }
+    }
+}
 
 // ── 进程入口 ──────────────────────────────────────────────────────────────────
 

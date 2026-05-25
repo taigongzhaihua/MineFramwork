@@ -16,6 +16,8 @@
 #include <mine/ui/style/TemplateRegistry.h>
 #include <mine/core/Memory.h>
 
+#include <cmath>
+
 namespace mine::ui {
 
 // ============================================================================
@@ -309,6 +311,37 @@ void Button::on_render(paint::Canvas& canvas)
     const float radius = rect.height * 0.5f;
     canvas.fill_rounded_rect(math::RoundedRect{rect, radius}, paint::Brush::solid(fill));
 
+    // MD3 Ripple 涟漪动画：在背景之上、文字之下绘制涟漪圆
+    if (ripple_.active) {
+        using Clock = std::chrono::steady_clock;
+        using Msf   = std::chrono::duration<float, std::milli>;
+        const float elapsed_ms = std::chrono::duration_cast<Msf>(
+            Clock::now() - ripple_.start).count();
+        constexpr float kDurationMs = 400.0f;
+        const float t = elapsed_ms / kDurationMs;
+        if (t >= 1.0f) {
+            // 动画结束，关闭 ripple（下一帧 timer proc 会停止定时器）
+            ripple_.active = false;
+        } else {
+            // 半径：从 0 扩展到按钮对角线的 60%（确保覆盖整个按钮）
+            const float max_r = std::sqrt(rect.width  * rect.width
+                                        + rect.height * rect.height) * 0.6f;
+            const float ripple_r = max_r * t;
+            // alpha：从 0.24 线性淡出到 0（MD3 Ripple 使用 On Primary 颜色）
+            const float alpha = 0.24f * (1.0f - t);
+            const math::Vec2 center{
+                rect.x + ripple_.center_x,
+                rect.y + ripple_.center_y,
+            };
+            // 裁剪到按钮胶囊边界，防止涟漪溢出
+            canvas.save();
+            canvas.clip_rounded_rect(math::RoundedRect{rect, radius});
+            canvas.fill_circle(center, ripple_r,
+                paint::Brush::solid(math::Color::White.with_alpha(alpha)));
+            canvas.restore();
+        }
+    }
+
     // 有模板根时，文字由 ContentPresenter 渲染，Button 自身不再绘制占位线
     if (template_root()) {
         return;
@@ -357,6 +390,14 @@ void Button::on_mouse_down(input::MouseEventArgs& args)
         return;
     }
     is_pressed_ = true;
+
+    // 记录 MD3 Ripple 涟漪动画起始状态（圆心为鼠标按下点的局部坐标）
+    const math::Rect rect = bounds_rect();
+    ripple_.center_x = args.position().x - rect.x;
+    ripple_.center_y = args.position().y - rect.y;
+    ripple_.start    = std::chrono::steady_clock::now();
+    ripple_.active   = true;
+
     update_visual_state();
 }
 
@@ -381,6 +422,11 @@ void Button::raise_click()
     args.set_original_source(this);
     args.set_source(this);
     EventManager::raise(*this, args);
+}
+
+bool Button::has_active_ripple() const noexcept
+{
+    return ripple_.active;
 }
 
 } // namespace mine::ui

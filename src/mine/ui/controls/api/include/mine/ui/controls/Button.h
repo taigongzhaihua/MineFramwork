@@ -13,6 +13,8 @@
 #include <mine/math/Color.h>
 #include <mine/math/Thickness.h>
 
+#include <chrono>
+
 namespace mine::paint { class Canvas; }
 namespace mine::ui::input { class MouseEventArgs; }
 
@@ -88,6 +90,12 @@ public:
     void set_border_color(math::Color color);
 
     /**
+     * @brief 查询当前是否有正在播放的 Ripple 涟漪动画。
+     * @return 若 ripple 动画仍在播放中则返回 true，动画结束后返回 false。
+     */
+    [[nodiscard]] bool has_active_ripple() const noexcept;
+
+    /**
      * @brief 设置文字渲染字体（同步传播到模板树内的 ContentPresenter）。
      * @param font_face 字体对象指针（nullptr 时 ContentPresenter 回退到占位线）
      */
@@ -151,6 +159,15 @@ private:
     math::Color              border_color_     = math::Color::Transparent;
     void*                    font_face_        = nullptr;
     float                    font_size_px_     = 14.0f;
+
+    /// MD3 Ripple 涟漪动画状态（鼠标按下时触发）
+    struct RippleState {
+        float  center_x  = 0.0f;  ///< 涟漪圆心 X（相对于 bounds_rect 左上角）
+        float  center_y  = 0.0f;  ///< 涟漪圆心 Y（相对于 bounds_rect 左上角）
+        std::chrono::steady_clock::time_point start; ///< 动画触发时刻
+        bool   active    = false;  ///< 是否正在播放
+    };
+    RippleState              ripple_;           ///< 当前涟漪状态
 };
 
 } // namespace mine::ui

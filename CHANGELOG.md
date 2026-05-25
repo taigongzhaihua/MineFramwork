@@ -17,6 +17,13 @@
 - **samples/02-controls-demo 崩溃修复（0xC0000005 悬空指针）**：`on_startup` 中 `font_face` 原为局部 `OwnedPtr`，`on_startup` 返回后字体对象被销毁，后续鼠标事件触发第二次渲染时各控件的 `font_face_` 成为悬空指针（use-after-free），导致 STATUS_ACCESS_VIOLATION 崩溃。修复方法：将字体资源提升为 `DemoApp::font_face_` 成员变量（`OwnedPtr<text::FontFace>`），生命周期与 `DemoApp` 一致，覆盖全部渲染周期，彻底消除悬空指针。
 
 ### Added
+- **mine.ui.controls / Button（MD3 Ripple 涟漪动画）**：为 Button 控件新增 Material Design Ripple 点击波纹效果：
+  - `Button` 新增私有 `RippleState` 成员（圆心局部坐标、`steady_clock::time_point` 动画起始时刻、活跃标志）
+  - 鼠标按下（`on_mouse_down`）时记录鼠标位置为涟漪圆心，触发 ripple 动画
+  - `on_render` 中在背景圆角矩形之上、文字之下绘制涟漪圆：通过 `canvas.save()`/`clip_rounded_rect`/`fill_circle`/`restore` 裁剪到胶囊边界；半径从 0 扩展至按钮对角线的 60%，alpha 从 0.24 线性淡出到 0，总时长 400ms
+  - 新增公开只读接口 `has_active_ripple() const noexcept` 供外部驱动器查询动画是否仍在播放
+  - `samples/02-controls-demo`：在 MouseDown 事件处理中使用 Win32 `SetTimer(nullptr, 0, 16, ripple_timer_proc)` 启动约 60fps 的渲染驱动定时器；`ripple_timer_proc`（TimerProc 形式，不依赖窗口过程）每帧检查三个按钮的 `has_active_ripple()`，有活跃 ripple 则调用 `ui_win_->render()` 驱动下一帧，所有 ripple 结束后自动 `KillTimer` 停止轮询；应用退出时在 `on_exit` 中清理定时器
+
 - **samples/02-controls-demo（控件交互演示示例）**：新增窗口+控件交互演示程序（F3.3 任务 #28.1）：
   - 采用 `DemoRoot : FrameworkElement` 方案，在 `measure_override` / `arrange_override` 中对 6 个控件（2 个 TextBlock + 3 个 Button + 1 个状态 TextBlock）实施手动绝对坐标布局
   - 通过 `Visual::add_child()` 将 Button / TextBlock 实例纳入视觉树（规避 `Panel::add_child` 只接受 `FrameworkElement*` 的限制）
