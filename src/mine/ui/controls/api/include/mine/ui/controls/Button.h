@@ -159,6 +159,7 @@ public:
 protected:
     void on_measure(math::Size available_size) override;
     void on_render(paint::Canvas& canvas) override;
+    UIElement* hit_test(math::Point p) override;
     [[nodiscard]] ControlVisualState compute_visual_state() const override;
     void on_visual_state_changed(ControlVisualState old_state,
                                  ControlVisualState new_state) override;

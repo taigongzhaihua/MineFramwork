@@ -103,10 +103,14 @@ public:
     /**
      * @brief 在指定屏幕坐标处进行命中测试，返回最顶层命中的 UIElement。
      *
+     * 声明为 virtual，允许控件子类（如 Button）覆盖以控制命中测试语义。
+     * 例如：Button 覆盖此方法以屏蔽模板子元素的命中，确保 Direct 路由事件
+     * （MouseEnter / MouseLeave）始终派发给控件本身而非内部的 ContentPresenter。
+     *
      * @param p 屏幕坐标系中的测试点（相对于父节点坐标系）
      * @return  命中的最内层 UIElement 指针；若无命中则返回 nullptr
      */
-    UIElement* hit_test(math::Point p);
+    virtual UIElement* hit_test(math::Point p);
 
     // ── 模板命名 ──────────────────────────────────────────────────────────
 

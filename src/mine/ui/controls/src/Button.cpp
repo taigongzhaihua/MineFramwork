@@ -450,6 +450,28 @@ void Button::on_render(paint::Canvas& canvas)
     }
 }
 
+UIElement* Button::hit_test(math::Point p)
+{
+    // Button 始终作为其整个视觉区域的命中目标，不递归模板子元素（ContentPresenter 等）。
+    // 这确保 MouseEnter / MouseLeave（Direct 路由，不冒泡）始终派发给 Button 本身，
+    // 而非内部的 ContentPresenter，从而使 Hover 颜色过渡和视觉状态正确触发。
+    if (visibility() == Visibility::Collapsed) {
+        return nullptr;
+    }
+    // 将输入点逆变换到本节点局部坐标系（与 UIElement::hit_test 基实现保持一致）
+    math::Point local_p = p;
+    const auto inv = render_transform().inverted();
+    if (inv) {
+        local_p = inv.value().apply(p);
+    }
+    // 裁剪区域检查
+    if (has_clip_rect() && !clip_rect().contains(local_p)) {
+        return nullptr;
+    }
+    // 直接判断本节点范围，不再递归子节点
+    return bounds_rect().contains(local_p) ? this : nullptr;
+}
+
 ControlVisualState Button::compute_visual_state() const
 {
     if (!is_enabled_) {
