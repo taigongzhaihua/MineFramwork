@@ -266,19 +266,21 @@ struct DemoApp : public mine::ui::app::Application,
         using Kind = platform::WindowEventKind;
         switch (event.kind) {
         case Kind::MouseMove:
+        case Kind::MouseDown:
         case Kind::MouseUp:
         case Kind::MouseWheel:
         case Kind::KeyDown:
         case Kind::KeyUp:
             router.on_window_event(event);
-            if (ui_win_) { ui_win_->render(); }
-            break;
-        case Kind::MouseDown:
-            router.on_window_event(event);
             if (ui_win_) {
                 ui_win_->render();
-                // 鼠标按下后启动 Ripple 驱动定时器（约 60fps，HWND=nullptr 使用 TimerProc 回调）
-                if (ripple_timer_id_ == 0) {
+                // 事件可能触发 visual_state 变化（悬停/按下等），进而启动动画
+                // 若有活跃动画（ripple 或背景色过渡）且 timer 未启动，则启动渲染驱动器
+                if (ripple_timer_id_ == 0 && (
+                    root.btn_count.has_active_animation() ||
+                    root.btn_reset.has_active_animation() ||
+                    root.btn_quit.has_active_animation()))
+                {
                     ripple_timer_id_ = SetTimer(nullptr, 0, 16, ripple_timer_proc);
                 }
             }
@@ -397,11 +399,11 @@ static VOID CALLBACK ripple_timer_proc(
 {
     if (!g_demo_app) { return; }
 
-    // 检查是否仍有活跃的 ripple 动画
+    // 检查是否仍有活跃的动画（ripple 或背景色过渡）
     const bool any_active =
-        g_demo_app->root.btn_count.has_active_ripple() ||
-        g_demo_app->root.btn_reset.has_active_ripple() ||
-        g_demo_app->root.btn_quit.has_active_ripple();
+        g_demo_app->root.btn_count.has_active_animation() ||
+        g_demo_app->root.btn_reset.has_active_animation() ||
+        g_demo_app->root.btn_quit.has_active_animation();
 
     if (any_active) {
         // 驱动当前帧渲染（on_render 会根据时间戳绘制最新 ripple 状态）

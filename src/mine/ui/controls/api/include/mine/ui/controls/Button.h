@@ -90,10 +90,10 @@ public:
     void set_border_color(math::Color color);
 
     /**
-     * @brief 查询当前是否有正在播放的 Ripple 涟漪动画。
-     * @return 若 ripple 动画仍在播放中则返回 true，动画结束后返回 false。
+     * @brief 查询当前是否有需要持续渲染的动画（ripple 或背景色过渡）。
+     * @return 任一动画仍在播放中则返回 true，全部结束后返回 false。
      */
-    [[nodiscard]] bool has_active_ripple() const noexcept;
+    [[nodiscard]] bool has_active_animation() const noexcept;
 
     /**
      * @brief 设置文字渲染字体（同步传播到模板树内的 ContentPresenter）。
@@ -111,6 +111,8 @@ protected:
     void on_measure(math::Size available_size) override;
     void on_render(paint::Canvas& canvas) override;
     [[nodiscard]] ControlVisualState compute_visual_state() const override;
+    void on_visual_state_changed(ControlVisualState old_state,
+                                 ControlVisualState new_state) override;
 
 private:
     // ── 依赖属性变更回调 ───────────────────────────────────────────────────
@@ -168,6 +170,15 @@ private:
         bool   active    = false;  ///< 是否正在播放
     };
     RippleState              ripple_;           ///< 当前涟漪状态
+
+    /// MD3 背景色过渡动画状态（视觉状态切换时触发）
+    struct BgTransState {
+        math::Color from;          ///< 过渡起始颜色（可能是上一次过渡中断时的插值色）
+        math::Color to;            ///< 过渡目标颜色
+        std::chrono::steady_clock::time_point start; ///< 过渡开始时刻
+        bool        active = false; ///< 是否正在过渡
+    };
+    BgTransState             bg_trans_;         ///< 当前背景色过渡状态
 };
 
 } // namespace mine::ui

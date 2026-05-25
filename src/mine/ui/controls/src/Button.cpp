@@ -294,17 +294,33 @@ void Button::on_render(paint::Canvas& canvas)
         return;
     }
 
-    // Material Design 3 Filled Button：背景颜色按视觉状态选取
+    // Material Design 3 Filled Button：背景颜色按视觉状态选取（支持过渡插值）
     math::Color fill;
     if (!is_enabled_) {
         // MD3 Disabled：OnSurface(#1C1B1F) at 12% opacity
         fill = math::Color{0.11f, 0.11f, 0.12f, 0.12f};
-    } else if (visual_state() == ControlVisualState::Pressed) {
-        fill = background_press_;
-    } else if (visual_state() == ControlVisualState::Hovered) {
-        fill = background_hover_;
+    } else if (bg_trans_.active) {
+        // 过渡动画进行中：用 ease-out 插值计算中间颜色
+        using Clock = std::chrono::steady_clock;
+        using Msf   = std::chrono::duration<float, std::milli>;
+        const float elapsed_ms = std::chrono::duration_cast<Msf>(
+            Clock::now() - bg_trans_.start).count();
+        constexpr float kBgTransDurationMs = 100.0f;  // 背景色过渡时长
+        const float t = elapsed_ms / kBgTransDurationMs;
+        if (t >= 1.0f) {
+            bg_trans_.active = false;
+            fill = bg_trans_.to;
+        } else {
+            // ease-out quad：视觉上更自然的减速曲线
+            const float ease = 1.0f - (1.0f - t) * (1.0f - t);
+            fill = bg_trans_.from + (bg_trans_.to - bg_trans_.from) * ease;
+        }
     } else {
-        fill = background_;
+        switch (visual_state()) {
+        case ControlVisualState::Pressed: fill = background_press_; break;
+        case ControlVisualState::Hovered: fill = background_hover_; break;
+        default:                          fill = background_;        break;
+        }
     }
 
     // Material Design 3 Filled Button：完全圆角（胶囊形，radius = height / 2）
@@ -317,8 +333,8 @@ void Button::on_render(paint::Canvas& canvas)
         using Msf   = std::chrono::duration<float, std::milli>;
         const float elapsed_ms = std::chrono::duration_cast<Msf>(
             Clock::now() - ripple_.start).count();
-        constexpr float kDurationMs = 400.0f;
-        const float t = elapsed_ms / kDurationMs;
+        constexpr float kRippleDurationMs = 200.0f;  // MD3 Ripple 动画时长
+        const float t = elapsed_ms / kRippleDurationMs;
         if (t >= 1.0f) {
             // 动画结束，关闭 ripple（下一帧 timer proc 会停止定时器）
             ripple_.active = false;
@@ -424,9 +440,51 @@ void Button::raise_click()
     EventManager::raise(*this, args);
 }
 
-bool Button::has_active_ripple() const noexcept
+bool Button::has_active_animation() const noexcept
 {
-    return ripple_.active;
+    return ripple_.active || bg_trans_.active;
+}
+
+void Button::on_visual_state_changed(ControlVisualState old_state,
+                                     ControlVisualState new_state)
+{
+    // 计算过渡起始颜色：若过渡正在进行则从当前插值位置开始（防止过渡闪跳）
+    math::Color from_color;
+    if (!is_enabled_) {
+        from_color = math::Color{0.11f, 0.11f, 0.12f, 0.12f};
+    } else if (bg_trans_.active) {
+        using Clock = std::chrono::steady_clock;
+        using Msf   = std::chrono::duration<float, std::milli>;
+        const float elapsed_ms = std::chrono::duration_cast<Msf>(
+            Clock::now() - bg_trans_.start).count();
+        constexpr float kBgTransDurationMs = 100.0f;
+        const float t = std::min(elapsed_ms / kBgTransDurationMs, 1.0f);
+        const float ease = 1.0f - (1.0f - t) * (1.0f - t);
+        from_color = bg_trans_.from + (bg_trans_.to - bg_trans_.from) * ease;
+    } else {
+        // 无过渡中：从旧状态的目标颜色开始
+        switch (old_state) {
+        case ControlVisualState::Pressed:  from_color = background_press_; break;
+        case ControlVisualState::Hovered:  from_color = background_hover_; break;
+        default:                           from_color = background_;        break;
+        }
+    }
+
+    // 计算过渡目标颜色
+    math::Color to_color;
+    switch (new_state) {
+    case ControlVisualState::Pressed:  to_color = background_press_; break;
+    case ControlVisualState::Hovered:  to_color = background_hover_; break;
+    case ControlVisualState::Disabled: to_color = math::Color{0.11f, 0.11f, 0.12f, 0.12f}; break;
+    default:                           to_color = background_;        break;
+    }
+
+    bg_trans_.from   = from_color;
+    bg_trans_.to     = to_color;
+    bg_trans_.start  = std::chrono::steady_clock::now();
+    bg_trans_.active = true;
+
+    invalidate_render();
 }
 
 } // namespace mine::ui
