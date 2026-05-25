@@ -127,14 +127,28 @@ void InputRouter::dispatch_mouse_event(const platform::WindowEvent& we) {
     if (root_) {
         target = root_->hit_test(pos);
     }
-    if (!target) {
-        // 若命中测试未找到目标，更新悬停状态后直接返回
-        mouse_over_ = nullptr;
-        return;
+
+    // 悬停元素发生切换时，合成 MouseLeave / MouseEnter
+    if (target != prev_mouse_over_) {
+        // 将当前悬停元素更新到 mouse_over_ 前，先向旧元素派发 MouseLeave
+        if (prev_mouse_over_) {
+            MouseEventArgs leave_args{ MouseLeaveEvent(), MouseButton::None, pos, mods };
+            EventManager::raise(*prev_mouse_over_, leave_args);
+        }
+        // 再向新元素派发 MouseEnter
+        if (target) {
+            MouseEventArgs enter_args{ MouseEnterEvent(), MouseButton::None, pos, mods };
+            EventManager::raise(*target, enter_args);
+        }
+        prev_mouse_over_ = target;
     }
 
-    // 更新鼠标悬停元素
+    // 更新公开的悬停属性
     mouse_over_ = target;
+
+    if (!target) {
+        return;
+    }
 
     using Kind = platform::WindowEventKind;
 

@@ -79,6 +79,8 @@ private:
     UIElement* root_{nullptr};
     UIElement* keyboard_focus_{nullptr};
     UIElement* mouse_over_{nullptr};
+    /// 上一帧的悬停元素，用于检测切换并合成 MouseLeave/MouseEnter
+    UIElement* prev_mouse_over_{nullptr};
 };
 
 } // namespace mine::ui::input

@@ -46,4 +46,9 @@ MINE_UI_INPUT_API const RoutedEvent& MouseMoveEvent();
 /// 鼠标滚轮（冒泡策略）
 MINE_UI_INPUT_API const RoutedEvent& MouseWheelEvent();
 
+/// 鼠标进入元素（直接策略；由 InputRouter 在悬停目标切换时合成派发）
+MINE_UI_INPUT_API const RoutedEvent& MouseEnterEvent();
+/// 鼠标离开元素（直接策略；由 InputRouter 在悬停目标切换时合成派发）
+MINE_UI_INPUT_API const RoutedEvent& MouseLeaveEvent();
+
 } // namespace mine::ui::input

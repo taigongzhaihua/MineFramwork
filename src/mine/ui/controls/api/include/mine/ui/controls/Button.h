@@ -159,15 +159,20 @@ private:
 
     static void on_mouse_down_router(void* sender, RoutedEventArgs& args, void* user_data);
     static void on_mouse_up_router(void* sender, RoutedEventArgs& args, void* user_data);
+    static void on_mouse_enter_router(void* sender, RoutedEventArgs& args, void* user_data);
+    static void on_mouse_leave_router(void* sender, RoutedEventArgs& args, void* user_data);
 
     void on_mouse_down(input::MouseEventArgs& args);
     void on_mouse_up(input::MouseEventArgs& args);
+    void on_mouse_enter();
+    void on_mouse_leave();
     void raise_click();
 
     // ── 成员变量 ───────────────────────────────────────────────────────────
 
     containers::InlineString text_;
     bool                     is_enabled_       = true;
+    bool                     is_hovered_       = false;  ///< 鼠标正悬停在按鈕上
     bool                     is_pressed_       = false;
     // Material Design 3 Filled Button 默认尺寸（水平 24dp，垂直 10dp）
     math::Thickness          padding_          = math::Thickness::symmetric(24.0f, 10.0f);

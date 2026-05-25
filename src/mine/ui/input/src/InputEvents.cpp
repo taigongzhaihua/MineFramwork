@@ -77,4 +77,18 @@ const RoutedEvent& MouseWheelEvent() {
     return ev;
 }
 
+const RoutedEvent& MouseEnterEvent() {
+    // Direct 策略：仅在目标元素上触发，不沿可视化树冒泡/隧道
+    static const RoutedEvent& ev =
+        register_event<UIElement>("MouseEnter", RoutingStrategy::Direct);
+    return ev;
+}
+
+const RoutedEvent& MouseLeaveEvent() {
+    // Direct 策略：仅在目标元素上触发，不沿可视化树冒泡/隧道
+    static const RoutedEvent& ev =
+        register_event<UIElement>("MouseLeave", RoutingStrategy::Direct);
+    return ev;
+}
+
 } // namespace mine::ui::input

@@ -144,6 +144,8 @@ Button::Button()
 
     add_handler(input::MouseDownEvent(), &Button::on_mouse_down_router, this);
     add_handler(input::MouseUpEvent(), &Button::on_mouse_up_router, this);
+    add_handler(input::MouseEnterEvent(), &Button::on_mouse_enter_router, this);
+    add_handler(input::MouseLeaveEvent(), &Button::on_mouse_leave_router, this);
 }
 
 Button::~Button() = default;
@@ -172,6 +174,7 @@ void Button::set_enabled(bool enabled) noexcept
     is_enabled_ = enabled;
     if (!is_enabled_) {
         is_pressed_ = false;
+        is_hovered_ = false;
     }
     update_visual_state();
     invalidate_render();
@@ -387,6 +390,9 @@ ControlVisualState Button::compute_visual_state() const
     if (is_pressed_) {
         return ControlVisualState::Pressed;
     }
+    if (is_hovered_) {
+        return ControlVisualState::Hovered;
+    }
     return ControlVisualState::Normal;
 }
 
@@ -402,6 +408,32 @@ void Button::on_mouse_up_router(void* /*sender*/, RoutedEventArgs& args, void* u
     auto* self = static_cast<Button*>(user_data);
     auto& mouse_args = static_cast<input::MouseEventArgs&>(args);
     self->on_mouse_up(mouse_args);
+}
+
+void Button::on_mouse_enter_router(void* /*sender*/, RoutedEventArgs& /*args*/, void* user_data)
+{
+    static_cast<Button*>(user_data)->on_mouse_enter();
+}
+
+void Button::on_mouse_leave_router(void* /*sender*/, RoutedEventArgs& /*args*/, void* user_data)
+{
+    static_cast<Button*>(user_data)->on_mouse_leave();
+}
+
+void Button::on_mouse_enter()
+{
+    if (!is_enabled_) {
+        return;
+    }
+    is_hovered_ = true;
+    update_visual_state();
+}
+
+void Button::on_mouse_leave()
+{
+    is_hovered_ = false;
+    is_pressed_ = false;  // 鼠标离开时同时解除按下态（防止跨元素 press 残留）
+    update_visual_state();
 }
 
 void Button::on_mouse_down(input::MouseEventArgs& args)
