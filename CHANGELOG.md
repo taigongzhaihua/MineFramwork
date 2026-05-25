@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Changed
+- **mine.ui.controls / Button（Material Design 3 Filled Button 外观）**：将 Button 默认模板外观重设计为 Material Design 3 Filled Button 风格：
+  - 背景色改为 MD3 Primary（#6750A4，蓝紫色）；Hovered 叠加 OnPrimary 8% state layer；Pressed 叠加 12% state layer
+  - 文字颜色改为 MD3 On Primary（白色），Disabled 状态降至 OnSurface 38% 半透明
+  - 形状改为完全圆角（`radius = height / 2`，胶囊形），使用 `fill_rounded_rect` 渲染
+  - 删除矩形实心边框（Filled Button 无边框）
+  - 默认水平内边距从 12px 升至 24px，垂直 8px 升至 10px（符合 MD3 尺寸规范）
+  - Disabled 背景改为 OnSurface 12% 半透明；`set_enabled` 同时触发 `invalidate_measure` 以刷新文字颜色
+
 ### Fixed
 - **samples/02-controls-demo 崩溃修复（0xC0000005 悬空指针）**：`on_startup` 中 `font_face` 原为局部 `OwnedPtr`，`on_startup` 返回后字体对象被销毁，后续鼠标事件触发第二次渲染时各控件的 `font_face_` 成为悬空指针（use-after-free），导致 STATUS_ACCESS_VIOLATION 崩溃。修复方法：将字体资源提升为 `DemoApp::font_face_` 成员变量（`OwnedPtr<text::FontFace>`），生命周期与 `DemoApp` 一致，覆盖全部渲染周期，彻底消除悬空指针。
 

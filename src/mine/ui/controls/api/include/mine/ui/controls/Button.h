@@ -137,12 +137,18 @@ private:
     containers::InlineString text_;
     bool                     is_enabled_       = true;
     bool                     is_pressed_       = false;
-    math::Thickness          padding_          = math::Thickness::symmetric(12.0f, 8.0f);
-    math::Color              foreground_       = math::Color::Black;
-    math::Color              background_       = math::Color::from_rgb_u32(0xE6E6E6);
-    math::Color              background_hover_ = math::Color::from_rgb_u32(0xDCDCDC);
-    math::Color              background_press_ = math::Color::from_rgb_u32(0xC8C8C8);
-    math::Color              border_color_     = math::Color::from_rgb_u32(0x707070);
+    // Material Design 3 Filled Button 默认尺寸（水平 24dp，垂直 10dp）
+    math::Thickness          padding_          = math::Thickness::symmetric(24.0f, 10.0f);
+    // MD3 On Primary（白色文字覆盖在 Primary 背景上）
+    math::Color              foreground_       = math::Color::White;
+    // MD3 Primary #6750A4
+    math::Color              background_       = math::Color::from_rgb_u32(0x6750A4);
+    // MD3 Hovered = Primary + OnPrimary * 8%  ≈ #735BAC
+    math::Color              background_hover_ = math::Color{0.452f, 0.369f, 0.672f, 1.0f};
+    // MD3 Pressed = Primary + OnPrimary * 12% ≈ #7A65AF
+    math::Color              background_press_ = math::Color{0.476f, 0.396f, 0.686f, 1.0f};
+    // MD3 Filled Button 无外边框
+    math::Color              border_color_     = math::Color::Transparent;
     void*                    font_face_        = nullptr;
     float                    font_size_px_     = 14.0f;
 };

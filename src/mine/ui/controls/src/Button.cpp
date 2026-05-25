@@ -33,11 +33,11 @@ const DependencyProperty& Button::ContentProperty =
             .changed         = &Button::on_content_changed,
         });
 
-// Button::PaddingProperty — 内边距（Thickness，默认水平 12px 垂直 8px）
+// Button::PaddingProperty — 内边距（Thickness，MD3 Filled Button 默认：水平 24px 垂直 10px）
 const DependencyProperty& Button::PaddingProperty =
     register_property<Button>(
         "Padding",
-        core::Variant{ math::Thickness::symmetric(12.0f, 8.0f) },
+        core::Variant{ math::Thickness::symmetric(24.0f, 10.0f) },
         PropertyMetadata{
             .affects_measure = true,
             .affects_render  = true,
@@ -158,6 +158,8 @@ void Button::set_enabled(bool enabled) noexcept
     }
     update_visual_state();
     invalidate_render();
+    // 状态变化需重新测量以同步 ContentPresenter 前景色（Disabled/Enabled 颜色不同）
+    invalidate_measure();
 }
 
 math::Thickness Button::padding() const noexcept
@@ -264,7 +266,11 @@ void Button::on_measure(math::Size available_size)
         if (child != nullptr && font_face_ != nullptr) {
             auto* presenter = static_cast<ContentPresenter*>(child);
             presenter->set_font_face(font_face_);
-            presenter->set_foreground(foreground_);
+            // MD3 Disabled 状态：OnSurface 38% opacity（暗灰半透明文字）
+            const math::Color effective_fg = is_enabled_
+                ? foreground_
+                : math::Color{0.11f, 0.11f, 0.12f, 0.38f};
+            presenter->set_foreground(effective_fg);
             presenter->set_font_size(font_size_px_);
         }
         return;
@@ -286,31 +292,37 @@ void Button::on_render(paint::Canvas& canvas)
         return;
     }
 
-    math::Color fill = background_;
+    // Material Design 3 Filled Button：背景颜色按视觉状态选取
+    math::Color fill;
     if (!is_enabled_) {
-        fill = math::Color{0.85f, 0.85f, 0.85f, 1.0f};
+        // MD3 Disabled：OnSurface(#1C1B1F) at 12% opacity
+        fill = math::Color{0.11f, 0.11f, 0.12f, 0.12f};
     } else if (visual_state() == ControlVisualState::Pressed) {
         fill = background_press_;
     } else if (visual_state() == ControlVisualState::Hovered) {
         fill = background_hover_;
+    } else {
+        fill = background_;
     }
 
-    // 背景和边框无论是否有模板根都需要绘制（这是 Button 自身的视觉样式）
-    canvas.fill_rect(rect, paint::Brush::solid(fill));
-    canvas.stroke_bordered_rect(rect, paint::Brush::solid(border_color_), math::Thickness::uniform(1.0f));
+    // Material Design 3 Filled Button：完全圆角（胶囊形，radius = height / 2）
+    const float radius = rect.height * 0.5f;
+    canvas.fill_rounded_rect(math::RoundedRect{rect, radius}, paint::Brush::solid(fill));
 
-    // 有模板根时，文字由 ContentPresenter 渲染，Button 自身不再绘制文字占位线
+    // 有模板根时，文字由 ContentPresenter 渲染，Button 自身不再绘制占位线
     if (template_root()) {
         return;
     }
 
     // 无模板时的回退路径：用居中横条表示文字区域
+    const float fallback_fg_a = is_enabled_ ? 1.0f : 0.38f;
+    const math::Color fallback_fg = foreground_.with_alpha(fallback_fg_a);
     const float line_w = rect.width - padding_.horizontal();
     const float line_y = rect.y + rect.height * 0.5f - 1.0f;
     if (line_w > 0.0f) {
         canvas.fill_rect(
             { rect.x + padding_.left, line_y, line_w, 2.0f },
-            paint::Brush::solid(foreground_));
+            paint::Brush::solid(fallback_fg));
     }
 }
 
