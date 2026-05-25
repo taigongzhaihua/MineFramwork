@@ -335,16 +335,16 @@ struct DemoApp : public mine::ui::app::Application,
         // ── 1. 标题文字（蓝色背景标题栏）────────────────────────────────────
         root.header_text.set_text("MineFramework 控件演示");
         root.header_text.set_font_size(22.0f);
-        root.header_text.set_foreground(math::Color::from_rgb_u32(0xFFFFFF));
-        root.header_text.set_background(math::Color::from_rgb_u32(0x1565C0));
+        root.header_text.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
+        root.header_text.set_background(paint::Brush::solid_rgb(0x1565C0));
         root.header_text.set_padding(math::Thickness{ 16.0f, 16.0f, 16.0f, 16.0f });
         if (font) { root.header_text.set_font_face(font); }
 
         // ── 2. 副标题说明 ─────────────────────────────────────────────────
         root.subtitle.set_text("点击按钮测试交互：Normal 颜色 → 按下 → Pressed 颜色");
         root.subtitle.set_font_size(12.0f);
-        root.subtitle.set_foreground(math::Color::from_rgb_u32(0x9E9E9E));
-        root.subtitle.set_background(math::Color::Transparent);
+        root.subtitle.set_foreground(paint::Brush::solid_rgb(0x9E9E9E));
+        root.subtitle.set_background(paint::Brush::solid(math::Color::Transparent));
         root.subtitle.set_padding(math::Thickness{ 4.0f, 6.0f, 4.0f, 6.0f });
         if (font) { root.subtitle.set_font_face(font); }
 
@@ -381,8 +381,8 @@ struct DemoApp : public mine::ui::app::Application,
         // ── 6. 状态计数标签 ───────────────────────────────────────────────
         root.status_label.set_text("当前计数：0 次");
         root.status_label.set_font_size(28.0f);
-        root.status_label.set_foreground(math::Color::from_rgb_u32(0xE8E8E8));
-        root.status_label.set_background(math::Color::Transparent);
+        root.status_label.set_foreground(paint::Brush::solid_rgb(0xE8E8E8));
+        root.status_label.set_background(paint::Brush::solid(math::Color::Transparent));
         root.status_label.set_padding(math::Thickness{ 4.0f, 4.0f, 4.0f, 4.0f });
         if (font) { root.status_label.set_font_face(font); }
 

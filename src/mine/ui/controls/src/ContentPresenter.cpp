@@ -64,10 +64,8 @@ void ContentPresenter::on_content_changed(DependencyObject*         sender,
             self->inline_text_block_ = MINE_NEW(TextBlock);
             self->inline_text_block_->set_font_face(self->font_face_);
             self->inline_text_block_->set_font_size(self->font_size_px_);
-            // 提取纯色分量传给 TextBlock（非纯色 Brush 降级为白色）
-            const math::Color init_color = (self->foreground_.kind() == paint::BrushKind::SolidColor)
-                ? self->foreground_.color() : math::Color::White;
-            self->inline_text_block_->set_foreground(init_color);
+            // 直接传入 Brush（TextBlock 已支持 paint::Brush 前景色）
+            self->inline_text_block_->set_foreground(self->foreground_);
             self->inline_text_block_->set_padding(self->padding_cache_);
             // 将 TextBlock 加入视觉子树，后续由视觉树驱动其测量和渲染
             self->add_child(self->inline_text_block_);
@@ -149,11 +147,8 @@ void ContentPresenter::set_foreground(paint::Brush brush) noexcept
 {
     foreground_ = brush;
     if (inline_text_block_) {
-        // TextBlock 当前仅支持纯色前景色；提取 SolidColor 分量传入，
-        // 渐变、亚克力等非纯色画刷降级为白色（F3+ 阶段再扩展）。
-        const math::Color text_color = (brush.kind() == paint::BrushKind::SolidColor)
-            ? brush.color() : math::Color::White;
-        inline_text_block_->set_foreground(text_color);
+        // TextBlock 已支持 paint::Brush 前景色，直接传入
+        inline_text_block_->set_foreground(brush);
     } else {
         invalidate_render();
     }

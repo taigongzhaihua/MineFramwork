@@ -39,21 +39,21 @@ const DependencyProperty& TextBlock::FontSizeProperty =
             .changed         = &TextBlock::on_font_size_changed,
         });
 
-// TextBlock::ForegroundProperty — 前景色（Color，默认黑色）
+// TextBlock::ForegroundProperty — 前景色（Brush，默认纯色黑色）
 const DependencyProperty& TextBlock::ForegroundProperty =
     register_property<TextBlock>(
         "Foreground",
-        core::Variant{ math::Color::Black },
+        core::Variant{ paint::Brush::solid(math::Color::Black) },
         PropertyMetadata{
             .affects_render = true,
             .changed        = &TextBlock::on_foreground_changed,
         });
 
-// TextBlock::BackgroundProperty — 背景色（Color，默认透明）
+// TextBlock::BackgroundProperty — 背景色（Brush，默认透明）
 const DependencyProperty& TextBlock::BackgroundProperty =
     register_property<TextBlock>(
         "Background",
-        core::Variant{ math::Color::Transparent },
+        core::Variant{ paint::Brush::solid(math::Color::Transparent) },
         PropertyMetadata{
             .affects_render = true,
             .changed        = &TextBlock::on_background_changed,
@@ -105,8 +105,8 @@ void TextBlock::on_foreground_changed(DependencyObject*         sender,
                                       const core::Variant&      new_v) noexcept
 {
     auto* self = static_cast<TextBlock*>(sender);
-    if (new_v.has<math::Color>()) {
-        self->foreground_ = new_v.get<math::Color>();
+    if (new_v.has<paint::Brush>()) {
+        self->foreground_ = new_v.get<paint::Brush>();
     }
 }
 
@@ -116,8 +116,8 @@ void TextBlock::on_background_changed(DependencyObject*         sender,
                                       const core::Variant&      new_v) noexcept
 {
     auto* self = static_cast<TextBlock*>(sender);
-    if (new_v.has<math::Color>()) {
-        self->background_ = new_v.get<math::Color>();
+    if (new_v.has<paint::Brush>()) {
+        self->background_ = new_v.get<paint::Brush>();
     }
 }
 
@@ -173,26 +173,26 @@ void TextBlock::set_font_size(float size_px)
     invalidate_render();
 }
 
-math::Color TextBlock::foreground() const noexcept
+paint::Brush TextBlock::foreground() const noexcept
 {
     return foreground_;
 }
 
-void TextBlock::set_foreground(math::Color color)
+void TextBlock::set_foreground(paint::Brush brush)
 {
-    foreground_ = color;
+    foreground_ = brush;
     set_value(ForegroundProperty, core::Variant{ foreground_ });
     invalidate_render();
 }
 
-math::Color TextBlock::background() const noexcept
+paint::Brush TextBlock::background() const noexcept
 {
     return background_;
 }
 
-void TextBlock::set_background(math::Color color)
+void TextBlock::set_background(paint::Brush brush)
 {
-    background_ = color;
+    background_ = brush;
     set_value(BackgroundProperty, core::Variant{ background_ });
     invalidate_render();
 }
@@ -256,8 +256,11 @@ void TextBlock::on_render(paint::Canvas& canvas)
         return;
     }
 
-    if (background_.a > 0.0f) {
-        canvas.fill_rect(rect, paint::Brush::solid(background_));
+    // 背景画刷可见性检查：纯色全透明时跳过
+    const bool bg_visible = (background_.kind() != paint::BrushKind::SolidColor)
+                         || (background_.color().a > 0.0f);
+    if (bg_visible) {
+        canvas.fill_rect(rect, background_);
     }
 
     if (font_face_ != nullptr && !text_.empty()) {
@@ -276,7 +279,7 @@ void TextBlock::on_render(paint::Canvas& canvas)
             { text_x, baseline_y },
             font_face_,
             font_size_px_,
-            paint::Brush::solid(foreground_));
+            foreground_);
         return;
     }
 
@@ -284,7 +287,7 @@ void TextBlock::on_render(paint::Canvas& canvas)
     const float line_y = rect.y + rect.height * 0.5f - 1.0f;
     canvas.fill_rect(
         { rect.x + padding_.left, line_y, rect.width - padding_.horizontal(), 2.0f },
-        paint::Brush::solid(foreground_));
+        foreground_);
 }
 
 } // namespace mine::ui

@@ -9,8 +9,8 @@
 #include <mine/ui/visual/Control.h>
 #include <mine/ui/property/DependencyProperty.h>
 #include <mine/containers/InlineString.h>
-#include <mine/math/Color.h>
 #include <mine/math/Thickness.h>
+#include <mine/paint/Brush.h>
 
 namespace mine::ui {
 
@@ -33,10 +33,10 @@ public:
     /** @brief 字体大小属性（Variant 存储 float，单位像素，默认 14）。 */
     static const DependencyProperty& FontSizeProperty;
 
-    /** @brief 前景色属性（Variant 存储 math::Color，默认 Black）。 */
+    /** @brief 前景色属性（Variant 存储 paint::Brush，默认 SolidColor(Black)）。 */
     static const DependencyProperty& ForegroundProperty;
 
-    /** @brief 背景色属性（Variant 存储 math::Color，默认 Transparent）。 */
+    /** @brief 背景色属性（Variant 存储 paint::Brush，默认 SolidColor(Transparent)）。 */
     static const DependencyProperty& BackgroundProperty;
 
     /** @brief 内边距属性（Variant 存储 math::Thickness，默认 {4, 2, 4, 2}）。 */
@@ -60,11 +60,11 @@ public:
     [[nodiscard]] float font_size() const noexcept;
     void set_font_size(float size_px);
 
-    [[nodiscard]] math::Color foreground() const noexcept;
-    void set_foreground(math::Color color);
+    [[nodiscard]] paint::Brush foreground() const noexcept;
+    void set_foreground(paint::Brush brush);
 
-    [[nodiscard]] math::Color background() const noexcept;
-    void set_background(math::Color color);
+    [[nodiscard]] paint::Brush background() const noexcept;
+    void set_background(paint::Brush brush);
 
     [[nodiscard]] math::Thickness padding() const noexcept;
     void set_padding(math::Thickness padding);
@@ -110,8 +110,8 @@ private:
 
     containers::InlineString text_;
     float                    font_size_px_ = 14.0f;
-    math::Color              foreground_   = math::Color::Black;
-    math::Color              background_   = math::Color::Transparent;
+    paint::Brush             foreground_   = paint::Brush::solid(math::Color::Black);
+    paint::Brush             background_   = paint::Brush::solid(math::Color::Transparent);
     math::Thickness          padding_      = math::Thickness::symmetric(4.0f, 2.0f);
     void*                    font_face_    = nullptr;
 
