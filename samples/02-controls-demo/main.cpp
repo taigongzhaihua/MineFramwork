@@ -33,6 +33,7 @@
 #include <mine/ui/event/RoutedEventArgs.h>
 #include <mine/platform/IWindow.h>
 #include <mine/platform/WindowDesc.h>
+#include <mine/ui/animation/AnimationClock.h>  // 集中动画时钟
 
 #include <mine/math/Color.h>
 #include <mine/math/Rect.h>
@@ -50,6 +51,7 @@ namespace math     = mine::math;
 namespace ui       = mine::ui;
 namespace input    = mine::ui::input;
 namespace core     = mine::core;
+namespace anim     = mine::ui::animation;  // 动画时钟命名空间别名
 
 // ── Ripple 动画驱动：Win32 Timer 回调 ────────────────────────────────────────
 
@@ -274,13 +276,9 @@ struct DemoApp : public mine::ui::app::Application,
             router.on_window_event(event);
             if (ui_win_) {
                 ui_win_->render();
-                // 事件可能触发 visual_state 变化（悬停/按下等），进而启动动画
-                // 若有活跃动画（ripple 或背景色过渡）且 timer 未启动，则启动渲染驱动器
-                if (ripple_timer_id_ == 0 && (
-                    root.btn_count.has_active_animation() ||
-                    root.btn_reset.has_active_animation() ||
-                    root.btn_quit.has_active_animation()))
-                {
+                // 事件可能触发 visual_state 变化，进而向 AnimationClock 注册动画
+                // 若有活跃动画且定时器未启动，则启动动画驱动器
+                if (ripple_timer_id_ == 0 && anim::AnimationClock::instance().has_active()) {
                     ripple_timer_id_ = SetTimer(nullptr, 0, 16, ripple_timer_proc);
                 }
             }
@@ -399,24 +397,13 @@ static VOID CALLBACK ripple_timer_proc(
 {
     if (!g_demo_app) { return; }
 
-    auto& root = g_demo_app->root;
-
-    // 推进每个按钮的背景色过渡 Storyboard（~60fps，dt = 16ms）
-    // Storyboard::tick 内部将插值色写入 BackgroundProperty 的 Animation 优先级槽，
-    // PropertyMetadata.affects_render = true → 触发 invalidate_render（由下方 render 刷新）
+    // AnimationClock 统一驱动所有已注册动画（Ripple + 背景色 Storyboard）
+    // 取代原来分散在各按钮的 tick_bg_animation() 和 has_active_animation() 调用
     constexpr float kDt = 16.0f / 1000.0f;
-    root.btn_count.tick_bg_animation(kDt);
-    root.btn_reset.tick_bg_animation(kDt);
-    root.btn_quit.tick_bg_animation(kDt);
-
-    // 检查是否仍有活跃的动画（ripple 或背景色过渡 Storyboard）
-    const bool any_active =
-        root.btn_count.has_active_animation() ||
-        root.btn_reset.has_active_animation() ||
-        root.btn_quit.has_active_animation();
+    const bool any_active = anim::AnimationClock::instance().tick_all(kDt);
 
     if (any_active) {
-        // 驱动当前帧渲染
+        // 仍有动画运行，驱动当前帧渲染
         if (g_demo_app->ui_win_) {
             g_demo_app->ui_win_->render();
         }

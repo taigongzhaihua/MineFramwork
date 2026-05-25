@@ -18,6 +18,7 @@
 #include <mine/ui/animation/Storyboard.h>
 #include <mine/ui/animation/EasingFunction.h>
 #include <mine/ui/animation/Duration.h>
+#include <mine/ui/animation/AnimationClock.h>
 #include <mine/core/Memory.h>
 
 #include <cmath>
@@ -59,6 +60,46 @@ const DependencyProperty& Button::BackgroundProperty =
         core::Variant{ math::Color::from_rgb_u32(0x6750A4) },  // MD3 Primary
         PropertyMetadata{
             .affects_render = true,  // 属性变更时自动触发 invalidate_render
+        });
+
+// Button::ForegroundProperty — 文字前景色（MD3 On Primary 白色）
+// 变更时通过 on_foreground_changed 自动传播到 ContentPresenter
+const DependencyProperty& Button::ForegroundProperty =
+    register_property<Button>(
+        "Foreground",
+        core::Variant{ math::Color::White },  // MD3 On Primary
+        PropertyMetadata{
+            .affects_render = true,
+            .changed        = &Button::on_foreground_changed,
+        });
+
+// Button::BorderColorProperty — 边框颜色（MD3 Filled Button 无外边框，默认透明）
+const DependencyProperty& Button::BorderColorProperty =
+    register_property<Button>(
+        "BorderColor",
+        core::Variant{ math::Color::Transparent },
+        PropertyMetadata{
+            .affects_render = true,
+        });
+
+// Button::HoveredBackgroundProperty — Hovered 状态目标背景色
+// MD3 Primary + OnPrimary * 8%（hover state layer = 8% of OnPrimary）
+const DependencyProperty& Button::HoveredBackgroundProperty =
+    register_property<Button>(
+        "HoveredBackground",
+        core::Variant{ math::Color{0.452f, 0.369f, 0.672f, 1.0f} },  // ≈ #735BAC
+        PropertyMetadata{
+            .affects_render = true,
+        });
+
+// Button::PressedBackgroundProperty — Pressed 状态目标背景色
+// MD3 Primary + OnPrimary * 12%（pressed state layer = 12% of OnPrimary）
+const DependencyProperty& Button::PressedBackgroundProperty =
+    register_property<Button>(
+        "PressedBackground",
+        core::Variant{ math::Color{0.476f, 0.396f, 0.686f, 1.0f} },  // ≈ #7A65AF
+        PropertyMetadata{
+            .affects_render = true,
         });
 
 // ============================================================================
@@ -127,6 +168,19 @@ void Button::on_padding_changed(DependencyObject*         sender,
     }
 }
 
+void Button::on_foreground_changed(DependencyObject*         sender,
+                                   const DependencyProperty& /*prop*/,
+                                   const core::Variant&      /*old_v*/,
+                                   const core::Variant&      new_v) noexcept
+{
+    auto* self = static_cast<Button*>(sender);
+    // 若模板已构建，将新前景色推送到 ContentPresenter（幂等，template_root 为 nullptr 则跳过）
+    UIElement* child = self->find_template_child("content");
+    if (child != nullptr && new_v.has<math::Color>()) {
+        static_cast<ContentPresenter*>(child)->set_foreground(new_v.get<math::Color>());
+    }
+}
+
 // ============================================================================
 // 路由事件注册
 // ============================================================================
@@ -148,7 +202,11 @@ Button::Button()
     add_handler(input::MouseLeaveEvent(), &Button::on_mouse_leave_router, this);
 }
 
-Button::~Button() = default;
+Button::~Button()
+{
+    // 析构时注销 AnimationClock 注册项，防止后续 tick_all 回调访问已释放内存
+    animation::AnimationClock::instance().unregister_animation(this);
+}
 
 core::StringView Button::text() const noexcept
 {
@@ -198,13 +256,15 @@ void Button::set_padding(math::Thickness padding)
 
 math::Color Button::foreground() const noexcept
 {
-    return foreground_;
+    const core::Variant& v = get_value(ForegroundProperty);
+    return v.has<math::Color>() ? v.get<math::Color>() : math::Color::White;
 }
 
 void Button::set_foreground(math::Color color)
 {
-    foreground_ = color;
-    invalidate_render();
+    // 写入 ForegroundProperty Local 槽；on_foreground_changed 回调负责传播到 ContentPresenter
+    // affects_render=true → set_value 内部自动触发 invalidate_render
+    set_value(ForegroundProperty, core::Variant{color}, ValuePriority::Local);
 }
 
 math::Color Button::background() const noexcept
@@ -227,46 +287,53 @@ void Button::set_background(math::Color color)
 
 math::Color Button::background_hovered() const noexcept
 {
-    return background_hover_;
+    const core::Variant& v = get_value(HoveredBackgroundProperty);
+    return v.has<math::Color>() ? v.get<math::Color>() : math::Color{};
 }
 
 void Button::set_background_hovered(math::Color color)
 {
-    background_hover_ = color;
-    invalidate_render();
+    // 写入 HoveredBackgroundProperty Local 槽；affects_render=true → 自动触发 invalidate_render
+    set_value(HoveredBackgroundProperty, core::Variant{color}, ValuePriority::Local);
 }
 
 math::Color Button::background_pressed() const noexcept
 {
-    return background_press_;
+    const core::Variant& v = get_value(PressedBackgroundProperty);
+    return v.has<math::Color>() ? v.get<math::Color>() : math::Color{};
 }
 
 void Button::set_background_pressed(math::Color color)
 {
-    background_press_ = color;
-    invalidate_render();
+    // 写入 PressedBackgroundProperty Local 槽；affects_render=true → 自动触发 invalidate_render
+    set_value(PressedBackgroundProperty, core::Variant{color}, ValuePriority::Local);
 }
 
 math::Color Button::border_color() const noexcept
 {
-    return border_color_;
+    const core::Variant& v = get_value(BorderColorProperty);
+    return v.has<math::Color>() ? v.get<math::Color>() : math::Color::Transparent;
 }
 
 void Button::set_border_color(math::Color color)
 {
-    border_color_ = color;
-    invalidate_render();
+    // 写入 BorderColorProperty Local 槽；affects_render=true → 自动触发 invalidate_render
+    set_value(BorderColorProperty, core::Variant{color}, ValuePriority::Local);
 }
 
 void Button::set_font_face(void* font_face) noexcept
 {
     font_face_ = font_face;
-    // 若模板已构建，立即将字体传播到 ContentPresenter
+    // 若模板已构建，立即将字体与当前前景色传播到 ContentPresenter
     UIElement* child = find_template_child("content");
     if (child != nullptr) {
         auto* presenter = static_cast<ContentPresenter*>(child);
         presenter->set_font_face(font_face_);
-        presenter->set_foreground(foreground_);
+        // 从 ForegroundProperty（唯一真相源）读取当前前景色并同步
+        const core::Variant& fg_var = get_value(ForegroundProperty);
+        if (fg_var.has<math::Color>()) {
+            presenter->set_foreground(fg_var.get<math::Color>());
+        }
     }
 }
 
@@ -293,9 +360,13 @@ void Button::on_measure(math::Size available_size)
         if (child != nullptr && font_face_ != nullptr) {
             auto* presenter = static_cast<ContentPresenter*>(child);
             presenter->set_font_face(font_face_);
+            // 从 ForegroundProperty（唯一真相源）读取前景色
+            const core::Variant& fg_var = get_value(ForegroundProperty);
+            const math::Color base_fg = fg_var.has<math::Color>()
+                ? fg_var.get<math::Color>() : math::Color::White;
             // MD3 Disabled 状态：OnSurface 38% opacity（暗灰半透明文字）
             const math::Color effective_fg = is_enabled_
-                ? foreground_
+                ? base_fg
                 : math::Color{0.11f, 0.11f, 0.12f, 0.38f};
             presenter->set_foreground(effective_fg);
             presenter->set_font_size(font_size_px_);
@@ -335,17 +406,11 @@ void Button::on_render(paint::Canvas& canvas)
     canvas.fill_rounded_rect(math::RoundedRect{rect, radius}, paint::Brush::solid(fill));
 
     // MD3 Ripple 涟漪动画：在背景之上、文字之下绘制涟漪圆
+    // elapsed_ms 由 AnimationClock 驱动的 anim_tick_callback 每帧累加
     if (ripple_.active) {
-        using Clock = std::chrono::steady_clock;
-        using Msf   = std::chrono::duration<float, std::milli>;
-        const float elapsed_ms = std::chrono::duration_cast<Msf>(
-            Clock::now() - ripple_.start).count();
         constexpr float kRippleDurationMs = 200.0f;  // MD3 Ripple 动画时长
-        const float t = elapsed_ms / kRippleDurationMs;
-        if (t >= 1.0f) {
-            // 动画结束，关闭 ripple（下一帧 timer proc 会停止定时器）
-            ripple_.active = false;
-        } else {
+        const float t = ripple_.elapsed_ms / kRippleDurationMs;
+        if (t < 1.0f) {
             // 半径：从 0 扩展到按钮对角线的 60%（确保覆盖整个按钮）
             const float max_r = std::sqrt(rect.width  * rect.width
                                         + rect.height * rect.height) * 0.6f;
@@ -363,6 +428,7 @@ void Button::on_render(paint::Canvas& canvas)
                 paint::Brush::solid(math::Color::White.with_alpha(alpha)));
             canvas.restore();
         }
+        // 若 t >= 1 时 ripple_.active 已被 tick 设为 false，此处无需额外处理
     }
 
     // 有模板根时，文字由 ContentPresenter 渲染，Button 自身不再绘制占位线
@@ -371,8 +437,10 @@ void Button::on_render(paint::Canvas& canvas)
     }
 
     // 无模板时的回退路径：用居中横条表示文字区域
+    const core::Variant& fg_var = get_value(ForegroundProperty);
+    const math::Color base_fg  = fg_var.has<math::Color>() ? fg_var.get<math::Color>() : math::Color::White;
     const float fallback_fg_a = is_enabled_ ? 1.0f : 0.38f;
-    const math::Color fallback_fg = foreground_.with_alpha(fallback_fg_a);
+    const math::Color fallback_fg = base_fg.with_alpha(fallback_fg_a);
     const float line_w = rect.width - padding_.horizontal();
     const float line_y = rect.y + rect.height * 0.5f - 1.0f;
     if (line_w > 0.0f) {
@@ -445,10 +513,12 @@ void Button::on_mouse_down(input::MouseEventArgs& args)
 
     // 记录 MD3 Ripple 涟漪动画起始状态（圆心为鼠标按下点的局部坐标）
     const math::Rect rect = bounds_rect();
-    ripple_.center_x = args.position().x - rect.x;
-    ripple_.center_y = args.position().y - rect.y;
-    ripple_.start    = std::chrono::steady_clock::now();
-    ripple_.active   = true;
+    ripple_.center_x   = args.position().x - rect.x;
+    ripple_.center_y   = args.position().y - rect.y;
+    ripple_.elapsed_ms = 0.0f;  // 由 AnimationClock 驱动的 tick 每帧累加
+    ripple_.active     = true;
+    // 注册到 AnimationClock（幂等：若 Storyboard 已注册则只刷新 tick_fn）
+    animation::AnimationClock::instance().register_animation(this, &Button::anim_tick_callback);
 
     update_visual_state();
 }
@@ -476,28 +546,46 @@ void Button::raise_click()
     EventManager::raise(*this, args);
 }
 
-bool Button::has_active_animation() const noexcept
-{
-    // ripple 使用手动 chrono 计时；背景色过渡通过 Storyboard 驱动
-    return ripple_.active || (bg_storyboard_ && !bg_storyboard_->is_complete());
-}
+// ============================================================================
+// AnimationClock tick 回调（由 AnimationClock::tick_all 每帧调用）
+// ============================================================================
 
-void Button::tick_bg_animation(float dt)
+bool Button::anim_tick_callback(void* user_data, float dt) noexcept
 {
-    if (!bg_storyboard_ || bg_storyboard_->is_complete()) {
-        return;
+    auto* self = static_cast<Button*>(user_data);
+    bool  any_active = false;
+
+    // ── Ripple 涟漪动画 ─────────────────────────────────────────────────────
+    if (self->ripple_.active) {
+        constexpr float kRippleDurationMs = 200.0f;
+        self->ripple_.elapsed_ms += dt * 1000.0f;
+        if (self->ripple_.elapsed_ms < kRippleDurationMs) {
+            any_active = true;
+        } else {
+            self->ripple_.active = false;  // 动画完成，on_render 不再绘制涟漪
+        }
+        // 触发重绘以反映当前 elapsed_ms 对应的涟漪半径/透明度
+        self->invalidate_render();
     }
-    // tick 内部调用 set_value(BackgroundProperty, interpolated, Animation)
-    // PropertyMetadata.affects_render = true → 触发 invalidate_render（由外部 timer 驱动刷帧）
-    const bool done = bg_storyboard_->tick(dt);
-    if (done) {
-        // 动画完成：将最终插值色（Animation 槽当前值）持久化到 Local 槽，
-        // 再调用 stop() 清除 Animation 槽（complete_ 不变，仍为 true）。
-        // 这样后续 set_background() 写 Local(50) 能立即生效，不被残留 Animation(60) 遮盖。
-        const core::Variant& final_val = get_value(BackgroundProperty);
-        set_value(BackgroundProperty, final_val, ValuePriority::Local);
-        bg_storyboard_->stop();
+
+    // ── 背景色过渡 Storyboard ────────────────────────────────────────────────
+    if (self->bg_storyboard_ && !self->bg_storyboard_->is_complete()) {
+        // tick 内部将插值色以 Animation 优先级写回 BackgroundProperty，
+        // affects_render=true → 自动触发 invalidate_render
+        const bool done = self->bg_storyboard_->tick(dt);
+        if (done) {
+            // 动画完成：将 Animation 槽的终值持久化到 Local 槽，
+            // 再 stop() 清除 Animation 槽，防止残留 Animation(60) 遮盖后续 set_background()
+            const core::Variant& final_val = self->get_value(BackgroundProperty);
+            self->set_value(BackgroundProperty, final_val, ValuePriority::Local);
+            self->bg_storyboard_->stop();
+        } else {
+            any_active = true;
+        }
     }
+
+    // 返回 false → AnimationClock 自动移除此注册项（无需手动注销）
+    return any_active;
 }
 
 void Button::on_visual_state_changed(ControlVisualState /*old_state*/,
@@ -525,13 +613,27 @@ void Button::on_visual_state_changed(ControlVisualState /*old_state*/,
     // （stop() 已清除 Animation 槽，若不写 Local 则 capture 会读到 Default 色）
     set_value(BackgroundProperty, core::Variant{from_color}, ValuePriority::Local);
 
-    // ── 4. 计算目标颜色 ───────────────────────────────────────────────────
+    // ── 4. 从对应 DP 读取目标颜色（唯一真相源）────────────────────────────
+    // HoveredBackgroundProperty / PressedBackgroundProperty 已通过
+    // set_background_hovered/pressed() 写入 Local 槽，默认为 MD3 规范值。
     math::Color to_color;
     switch (new_state) {
-    case ControlVisualState::Pressed:  to_color = background_press_; break;
-    case ControlVisualState::Hovered:  to_color = background_hover_; break;
-    case ControlVisualState::Disabled: to_color = math::Color{0.11f, 0.11f, 0.12f, 0.12f}; break;
-    default:                           to_color = background_;        break;
+    case ControlVisualState::Pressed: {
+        const core::Variant& v = get_value(PressedBackgroundProperty);
+        to_color = v.has<math::Color>() ? v.get<math::Color>() : background_;
+        break;
+    }
+    case ControlVisualState::Hovered: {
+        const core::Variant& v = get_value(HoveredBackgroundProperty);
+        to_color = v.has<math::Color>() ? v.get<math::Color>() : background_;
+        break;
+    }
+    case ControlVisualState::Disabled:
+        to_color = math::Color{0.11f, 0.11f, 0.12f, 0.12f};
+        break;
+    default:
+        to_color = background_;
+        break;
     }
 
     // ── 5. 构建新 Storyboard 并启动 ─────────────────────────────────────
@@ -544,6 +646,11 @@ void Button::on_visual_state_changed(ControlVisualState /*old_state*/,
         animation::QuadEaseOut);                     // ease-out quad：末尾减速感更自然
     bg_storyboard_->capture_from_values();  // 读取 Local 槽中的 from_color
     bg_storyboard_->resolve_and_begin();    // 写入 Animation=from，启动插值
+
+    // ── 6. 向 AnimationClock 注册 tick 回调（幂等，不会产生重复项）────────
+    // AnimationClock 统一驱动 Ripple + Storyboard 两种动画，
+    // 取代了原来分散在 App 层的 tick_bg_animation() 调用
+    animation::AnimationClock::instance().register_animation(this, &Button::anim_tick_callback);
 }
 
 } // namespace mine::ui

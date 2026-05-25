@@ -4,7 +4,33 @@
 
 ## [Unreleased]
 
+### Added
+- **mine.ui.animation（AnimationClock）**：新增全局动画时钟，统一管理所有活跃动画的 tick 驱动：
+  - Meyer's Singleton 模式（`AnimationClock::instance()`），无全局变量
+  - 注册接口 `register_animation(handle, tick_fn)`：以 `void* handle + TickFn` 函数指针回调为注册单元（与框架路由事件、DP changed 回调风格一致，无 `std::function` 堆分配）
+  - `tick_all(dt) -> bool`：推进所有已注册动画，回调返回 `false` 时以尾部覆盖方式 O(1) 删除（无顺序保证），方法返回 `true` 表示仍有活跃动画
+  - `unregister_animation(handle)`：线性扫描按 handle 删除，析构/停止时安全调用（handle 不存在时幂等）
+  - `has_active() const noexcept`：轮询是否有活跃动画
+  - 内部使用 `SmallVector<Entry, 8>` 存储，防重入标志 `ticking_` 保护 `tick_all` 内部状态
+  - 新增至 `AnimationAll.h` 伞形头文件
+
 ### Changed
+- **mine.ui.controls / Button（F2 技术债清理）**：完成 §21.8 全部技术债清理：
+  - **新增 4 个 DependencyProperty**：`ForegroundProperty`（白色默认值）、`BorderColorProperty`（透明默认值）、`HoveredBackgroundProperty`（MD3 Primary+8% state layer）、`PressedBackgroundProperty`（MD3 Primary+12% state layer）
+  - **移除 4 个 plain member**：`foreground_`、`background_hover_`、`background_press_`、`border_color_` 全部替换为对应 DP 的 `get_value()`/`set_value()` 读写
+  - **新增 `on_foreground_changed` 静态回调**：前景色变更时自动推送到 `ContentPresenter`（模板未构建时静默跳过）
+  - **删除公开 API `has_active_animation()` 和 `tick_bg_animation(dt)`**：改由 `AnimationClock` 统一驱动
+  - **新增私有 `anim_tick_callback()`**：统一推进 Ripple elapsed_ms 和 bg_storyboard_；返回 `false` 时 `AnimationClock` 自动移除注册
+  - **Ripple 去 chrono**：`RippleState::start`（`chrono::time_point`）改为 `elapsed_ms`（`float`），由 `anim_tick_callback` 每帧以 `dt * 1000.0f` 累加；消除 `<chrono>` 依赖
+  - **`on_mouse_down`**：启动 Ripple 时调用 `AnimationClock::instance().register_animation(this, &Button::anim_tick_callback)`
+  - **`on_visual_state_changed`**：读取 `HoveredBackgroundProperty`/`PressedBackgroundProperty` DP 作为过渡目标色；状态切换后调用 `AnimationClock::instance().register_animation(this, &Button::anim_tick_callback)`
+  - **析构函数**：调用 `AnimationClock::instance().unregister_animation(this)` 清理注册
+
+- **samples/02-controls-demo（改为 AnimationClock 驱动）**：
+  - 删除对各 `Button::tick_bg_animation()` 和 `Button::has_active_animation()` 的直接调用
+  - `ripple_timer_proc` 改为调用 `anim::AnimationClock::instance().tick_all(kDt)` 统一推进所有动画
+  - 鼠标/键盘事件后改为检查 `AnimationClock::instance().has_active()` 决定是否启动定时器
+
 - **mine.ui.controls / Button（Material Design 3 Filled Button 外观）**：将 Button 默认模板外观重设计为 Material Design 3 Filled Button 风格：
   - 背景色改为 MD3 Primary（#6750A4，蓝紫色）；Hovered 叠加 OnPrimary 8% state layer；Pressed 叠加 12% state layer
   - 文字颜色改为 MD3 On Primary（白色），Disabled 状态降至 OnSurface 38% 半透明
