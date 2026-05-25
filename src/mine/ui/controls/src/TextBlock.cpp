@@ -5,6 +5,7 @@
 
 #include <mine/ui/controls/TextBlock.h>
 
+#include <mine/text/FontFace.h>        // 用于 measure_text() 真实字形测量
 #include <mine/paint/Canvas.h>
 #include <mine/paint/Brush.h>
 #include <mine/ui/property/DependencyProperty.h>
@@ -217,12 +218,35 @@ void TextBlock::set_font_face(void* font_face) noexcept
 
 void TextBlock::on_measure(math::Size /*available_size*/)
 {
-    const float content_width  = static_cast<float>(text_.size()) * font_size_px_ * 0.55f;
-    const float content_height = font_size_px_ * 1.4f;
-    set_desired_size({
-        content_width + padding_.horizontal(),
-        content_height + padding_.vertical(),
-    });
+    if (font_face_ != nullptr) {
+        // ── 有字体：FreeType 真实字形测量 ──────────────────────────────────────
+        auto* face = static_cast<text::FontFace*>(font_face_);
+
+        // measure_text 内部临时调用 FT_Set_Pixel_Sizes；
+        // 调用完成后 ascender()/descender() 返回当前字号的真实行高度量。
+        const float text_w    = face->measure_text(text_.data(), text_.size(), font_size_px_);
+        cached_ascender_      = face->ascender();   // 正值，基线上方像素数
+        cached_descender_     = face->descender();  // 负值，基线下方像素数
+
+        // 真实行高 = ascender + |descender|（descender 为负，相减即相加）
+        const float text_h = static_cast<float>(cached_ascender_ - cached_descender_);
+        set_desired_size({
+            text_w + padding_.horizontal(),
+            text_h + padding_.vertical(),
+        });
+    } else {
+        // ── 无字体：估算（向后兼容回退路径）──────────────────────────────────
+        const float content_width  = static_cast<float>(text_.size()) * font_size_px_ * 0.55f;
+        const float content_height = font_size_px_ * 1.4f;
+
+        // 估算行高度量（近似 Latin 字体比例）
+        cached_ascender_  = static_cast<int32_t>(font_size_px_ * 0.8f);
+        cached_descender_ = -static_cast<int32_t>(font_size_px_ * 0.2f);
+        set_desired_size({
+            content_width + padding_.horizontal(),
+            content_height + padding_.vertical(),
+        });
+    }
 }
 
 void TextBlock::on_render(paint::Canvas& canvas)
@@ -236,11 +260,20 @@ void TextBlock::on_render(paint::Canvas& canvas)
         canvas.fill_rect(rect, paint::Brush::solid(background_));
     }
 
-    const math::Vec2 text_origin{ rect.x + padding_.left, rect.y + padding_.top + font_size_px_ };
     if (font_face_ != nullptr && !text_.empty()) {
+        // 垂直居中：令文字视觉中心与 rect 竖向中点对齐
+        //   文字视觉中心 = 基线 - (ascender + descender) / 2
+        //                （descender 为负值，视觉中心在基线上方）
+        //   令视觉中心 = rect.center_y ：
+        //     baseline = rect.center_y + (ascender + descender) / 2
+        const float asc        = static_cast<float>(cached_ascender_);
+        const float dsc        = static_cast<float>(cached_descender_); // 负值
+        const float baseline_y = rect.y + rect.height * 0.5f + (asc + dsc) * 0.5f;
+        const float text_x     = rect.x + padding_.left;
+
         canvas.draw_text(
             core::StringView{ text_.data(), text_.size() },
-            text_origin,
+            { text_x, baseline_y },
             font_face_,
             font_size_px_,
             paint::Brush::solid(foreground_));

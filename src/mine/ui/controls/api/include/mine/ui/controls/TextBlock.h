@@ -114,6 +114,13 @@ private:
     math::Color              background_   = math::Color::Transparent;
     math::Thickness          padding_      = math::Thickness::symmetric(4.0f, 2.0f);
     void*                    font_face_    = nullptr;
+
+    // ── 测量缓存（on_measure 计算，on_render 读取）────────────────────────
+
+    /// 上行距（ascender）：基线以上像素数，正值。无字体时按字号估算。
+    int32_t cached_ascender_  = 0;
+    /// 下行距（descender）：基线以下像素数，负值。无字体时按字号估算。
+    int32_t cached_descender_ = 0;
 };
 
 } // namespace mine::ui
