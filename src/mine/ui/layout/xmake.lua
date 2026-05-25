@@ -11,5 +11,6 @@ mine_module("mine.ui.layout", {
         "mine.math",
         "mine.ui.property",
         "mine.ui.visual",
+        "mine.ui.style",   -- Control 依赖 ControlTemplate / TemplateRegistry / VisualStateManager
     },
 })

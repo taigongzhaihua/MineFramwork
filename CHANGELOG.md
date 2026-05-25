@@ -15,6 +15,16 @@
   - 新增至 `AnimationAll.h` 伞形头文件
 
 ### Changed
+- **mine.ui.layout（迁移第二步：Control 迁移至 FrameworkElement）**：将 `Control` 基类物理迁移至 `mine.ui.layout` 模块，使所有控件自动参与两遍布局协议：
+  - `Control` 继承链由 `UIElement → Control` 升级为 `UIElement → FrameworkElement → Control`
+  - 新增 `src/mine/ui/layout/api/include/mine/ui/layout/Control.h`（继承 `FrameworkElement`，导出宏 `MINE_UI_LAYOUT_API`）
+  - 新增 `src/mine/ui/layout/src/Control.cpp`（`on_measure` 改为 `measure_override`，`on_arrange` 改为 `arrange_override`）
+  - `src/mine/ui/visual/api/include/mine/ui/visual/Control.h` 改为向后兼容转发头（仅保留注释 + `#include <mine/ui/layout/Control.h>`）
+  - `src/mine/ui/visual/src/Control.cpp` 清空（实现已迁移至 layout 模块）
+  - `mine.ui.layout/xmake.lua` 新增 `mine.ui.style` 依赖；`mine.ui.visual/xmake.lua` 移除 `mine.ui.style` 依赖
+  - `mine.ui.visual.test` 目标追加 `mine.ui.layout` 依赖以访问迁移后的 Control 实现
+  - 测试全部通过：layout 27/27、visual 53/53、controls 16/16
+
 - **mine.ui.layout（迁移第一步）**：布局容器子元素类型从 `FrameworkElement*` 放宽为 `UIElement*`，打通现有 `Button/TextBlock` 直接接入 `StackPanel/Grid` 的能力：
   - `Panel::add_child/remove_child/child_at` 与 `children_` 改为 `UIElement*`
   - `Grid` 附加属性便捷接口（`get_row/set_row/get_column/...`）参数从 `FrameworkElement` 放宽为 `UIElement`

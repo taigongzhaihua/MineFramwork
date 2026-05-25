@@ -12,6 +12,7 @@
 #include <mine/ui/layout/Orientation.h>
 #include <mine/ui/layout/GridLength.h>
 #include <mine/ui/layout/FrameworkElement.h>
+#include <mine/ui/layout/Control.h>
 #include <mine/ui/layout/Panel.h>
 #include <mine/ui/layout/StackPanel.h>
 #include <mine/ui/layout/Grid.h>
