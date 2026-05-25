@@ -40,6 +40,17 @@
   - Disabled 背景改为 OnSurface 12% 半透明；`set_enabled` 同时触发 `invalidate_measure` 以刷新文字颜色
 
 ### Fixed
+- **samples/02-controls-demo 动画延时与中断卡顿修复**：
+  - **根因 1（延时）**：原实现在状态切换 → `register_animation` 后调用 `ui_win_->render()`，再等待 Win32 定时器下一次触发（最多 16ms 后）才第一次 `tick_all`；期间按钮冻结在 `from_brush`，用户感知到明显的响应延迟。
+  - **根因 2（卡顿）**：`ripple_timer_proc` 使用硬编码 `kDt = 16ms`，实际定时器精度约 ±4ms，动画速度与期望不符；动画打断时新状态同样须等下一定时器周期，导致视觉冻结后突跳。
+  - **根因 3（跳色）**：三个自定义颜色按钮（蓝/蓝灰/红）未调用 `set_background_hovered`，Hover 过渡默认使用 MD3 紫色（`#735BAC`），产生强烈的色调跳变，加剧卡顿感。
+  - **修复**：
+    - 新增 `DemoApp::last_anim_tick_ms_`（`DWORD`）记录上次 tick 的真实系统时间戳。
+    - 新增 `tick_animations_and_render()` 辅助方法：使用 `GetTickCount()` 计算实际 `dt`（首帧默认 16ms，后续取真实帧间隔，最大钳制 100ms 防调试/最小化大跳帧）；每次调用仅推进上次 tick 后经过的真实时间，事件与定时器两条路径共享 `last_anim_tick_ms_` 保证不重复计时。
+    - 事件处理器（`on_window_event`）改为调用 `tick_animations_and_render()` 代替直接 `render() + SetTimer`：状态切换后立即 tick，首帧动画在同一消息处理轮次内渲染，消除起始延迟。
+    - `ripple_timer_proc` 委托给 `tick_animations_and_render()`：不再使用硬编码 dt，定时器与事件共享时间戳，打断时下一 tick 精确消耗打断至 tick 之间的实际间隔，无突跳。
+    - 为 `btn_count/btn_reset/btn_quit` 补充 `set_background_hovered`（分别为 Material Blue 400 `#1E88E5`、Blue Grey 600 `#546E7A`、Red 700 `#D32F2F`），Hover 过渡不再错误跳变为 MD3 紫色。
+
 - **samples/02-controls-demo 崩溃修复（0xC0000005 悬空指针）**：`on_startup` 中 `font_face` 原为局部 `OwnedPtr`，`on_startup` 返回后字体对象被销毁，后续鼠标事件触发第二次渲染时各控件的 `font_face_` 成为悬空指针（use-after-free），导致 STATUS_ACCESS_VIOLATION 崩溃。修复方法：将字体资源提升为 `DemoApp::font_face_` 成员变量（`OwnedPtr<text::FontFace>`），生命周期与 `DemoApp` 一致，覆盖全部渲染周期，彻底消除悬空指针。
 
 ### Added

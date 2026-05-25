@@ -185,9 +185,10 @@ struct DemoApp : public mine::ui::app::Application,
     core::OwnedPtr<text::FontFace> font_face_;  ///< 已加载的字体，所有控件共享
 
     // ── 运行时状态 ────────────────────────────────────────────────────────
-    int          click_count      = 0;       ///< 点击计数器
-    ui::Window*  ui_win_          = nullptr; ///< 主窗口（由 on_startup 赋值）
-    UINT_PTR     ripple_timer_id_ = 0;       ///< Ripple 动画驱动定时器 ID（0 = 未启动）
+    int          click_count         = 0;        ///< 点击计数器
+    ui::Window*  ui_win_             = nullptr;  ///< 主窗口（由 on_startup 赋值）
+    UINT_PTR     ripple_timer_id_    = 0;        ///< 动画驱动定时器 ID（0 = 未启动）
+    DWORD        last_anim_tick_ms_  = 0;        ///< 上次 tick_all 的系统时间戳（ms）
 
     // ── Application 生命周期扩展点 ───────────────────────────────────────
 
@@ -276,17 +277,60 @@ struct DemoApp : public mine::ui::app::Application,
         case Kind::KeyDown:
         case Kind::KeyUp:
             router.on_window_event(event);
-            if (ui_win_) {
-                ui_win_->render();
-                // 事件可能触发 visual_state 变化，进而向 AnimationClock 注册动画
-                // 若有活跃动画且定时器未启动，则启动动画驱动器
-                if (ripple_timer_id_ == 0 && anim::AnimationClock::instance().has_active()) {
-                    ripple_timer_id_ = SetTimer(nullptr, 0, 16, ripple_timer_proc);
-                }
-            }
+            // 事件处理后立即 tick 并渲染：消除状态切换至首帧显示之间的延时感
+            tick_animations_and_render();
             break;
         default:
             break;
+        }
+    }
+
+    /**
+     * @brief 使用真实时间戳推进所有活跃动画并触发渲染，同时管理定时器生命周期。
+     *
+     * 在输入事件处理和定时器回调中均可安全调用：两处共享 last_anim_tick_ms_，
+     * 保证每次 tick_all 仅消耗上次调用后实际经过的时间，彻底消除：
+     *  - 动画起始延时（状态切换后立即 tick，无需等待下一个定时器周期）；
+     *  - 打断卡顿（中断时同样即时 tick，不会因硬编码 dt 与实际帧间隔不符而跳帧）。
+     */
+    void tick_animations_and_render()
+    {
+        if (anim::AnimationClock::instance().has_active()) {
+            // 用真实时间戳计算步长，消除 Win32 定时器精度误差
+            const DWORD now = GetTickCount();
+            float dt;
+            if (last_anim_tick_ms_ == 0 || now < last_anim_tick_ms_) {
+                // 首帧（动画刚注册）或时钟回绕：使用默认步长约 60fps
+                dt = 16.0f / 1000.0f;
+            } else {
+                dt = static_cast<float>(now - last_anim_tick_ms_) / 1000.0f;
+                // 限制最大步长：防止窗口最小化、调试断点后大幅跳帧
+                if (dt > 0.1f) { dt = 0.1f; }
+            }
+            last_anim_tick_ms_ = now;
+
+            const bool still_active = anim::AnimationClock::instance().tick_all(dt);
+            if (ui_win_) { ui_win_->render(); }
+
+            if (!still_active) {
+                // 所有动画已完成：停止定时器并重置时间戳
+                if (ripple_timer_id_ != 0) {
+                    KillTimer(nullptr, ripple_timer_id_);
+                    ripple_timer_id_ = 0;
+                }
+                last_anim_tick_ms_ = 0;
+            } else if (ripple_timer_id_ == 0) {
+                // 仍有动画但定时器未启动（首次从事件驱动进入）：启动定时器
+                ripple_timer_id_ = SetTimer(nullptr, 0, 16, ripple_timer_proc);
+            }
+        } else {
+            // 无活跃动画：直接渲染，清理可能残留的定时器
+            if (ui_win_) { ui_win_->render(); }
+            if (ripple_timer_id_ != 0) {
+                KillTimer(nullptr, ripple_timer_id_);
+                ripple_timer_id_ = 0;
+                last_anim_tick_ms_ = 0;
+            }
         }
     }
 
@@ -353,6 +397,7 @@ struct DemoApp : public mine::ui::app::Application,
         root.btn_count.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
         root.btn_count.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
         root.btn_count.set_background(paint::Brush::solid_rgb(0x1976D2));
+        root.btn_count.set_background_hovered(paint::Brush::solid_rgb(0x1E88E5));  // Material Blue 400
         root.btn_count.set_background_pressed(paint::Brush::solid_rgb(0x0D47A1));
         root.btn_count.set_border_color(paint::Brush::solid_rgb(0x0D47A1));
         if (font) { root.btn_count.set_font_face(font); }
@@ -363,6 +408,7 @@ struct DemoApp : public mine::ui::app::Application,
         root.btn_reset.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
         root.btn_reset.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
         root.btn_reset.set_background(paint::Brush::solid_rgb(0x455A64));
+        root.btn_reset.set_background_hovered(paint::Brush::solid_rgb(0x546E7A));  // Blue Grey 600
         root.btn_reset.set_background_pressed(paint::Brush::solid_rgb(0x263238));
         root.btn_reset.set_border_color(paint::Brush::solid_rgb(0x263238));
         if (font) { root.btn_reset.set_font_face(font); }
@@ -373,6 +419,7 @@ struct DemoApp : public mine::ui::app::Application,
         root.btn_quit.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
         root.btn_quit.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
         root.btn_quit.set_background(paint::Brush::solid_rgb(0xC62828));
+        root.btn_quit.set_background_hovered(paint::Brush::solid_rgb(0xD32F2F));  // Red 700
         root.btn_quit.set_background_pressed(paint::Brush::solid_rgb(0x7F0000));
         root.btn_quit.set_border_color(paint::Brush::solid_rgb(0x7F0000));
         if (font) { root.btn_quit.set_font_face(font); }
@@ -398,26 +445,8 @@ static VOID CALLBACK ripple_timer_proc(
     HWND /*hwnd*/, UINT /*msg*/, UINT_PTR /*id*/, DWORD /*time*/) noexcept
 {
     if (!g_demo_app) { return; }
-
-    // AnimationClock 统一驱动所有已注册动画（Ripple + 背景色 Storyboard）
-    // 取代原来分散在各按钮的 tick_bg_animation() 和 has_active_animation() 调用
-    constexpr float kDt = 16.0f / 1000.0f;
-    const bool any_active = anim::AnimationClock::instance().tick_all(kDt);
-
-    if (any_active) {
-        // 仍有动画运行，驱动当前帧渲染
-        if (g_demo_app->ui_win_) {
-            g_demo_app->ui_win_->render();
-        }
-    } else {
-        // 所有动画已结束，停止定时器
-        KillTimer(nullptr, g_demo_app->ripple_timer_id_);
-        g_demo_app->ripple_timer_id_ = 0;
-        // 触发最后一帧以确保最终状态正确显示
-        if (g_demo_app->ui_win_) {
-            g_demo_app->ui_win_->render();
-        }
-    }
+    // 委托给 DemoApp 统一处理：使用真实时间戳计算 dt，推进动画并渲染
+    g_demo_app->tick_animations_and_render();
 }
 
 // ── 进程入口 ──────────────────────────────────────────────────────────────────
