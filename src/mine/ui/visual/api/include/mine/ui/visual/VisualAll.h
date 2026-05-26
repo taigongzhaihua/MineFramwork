@@ -8,6 +8,9 @@
 #include <mine/ui/visual/Api.h>
 #include <mine/ui/visual/ModuleTag.h>
 #include <mine/ui/visual/Visibility.h>
+#include <mine/ui/visual/HorizontalAlignment.h>
+#include <mine/ui/visual/VerticalAlignment.h>
 #include <mine/ui/visual/Visual.h>
 #include <mine/ui/visual/UIElement.h>
+#include <mine/ui/visual/FrameworkElement.h>
 #include <mine/ui/visual/Control.h>

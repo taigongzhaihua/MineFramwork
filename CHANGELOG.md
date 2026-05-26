@@ -15,6 +15,24 @@
   - 新增至 `AnimationAll.h` 伞形头文件
 
 ### Changed
+- **mine.ui.visual + mine.ui.layout（架构修正：FrameworkElement/Control 归还 visual 层）**：
+  将 `FrameworkElement` 和 `Control` 从 `mine.ui.layout` 迁回 `mine.ui.visual`，符合设计文档 §02-modules 规定：
+  - 继承关系修正为 `Visual → UIElement → FrameworkElement → Control`（全部在 mine.ui.visual）
+  - `HorizontalAlignment`/`VerticalAlignment` 枚举随 FrameworkElement 迁至 visual，layout 保留向后兼容转发头
+  - 新增 `src/mine/ui/visual/api/include/mine/ui/visual/HorizontalAlignment.h`
+  - 新增 `src/mine/ui/visual/api/include/mine/ui/visual/VerticalAlignment.h`
+  - 新增 `src/mine/ui/visual/api/include/mine/ui/visual/FrameworkElement.h`（导出宏 `MINE_UI_VISUAL_API`）
+  - 新增 `src/mine/ui/visual/src/FrameworkElement.cpp`（完整布局协议实现）
+  - `visual/Control.h` 还原为完整类定义（`MINE_UI_VISUAL_API`，继承 `FrameworkElement`）
+  - `visual/Control.cpp` 还原为完整实现（`measure_override`/`arrange_override`/VSM/模板绑定）
+  - `layout/FrameworkElement.h` / `layout/Control.h` 改为向后兼容转发头（包含路径变更透明）
+  - `layout/FrameworkElement.cpp` / `layout/Control.cpp` 清空（实现已迁至 visual）
+  - `mine.ui.visual/xmake.lua` 新增 `mine.ui.style` 依赖（Control 需要 ControlTemplate/VSM）
+  - `mine.ui.layout/xmake.lua` 移除 `mine.ui.style` 依赖（layout 不再包含 Control）
+  - `VisualAll.h` 新增 HorizontalAlignment/VerticalAlignment/FrameworkElement 头文件
+  - `LayoutAll.h` 移除 Control 包含（layout 层不再拥有 Control）
+  - 测试全部通过：layout 27/27、visual 53/53、controls 16/16
+
 - **mine.ui.layout（迁移第二步：Control 迁移至 FrameworkElement）**：将 `Control` 基类物理迁移至 `mine.ui.layout` 模块，使所有控件自动参与两遍布局协议：
   - `Control` 继承链由 `UIElement → Control` 升级为 `UIElement → FrameworkElement → Control`
   - 新增 `src/mine/ui/layout/api/include/mine/ui/layout/Control.h`（继承 `FrameworkElement`，导出宏 `MINE_UI_LAYOUT_API`）

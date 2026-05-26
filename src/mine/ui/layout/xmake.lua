@@ -1,7 +1,7 @@
 -- mine.ui.layout 模块构建配置
 -- 依赖：mine.core / mine.containers / mine.math
 --       mine.ui.property（DependencyProperty、DependencyObject）
---       mine.ui.visual（UIElement、Visual — 布局协议基类）
+--       mine.ui.visual（UIElement、FrameworkElement、Control — 布局协议基类）
 
 mine_module("mine.ui.layout", {
     short_name = "ui.layout",
@@ -10,7 +10,6 @@ mine_module("mine.ui.layout", {
         "mine.containers",
         "mine.math",
         "mine.ui.property",
-        "mine.ui.visual",
-        "mine.ui.style",   -- Control 依赖 ControlTemplate / TemplateRegistry / VisualStateManager
+        "mine.ui.visual",  -- Panel/StackPanel/Grid 基于 FrameworkElement（mine.ui.visual）
     },
 })
