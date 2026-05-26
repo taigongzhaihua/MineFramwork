@@ -7,11 +7,11 @@
 
 #include <mine/ui/layout/Api.h>
 #include <mine/ui/layout/ModuleTag.h>
-#include <mine/ui/layout/HorizontalAlignment.h>
-#include <mine/ui/layout/VerticalAlignment.h>
+#include <mine/ui/visual/HorizontalAlignment.h>
+#include <mine/ui/visual/VerticalAlignment.h>
 #include <mine/ui/layout/Orientation.h>
 #include <mine/ui/layout/GridLength.h>
-#include <mine/ui/layout/FrameworkElement.h>
+#include <mine/ui/visual/FrameworkElement.h>
 #include <mine/ui/layout/Panel.h>
 #include <mine/ui/layout/StackPanel.h>
 #include <mine/ui/layout/Grid.h>

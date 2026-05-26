@@ -26,7 +26,7 @@
 #include <mine/text/FontFace.h>
 
 #include <mine/ui/window/Window.h>
-#include <mine/ui/layout/FrameworkElement.h>
+#include <mine/ui/visual/FrameworkElement.h>
 #include <mine/ui/controls/Button.h>
 #include <mine/ui/controls/TextBlock.h>
 #include <mine/ui/input/InputRouter.h>

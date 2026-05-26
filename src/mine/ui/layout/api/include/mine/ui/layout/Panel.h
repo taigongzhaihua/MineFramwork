@@ -8,7 +8,7 @@
  * 具体布局逻辑（StackPanel、Grid 等）通过覆盖 measure_override / arrange_override 实现。
  *
  * 继承关系：
- *   FrameworkElement (mine.ui.layout)
+ *   FrameworkElement (mine.ui.visual)
  *       └─ Panel
  *           ├─ StackPanel
  *           └─ Grid
@@ -17,7 +17,7 @@
 #pragma once
 
 #include <mine/ui/layout/Api.h>
-#include <mine/ui/layout/FrameworkElement.h>
+#include <mine/ui/visual/FrameworkElement.h>
 #include <mine/containers/SmallVector.h>
 
 namespace mine::ui {
