@@ -275,8 +275,9 @@ paint::Brush Button::background() const noexcept
 void Button::set_background(paint::Brush brush)
 {
     background_ = brush;
-    // 若有进行中的背景过渡动画，先停止并释放，防止 Animation 槽(60) 遮盖 Local 槽(50)
-    if (bg_storyboard_ && !bg_storyboard_->is_complete()) {
+    // 无论动画是否完成，都清除 Animation 槽（is_complete 时 Animation(60) 仍残留），
+    // 防止已完成动画的终值遮盖新写入的 Local 值导致画面不更新
+    if (bg_storyboard_) {
         bg_storyboard_->stop();
         bg_storyboard_ = nullptr;
     }
@@ -598,11 +599,11 @@ bool Button::anim_tick_callback(void* user_data, float dt) noexcept
         // affects_render=true → 自动触发 invalidate_render
         const bool done = self->bg_storyboard_->tick(dt);
         if (done) {
-            // 动画完成：将 Animation 槽的终值持久化到 Local 槽，
-            // 再 stop() 清除 Animation 槽，防止残留 Animation(60) 遮盖后续 set_background()
-            const core::Variant& final_val = self->get_value(BackgroundProperty);
-            self->set_value(BackgroundProperty, final_val, ValuePriority::Local);
-            self->bg_storyboard_->stop();
+            // 动画完成后，保留 Animation(60) 槽中的终值，画面自然稳定在目标颜色。
+            // 不持久化到 Local(50)：若持久化，会把 Hovered/Pressed 终值写入 Local，
+            // 下次切换回 Normal 时 get_value 读到该污染值，导致 Normal 目标色错误。
+            // Animation(60) 将在下次 on_visual_state_changed 调用 stop() 时被正确清除。
+            // anim_tick_callback 返回 any_active=false，AnimationClock 自动移除此项。
         } else {
             any_active = true;
         }
