@@ -34,6 +34,8 @@
 #include <mine/platform/IWindow.h>
 #include <mine/platform/WindowDesc.h>
 #include <mine/ui/animation/AnimationClock.h>  // 集中动画时钟
+#include <mine/ui/style/StyleAll.h>          // Style / VisualStateManager / ControlTemplate
+#include <mine/ui/controls/Border.h>         // Border（ControlTemplate 演示用）
 
 #include <mine/math/Color.h>
 #include <mine/math/Rect.h>
@@ -54,6 +56,7 @@ namespace input    = mine::ui::input;
 namespace core     = mine::core;
 namespace anim     = mine::ui::animation;  // 动画时钟命名空间别名
 namespace paint    = mine::paint;          // 画刷命名空间别名
+namespace style    = mine::ui::style;      // Style / VSM / ControlTemplate 命名空间别名
 
 // ── Ripple 动画驱动：Win32 Timer 回调 ────────────────────────────────────────
 
@@ -94,6 +97,18 @@ struct DemoApp : public mine::ui::app::Application,
     ui::Button      btn_reset;    ///< "重  置" 按钮
     ui::Button      btn_quit;     ///< "退  出" 按钮
     ui::TextBlock   status_label; ///< 显示当前点击计数的状态标签
+
+    // ── Style 演示区（生命周期与 DemoApp 一致）────────────────────────────────
+    ui::TextBlock   style_section_;   ///< "── Style 演示 ──" 区域分隔标题
+    ui::TextBlock   style_info_;      ///< Style 演示说明文字
+    ui::Button      btn_styled_;      ///< 颜色完全由 Style::add_setter 控制的绿色按钮
+    style::Style    demo_style_;      ///< Style 对象（生命周期须覆盖所有对它的引用）
+
+    // ── ControlTemplate 演示区（生命周期与 DemoApp 一致）─────────────────────
+    ui::TextBlock   tmpl_section_;    ///< "── ControlTemplate 演示 ──" 区域分隔标题
+    ui::TextBlock   tmpl_info_;       ///< ControlTemplate 演示说明文字
+    ui::Button      btn_tmpl_;        ///< 使用自定义模板根（Border + TextBlock）的按钮
+    ui::TextBlock   tmpl_label_;      ///< 模板根 Border 的子元素（DemoApp 管理生命周期）
 
     // ── 字体资源（生命周期与 DemoApp 一致，避免悬空指针）─────────────────────
     core::OwnedPtr<text::FontFace> font_face_;  ///< 已加载的字体，所有控件共享
@@ -144,7 +159,7 @@ struct DemoApp : public mine::ui::app::Application,
         // 创建主窗口（Application 内部自动创建交换链并订阅 Resized/DpiChanged）
         platform::WindowDesc desc{};
         desc.title         = "MineFramework - 控件交互演示";
-        desc.size          = { 800.0f, 500.0f };
+        desc.size          = { 800.0f, 700.0f };
         desc.auto_position = true;
         desc.resizable     = true;
         desc.kind          = platform::WindowKind::Normal;
@@ -375,6 +390,101 @@ struct DemoApp : public mine::ui::app::Application,
         // ── 7. 连接输入路由器 ─────────────────────────────────────────────
         router.set_root(&root_grid);
         router.set_keyboard_focus(&root_grid);
+
+        // ── 8. Style 程序化演示区 ────────────────────────────────────────────
+
+        // 8a. 构建 Style（程序化路径）：通过 add_setter 设置绿色主题配色
+        //     StyleSetter(20) 优先级，不覆盖 Local(50) 及以上的属性值
+        //     Button 自带的 Storyboard 会读取 HoveredBackgroundProperty /
+        //     PressedBackgroundProperty 的值作为动画终值，无需额外写入 Local
+        demo_style_
+            .set_name("GreenButtonStyle")
+            .set_target_type(core::TypeId::of<ui::Button>())
+            .add_setter({&ui::Button::BackgroundProperty,
+                         core::Variant{paint::Brush::solid_rgb(0x2E7D32)}})   // 深绿 Normal
+            .add_setter({&ui::Button::HoveredBackgroundProperty,
+                         core::Variant{paint::Brush::solid_rgb(0x43A047)}})   // 中绿 Hovered
+            .add_setter({&ui::Button::PressedBackgroundProperty,
+                         core::Variant{paint::Brush::solid_rgb(0x1B5E20)}})   // 墨绿 Pressed
+            .add_setter({&ui::Button::ForegroundProperty,
+                         core::Variant{paint::Brush::solid_rgb(0xFFFFFF)}})   // 白色文字
+            .add_setter({&ui::Button::PaddingProperty,
+                         core::Variant{math::Thickness{20.0f, 10.0f, 20.0f, 10.0f}}});
+
+        // 8b. 区域分隔标题
+        style_section_.set_text("\u2500\u2500 Style & \u5c5e\u6027\u4f18\u5148\u7ea7\u6f14\u793a \u2500\u2500");
+        style_section_.set_font_size(11.0f);
+        style_section_.set_foreground(paint::Brush::solid_rgb(0x757575));
+        style_section_.set_background(paint::Brush::solid_rgb(0xF0F0F0));
+        style_section_.set_padding(math::Thickness{16.0f, 6.0f, 16.0f, 6.0f});
+        style_section_.set_margin(math::Thickness{0.0f, 16.0f, 0.0f, 0.0f});
+        if (font) { style_section_.set_font_face(font); }
+        body_panel.add_child(&style_section_);
+
+        // 8c. 说明文字
+        style_info_.set_text("\u4e0b\u65b9\u7eff\u8272\u6309\u9215\u989c\u8272\u4ec5\u7531 Style::add_setter(StyleSetter/20) \u8bbe\u7f6e\uff0c\u672a\u8c03\u7528 set_background*");
+        style_info_.set_font_size(11.0f);
+        style_info_.set_foreground(paint::Brush::solid_rgb(0x757575));
+        style_info_.set_background(paint::Brush::solid(math::Color::Transparent));
+        style_info_.set_padding(math::Thickness{4.0f, 2.0f, 4.0f, 2.0f});
+        style_info_.set_margin(math::Thickness{16.0f, 4.0f, 16.0f, 0.0f});
+        if (font) { style_info_.set_font_face(font); }
+        body_panel.add_child(&style_info_);
+
+        // 8d. btn_styled_：通过 Style::apply 写入颜色，不调用 set_background*
+        //     Button 自带 Storyboard 读取 StyleSetter(20) 写入的颜色值驱动动画
+        btn_styled_.set_text("Style \u9a71\u52a8\u6309\u9215\uff08\u7eff\u8272\uff09");
+        btn_styled_.set_margin(math::Thickness{16.0f, 10.0f, 16.0f, 0.0f});
+        if (font) { btn_styled_.set_font_face(font); }
+        demo_style_.apply(btn_styled_);
+        btn_styled_.add_handler(ui::Button::ClickEvent(), &DemoApp::on_click_count, this);
+        body_panel.add_child(&btn_styled_);
+
+        // ── 9. ControlTemplate 演示区 ─────────────────────────────────────────
+
+        // 9a. 区域分隔标题
+        tmpl_section_.set_text("\u2500\u2500 ControlTemplate\uff08\u81ea\u5b9a\u4e49\u89c6\u89c9\u6811\uff09\u6f14\u793a \u2500\u2500");
+        tmpl_section_.set_font_size(11.0f);
+        tmpl_section_.set_foreground(paint::Brush::solid_rgb(0x757575));
+        tmpl_section_.set_background(paint::Brush::solid_rgb(0xF0F0F0));
+        tmpl_section_.set_padding(math::Thickness{16.0f, 6.0f, 16.0f, 6.0f});
+        tmpl_section_.set_margin(math::Thickness{0.0f, 16.0f, 0.0f, 0.0f});
+        if (font) { tmpl_section_.set_font_face(font); }
+        body_panel.add_child(&tmpl_section_);
+
+        // 9b. 说明文字
+        tmpl_info_.set_text("\u4e0b\u65b9\u6309\u9215\u7528 set_template_root() \u8bbe\u7f6e\u81ea\u5b9a\u4e49\u6a21\u677f\u6839\uff08Border + TextBlock \u66ff\u6362\u9ed8\u8ba4\u6a21\u677f\uff09");
+        tmpl_info_.set_font_size(11.0f);
+        tmpl_info_.set_foreground(paint::Brush::solid_rgb(0x757575));
+        tmpl_info_.set_background(paint::Brush::solid(math::Color::Transparent));
+        tmpl_info_.set_padding(math::Thickness{4.0f, 2.0f, 4.0f, 2.0f});
+        tmpl_info_.set_margin(math::Thickness{16.0f, 4.0f, 16.0f, 0.0f});
+        if (font) { tmpl_info_.set_font_face(font); }
+        body_panel.add_child(&tmpl_info_);
+
+        // 9c. 构建自定义模板根（Border + TextBlock）
+        //     tmpl_label_ 是 DemoApp 成员，生命周期覆盖模板根，Border 通过裸指针引用
+        tmpl_label_.set_text("\u81ea\u5b9a\u4e49 ControlTemplate \u89c6\u89c9\u6811");
+        tmpl_label_.set_font_size(13.0f);
+        tmpl_label_.set_foreground(paint::Brush::solid_rgb(0x4A148C));
+        tmpl_label_.set_background(paint::Brush::solid(math::Color::Transparent));
+        tmpl_label_.set_padding(math::Thickness{16.0f, 8.0f, 16.0f, 8.0f});
+        if (font) { tmpl_label_.set_font_face(font); }
+
+        {
+            // Border 作为模板根，Control 通过 OwnedPtr 拥有其生命周期
+            auto border_root = core::make_owned<ui::Border>();
+            border_root->set_border_thickness(math::Thickness::uniform(2.0f));
+            border_root->set_border_color(paint::Brush::solid_rgb(0x7B1FA2));   // 深紫边框
+            border_root->set_background(paint::Brush::solid_rgb(0xF3E5F5));    // 浅紫背景
+            border_root->set_child(&tmpl_label_);  // Border 通过裸指针引用（不拥有）
+            btn_tmpl_.set_template_root(std::move(border_root));
+        }
+
+        btn_tmpl_.set_margin(math::Thickness{16.0f, 10.0f, 16.0f, 0.0f});
+        if (font) { btn_tmpl_.set_font_face(font); }
+        btn_tmpl_.add_handler(ui::Button::ClickEvent(), &DemoApp::on_click_count, this);
+        body_panel.add_child(&btn_tmpl_);
     }
 };
 
