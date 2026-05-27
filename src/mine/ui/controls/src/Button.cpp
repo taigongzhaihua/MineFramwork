@@ -633,13 +633,14 @@ void Button::on_visual_state_changed(ControlVisualState /*old_state*/,
         bg_storyboard_->stop();
     }
 
-    // ── 3. 将采样画刷写入 Local 槽，使 capture_from_values 读到正确起始画刷 ─
-    // （stop() 已清除 Animation 槽，若不写 Local 则 capture 会读到 Default 画刷）
-    set_value(BackgroundProperty, core::Variant{from_brush}, ValuePriority::Local);
-
-    // ── 4. 从对应 DP 读取目标画刷（唯一真相源）────────────────────────────
-    // HoveredBackgroundProperty / PressedBackgroundProperty 已通过
-    // set_background_hovered/pressed() 写入 Local 槽，默认为 MD3 规范值。
+    // ── 3. 在写入 Local 之前，读取目标画刷（唯一真相源）────────────────────
+    // 必须在 set_value(Local) 之前确定 to_brush：stop() 已清除 Animation(60) 槽，
+    // 此时 get_value 返回的是 StyleSetter(20) 或 Default(0) 的值（即 Style 设置的颜色）。
+    // 若在 set_value(Local, from_brush) 之后读取，Local(50) 会遮蔽 StyleSetter(20)，
+    // 导致 Normal 状态目标色错误地回退到 background_ 成员变量（忽略 Style 配色）。
+    //
+    // HoveredBackgroundProperty / PressedBackgroundProperty 也须在此读取，
+    // 同样需要优先返回 StyleSetter(20) 写入的值（若用户已 Style::apply）。
     paint::Brush to_brush;
     switch (new_state) {
     case ControlVisualState::Pressed: {
@@ -655,10 +656,19 @@ void Button::on_visual_state_changed(ControlVisualState /*old_state*/,
     case ControlVisualState::Disabled:
         to_brush = paint::Brush::solid(math::Color{0.11f, 0.11f, 0.12f, 0.12f});
         break;
-    default:
-        to_brush = background_;
+    default: {
+        // Normal 状态：优先读取 BackgroundProperty 的 StyleSetter(20) 值，
+        // 若 Style 已通过 apply() 写入（如 demo_style_.apply(btn)），将正确返回该颜色；
+        // 若无 Style 写入，回退到 background_ 成员变量（直接调用 set_background 写入的值）。
+        const core::Variant& v = get_value(BackgroundProperty);
+        to_brush = v.has<paint::Brush>() ? v.get<paint::Brush>() : background_;
         break;
     }
+    }
+
+    // ── 4. 将采样画刷写入 Local 槽，使 capture_from_values 读到正确起始画刷 ─
+    // （stop() 已清除 Animation 槽，若不写 Local 则 capture 会读到 Default 画刷）
+    set_value(BackgroundProperty, core::Variant{from_brush}, ValuePriority::Local);
 
     // ── 5. 构建新 Storyboard 并启动 ─────────────────────────────────────
     bg_storyboard_ = core::make_owned<animation::Storyboard>();
