@@ -5,7 +5,7 @@
  * 演示内容：
  *   1. mine::ui::app::Application 应用基类（封装平台初始化、设备、渲染器）
  *   2. mine::ui::Window 窗口（通过 Application::create_window() 创建）
- *   3. 自定义 DemoRoot（FrameworkElement 子类），手动管理控件绝对位置布局
+ *   3. Grid + StackPanel 布局容器，由框架自动完成两遍布局（Measure/Arrange）
  *   4. Button 控件（点击计数 / 重置 / 退出，Normal/Pressed 视觉反馈）
  *   5. TextBlock 控件（标题 / 副标题 / 状态计数，真实字体渲染）
  *   6. InputRouter 将平台鼠标事件路由到视觉树
@@ -26,7 +26,7 @@
 #include <mine/text/FontFace.h>
 
 #include <mine/ui/window/Window.h>
-#include <mine/ui/visual/FrameworkElement.h>
+#include <mine/ui/layout/LayoutAll.h>
 #include <mine/ui/controls/Button.h>
 #include <mine/ui/controls/TextBlock.h>
 #include <mine/ui/input/InputRouter.h>
@@ -70,100 +70,6 @@ static constexpr UINT_PTR kRippleTimerId = 42u;
 static VOID CALLBACK ripple_timer_proc(
     HWND /*hwnd*/, UINT /*msg*/, UINT_PTR /*id*/, DWORD /*time*/) noexcept;
 
-// ── 演示根面板（自定义 FrameworkElement，绝对坐标布局）──────────────────────
-
-/**
- * @brief 演示根面板。
- *
- * 继承 FrameworkElement 使其可作为 Window::set_content(UIElement*) 的内容根，
- * 并参与 Window 的两遍布局（Measure/Arrange）。
- *
- * 由于 Control（Button/TextBlock 等）继承自 UIElement 而非 FrameworkElement，
- * 无法通过 Panel::add_child(FrameworkElement*) 添加控件。
- * 本类改用 Visual::add_child(Visual*) 将控件纳入视觉树，
- * 在 arrange_override() 中通过 UIElement::arrange(Rect) 为每个控件分配位置。
- */
-struct DemoRoot : public ui::FrameworkElement {
-
-    // 控件成员（公开以便 DemoApp 中的回调直接访问）
-    ui::TextBlock  header_text;   ///< 标题（蓝色背景全宽标题栏）
-    ui::TextBlock  subtitle;      ///< 副标题说明文字
-    ui::Button     btn_count;     ///< "计数 +1" 按钮
-    ui::Button     btn_reset;     ///< "重  置" 按钮
-    ui::Button     btn_quit;      ///< "退  出" 按钮
-    ui::TextBlock  status_label;  ///< 显示当前点击计数的状态标签
-
-    DemoRoot()
-    {
-        // 将控件纳入 Visual 视觉树（render_to_canvas 递归渲染 + hit_test 命中测试均依赖此步）
-        Visual::add_child(&header_text);
-        Visual::add_child(&subtitle);
-        Visual::add_child(&btn_count);
-        Visual::add_child(&btn_reset);
-        Visual::add_child(&btn_quit);
-        Visual::add_child(&status_label);
-    }
-
-protected:
-    /**
-     * @brief 测量阶段：测量各控件的期望尺寸，根面板自身充满全部可用空间。
-     */
-    math::Size measure_override(math::Size available) override
-    {
-        header_text.measure(available);
-        subtitle.measure(available);
-        btn_count.measure(available);
-        btn_reset.measure(available);
-        btn_quit.measure(available);
-        status_label.measure(available);
-        return available;
-    }
-
-    /**
-     * @brief 排列阶段：为各控件分配绝对坐标矩形。
-     *
-     * 调用 UIElement::arrange(Rect) 设置每个控件的 bounds_rect，
-     * 控件在 on_render() 中以 bounds_rect() 为绘制基准。
-     */
-    math::Size arrange_override(math::Size final_size) override
-    {
-        const float W      = final_size.width;
-        const float margin = 16.0f;
-        float y = 0.0f;
-
-        // 标题栏：全宽蓝色背景，固定高 60px
-        const float header_h = 60.0f;
-        header_text.arrange(math::Rect{ 0.0f, y, W, header_h });
-        y += header_h;
-
-        // 副标题：两侧留边距，高 38px，上下各 8px 间距
-        y += 8.0f;
-        const float subtitle_h = 38.0f;
-        subtitle.arrange(math::Rect{ margin, y, W - 2.0f * margin, subtitle_h });
-        y += subtitle_h + 16.0f;
-
-        // 按钮行：宽度由内容期望尺寸决定，高度对齐到三者最大值，间距 10px
-        const float btn_gap     = 10.0f;
-        const math::Size bsz_count = btn_count.desired_size();
-        const math::Size bsz_reset = btn_reset.desired_size();
-        const math::Size bsz_quit  = btn_quit.desired_size();
-        const float btn_h = std::max({ bsz_count.height, bsz_reset.height, bsz_quit.height });
-        float bx = margin;
-        btn_count.arrange(math::Rect{ bx, y, bsz_count.width, btn_h });
-        bx += bsz_count.width + btn_gap;
-        btn_reset.arrange(math::Rect{ bx, y, bsz_reset.width, btn_h });
-        bx += bsz_reset.width + btn_gap;
-        btn_quit.arrange(math::Rect{ bx, y, bsz_quit.width, btn_h });
-        y += btn_h + 24.0f;
-
-        // 状态标签：两侧留边距，高 44px（大字体）
-        const float status_h = 44.0f;
-        status_label.arrange(math::Rect{ margin, y, W - 2.0f * margin, status_h });
-
-        return final_size;
-    }
-};
-
 // ── 演示应用主类 ──────────────────────────────────────────────────────────────
 
 /**
@@ -178,8 +84,16 @@ struct DemoApp : public mine::ui::app::Application,
     // ── 输入路由器 ────────────────────────────────────────────────────────
     input::InputRouter  router;
 
-    // ── UI 控件树根节点 ───────────────────────────────────────────────────
-    DemoRoot            root;
+    // ── UI 布局树 ──────────────────────────────────────────────────────────
+    ui::Grid        root_grid;    ///< 根 Grid（2行×1列：Row0=标题栏，Row1=内容区）
+    ui::StackPanel  body_panel;   ///< 内容区垂直 StackPanel
+    ui::StackPanel  btn_row;      ///< 按钮行水平 StackPanel
+    ui::TextBlock   header_text;  ///< 标题（蓝色背景标题栏，Row 0）
+    ui::TextBlock   subtitle;     ///< 副标题说明文字
+    ui::Button      btn_count;    ///< "计数 +1" 按钮
+    ui::Button      btn_reset;    ///< "重  置" 按钮
+    ui::Button      btn_quit;     ///< "退  出" 按钮
+    ui::TextBlock   status_label; ///< 显示当前点击计数的状态标签
 
     // ── 字体资源（生命周期与 DemoApp 一致，避免悬空指针）─────────────────────
     core::OwnedPtr<text::FontFace> font_face_;  ///< 已加载的字体，所有控件共享
@@ -245,7 +159,7 @@ struct DemoApp : public mine::ui::app::Application,
         ui_win_->native_window().events().subscribe(this);
 
         // 将控件树挂载到窗口，触发首次布局 + 渲染
-        ui_win_->set_content(&root);
+        ui_win_->set_content(&root_grid);
         ui_win_->show();
     }
 
@@ -368,7 +282,7 @@ struct DemoApp : public mine::ui::app::Application,
     {
         char buf[128];
         std::snprintf(buf, sizeof(buf), "当前计数：%d 次", click_count);
-        root.status_label.set_text(buf);
+        status_label.set_text(buf);
         if (ui_win_) { ui_win_->render(); }
     }
 
@@ -376,66 +290,91 @@ struct DemoApp : public mine::ui::app::Application,
 
     void build_ui(text::FontFace* font)
     {
-        // ── 1. 标题文字（蓝色背景标题栏）────────────────────────────────────
-        root.header_text.set_text("MineFramework 控件演示");
-        root.header_text.set_font_size(22.0f);
-        root.header_text.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
-        root.header_text.set_background(paint::Brush::solid_rgb(0x1565C0));
-        root.header_text.set_padding(math::Thickness{ 16.0f, 16.0f, 16.0f, 16.0f });
-        if (font) { root.header_text.set_font_face(font); }
+        // ── 1. 配置根 Grid：2行×1列 ─────────────────────────────────────────
+        // Row 0: 标题栏（固定 60px），Row 1: 内容区（占剩余全部空间）
+        root_grid.add_row(ui::RowDefinition{ ui::GridLength::pixel(60.0f) });
+        root_grid.add_row(ui::RowDefinition{ ui::GridLength::star() });
 
-        // ── 2. 副标题说明 ─────────────────────────────────────────────────
-        root.subtitle.set_text("点击按钮测试交互：Normal 颜色 → 按下 → Pressed 颜色");
-        root.subtitle.set_font_size(12.0f);
-        root.subtitle.set_foreground(paint::Brush::solid_rgb(0x9E9E9E));
-        root.subtitle.set_background(paint::Brush::solid(math::Color::Transparent));
-        root.subtitle.set_padding(math::Thickness{ 4.0f, 6.0f, 4.0f, 6.0f });
-        if (font) { root.subtitle.set_font_face(font); }
+        // ── 2. 标题文字（蓝色背景，Row 0，水平/垂直均 Stretch）──────────────
+        header_text.set_text("MineFramework 控件演示");
+        header_text.set_font_size(22.0f);
+        header_text.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
+        header_text.set_background(paint::Brush::solid_rgb(0x1565C0));
+        header_text.set_padding(math::Thickness{ 16.0f, 16.0f, 16.0f, 16.0f });
+        if (font) { header_text.set_font_face(font); }
+        ui::Grid::set_row(header_text, 0);
+        root_grid.add_child(&header_text);
 
-        // ── 3. "计数 +1" 蓝色主操作按钮 ─────────────────────────────────
-        root.btn_count.set_text("计数 +1");
-        root.btn_count.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
-        root.btn_count.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
-        root.btn_count.set_background(paint::Brush::solid_rgb(0x1976D2));
-        root.btn_count.set_background_hovered(paint::Brush::solid_rgb(0x1E88E5));  // Material Blue 400
-        root.btn_count.set_background_pressed(paint::Brush::solid_rgb(0x0D47A1));
-        root.btn_count.set_border_color(paint::Brush::solid_rgb(0x0D47A1));
-        if (font) { root.btn_count.set_font_face(font); }
-        root.btn_count.add_handler(ui::Button::ClickEvent(), &DemoApp::on_click_count, this);
+        // ── 3. 内容区垂直 StackPanel（Row 1）───────────────────────────────
+        ui::Grid::set_row(body_panel, 1);
+        root_grid.add_child(&body_panel);
 
-        // ── 4. "重  置" 灰色辅助按钮 ─────────────────────────────────────
-        root.btn_reset.set_text("重  置");
-        root.btn_reset.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
-        root.btn_reset.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
-        root.btn_reset.set_background(paint::Brush::solid_rgb(0x455A64));
-        root.btn_reset.set_background_hovered(paint::Brush::solid_rgb(0x546E7A));  // Blue Grey 600
-        root.btn_reset.set_background_pressed(paint::Brush::solid_rgb(0x263238));
-        root.btn_reset.set_border_color(paint::Brush::solid_rgb(0x263238));
-        if (font) { root.btn_reset.set_font_face(font); }
-        root.btn_reset.add_handler(ui::Button::ClickEvent(), &DemoApp::on_click_reset, this);
+        // ── 4. 副标题说明 ─────────────────────────────────────────────────
+        subtitle.set_text("点击按钮测试交互：Normal 颜色 → 按下 → Pressed 颜色");
+        subtitle.set_font_size(12.0f);
+        subtitle.set_foreground(paint::Brush::solid_rgb(0x9E9E9E));
+        subtitle.set_background(paint::Brush::solid(math::Color::Transparent));
+        subtitle.set_padding(math::Thickness{ 4.0f, 6.0f, 4.0f, 6.0f });
+        subtitle.set_margin(math::Thickness{ 16.0f, 8.0f, 16.0f, 0.0f });
+        if (font) { subtitle.set_font_face(font); }
+        body_panel.add_child(&subtitle);
 
-        // ── 5. "退  出" 红色危险操作按钮 ─────────────────────────────────
-        root.btn_quit.set_text("退  出");
-        root.btn_quit.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
-        root.btn_quit.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
-        root.btn_quit.set_background(paint::Brush::solid_rgb(0xC62828));
-        root.btn_quit.set_background_hovered(paint::Brush::solid_rgb(0xD32F2F));  // Red 700
-        root.btn_quit.set_background_pressed(paint::Brush::solid_rgb(0x7F0000));
-        root.btn_quit.set_border_color(paint::Brush::solid_rgb(0x7F0000));
-        if (font) { root.btn_quit.set_font_face(font); }
-        root.btn_quit.add_handler(ui::Button::ClickEvent(), &DemoApp::on_click_quit, this);
+        // ── 5. 按钮行（水平 StackPanel）──────────────────────────────────
+        btn_row.set_orientation(ui::Orientation::Horizontal);
+        btn_row.set_margin(math::Thickness{ 16.0f, 16.0f, 16.0f, 0.0f });
+        body_panel.add_child(&btn_row);
+
+        // ── 5a. "计数 +1" 蓝色主操作按钮 ─────────────────────────────────
+        btn_count.set_text("计数 +1");
+        btn_count.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
+        btn_count.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
+        btn_count.set_background(paint::Brush::solid_rgb(0x1976D2));
+        btn_count.set_background_hovered(paint::Brush::solid_rgb(0x1E88E5));  // Material Blue 400
+        btn_count.set_background_pressed(paint::Brush::solid_rgb(0x0D47A1));
+        btn_count.set_border_color(paint::Brush::solid_rgb(0x0D47A1));
+        btn_count.set_margin(math::Thickness{ 0.0f, 0.0f, 10.0f, 0.0f });
+        if (font) { btn_count.set_font_face(font); }
+        btn_count.add_handler(ui::Button::ClickEvent(), &DemoApp::on_click_count, this);
+        btn_row.add_child(&btn_count);
+
+        // ── 5b. "重  置" 灰色辅助按钮 ─────────────────────────────────────
+        btn_reset.set_text("重  置");
+        btn_reset.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
+        btn_reset.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
+        btn_reset.set_background(paint::Brush::solid_rgb(0x455A64));
+        btn_reset.set_background_hovered(paint::Brush::solid_rgb(0x546E7A));  // Blue Grey 600
+        btn_reset.set_background_pressed(paint::Brush::solid_rgb(0x263238));
+        btn_reset.set_border_color(paint::Brush::solid_rgb(0x263238));
+        btn_reset.set_margin(math::Thickness{ 0.0f, 0.0f, 10.0f, 0.0f });
+        if (font) { btn_reset.set_font_face(font); }
+        btn_reset.add_handler(ui::Button::ClickEvent(), &DemoApp::on_click_reset, this);
+        btn_row.add_child(&btn_reset);
+
+        // ── 5c. "退  出" 红色危险操作按钮 ─────────────────────────────────
+        btn_quit.set_text("退  出");
+        btn_quit.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
+        btn_quit.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
+        btn_quit.set_background(paint::Brush::solid_rgb(0xC62828));
+        btn_quit.set_background_hovered(paint::Brush::solid_rgb(0xD32F2F));  // Red 700
+        btn_quit.set_background_pressed(paint::Brush::solid_rgb(0x7F0000));
+        btn_quit.set_border_color(paint::Brush::solid_rgb(0x7F0000));
+        if (font) { btn_quit.set_font_face(font); }
+        btn_quit.add_handler(ui::Button::ClickEvent(), &DemoApp::on_click_quit, this);
+        btn_row.add_child(&btn_quit);
 
         // ── 6. 状态计数标签 ───────────────────────────────────────────────
-        root.status_label.set_text("当前计数：0 次");
-        root.status_label.set_font_size(28.0f);
-        root.status_label.set_foreground(paint::Brush::solid_rgb(0xE8E8E8));
-        root.status_label.set_background(paint::Brush::solid(math::Color::Transparent));
-        root.status_label.set_padding(math::Thickness{ 4.0f, 4.0f, 4.0f, 4.0f });
-        if (font) { root.status_label.set_font_face(font); }
+        status_label.set_text("当前计数：0 次");
+        status_label.set_font_size(28.0f);
+        status_label.set_foreground(paint::Brush::solid_rgb(0xE8E8E8));
+        status_label.set_background(paint::Brush::solid(math::Color::Transparent));
+        status_label.set_padding(math::Thickness{ 4.0f, 4.0f, 4.0f, 4.0f });
+        status_label.set_margin(math::Thickness{ 16.0f, 24.0f, 16.0f, 0.0f });
+        if (font) { status_label.set_font_face(font); }
+        body_panel.add_child(&status_label);
 
         // ── 7. 连接输入路由器 ─────────────────────────────────────────────
-        router.set_root(&root);
-        router.set_keyboard_focus(&root);
+        router.set_root(&root_grid);
+        router.set_keyboard_focus(&root_grid);
     }
 };
 
