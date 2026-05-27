@@ -33,6 +33,9 @@
 // 样式系统（主题资源字典）
 #include <mine/ui/style/ResourceDictionary.h>
 
+// 动画时钟（驱动 AnimationClock::tick_all 推进全部已注册动画）
+#include <mine/ui/animation/AnimationClock.h>
+
 // Core
 #include <mine/core/Memory.h>
 #include <mine/core/Assert.h>
@@ -41,6 +44,14 @@
 // 容器
 #include <mine/containers/SmallVector.h>
 #include <mine/containers/InlineString.h>
+
+// 平台时间（GetTickCount64不依赖具体平台 API，通过标准库获取）
+#if defined(_WIN32)
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  include <windows.h>  // GetTickCount()
+#endif
 
 namespace mine::ui::app {
 
@@ -151,6 +162,11 @@ struct Application::Impl {
 
     /// 应用级全局资源字典（根字典）
     style::ResourceDictionary              global_resources_;
+
+    // ── 帧定时器状态（供 tick_and_render 使用）───────────────────────────────
+
+    /// 上次 tick_all 的系统时间戳（ms，0 = 未初始化）
+    unsigned long last_tick_ms_{0};
 };
 
 // ============================================================================
@@ -371,6 +387,50 @@ style::ResourceDictionary& Application::global_resources() noexcept
 const style::ResourceDictionary& Application::global_resources() const noexcept
 {
     return p_->global_resources_;
+}
+
+// ── 动画驱动辅助 ──────────────────────────────────────────────────────────────
+
+void Application::tick_and_render(ui::Window* win)
+{
+    using Clock = animation::AnimationClock;
+
+    if (Clock::instance().has_active()) {
+        // ── 计算真实步长（dt），消除定时器精度误差 ──
+        const auto now = static_cast<unsigned long>(GetTickCount());
+        float dt;
+        if (p_->last_tick_ms_ == 0 || now < p_->last_tick_ms_) {
+            // 首帧或时钟回绕：使用默认步长（约 60fps）
+            dt = 16.0f / 1000.0f;
+        } else {
+            dt = static_cast<float>(now - p_->last_tick_ms_) / 1000.0f;
+            // 限制最大步长：防止调试断点或窗口最小化后大幅跳帧
+            if (dt > 0.1f) { dt = 0.1f; }
+        }
+        p_->last_tick_ms_ = now;
+
+        const bool still_active = Clock::instance().tick_all(dt);
+        if (win) { win->render(); }
+
+        if (!still_active) {
+            // 所有动画完成：停止帧定时器并重置时间戳
+            if (p_->host_) { p_->host_->stop_frame_timer(); }
+            p_->last_tick_ms_ = 0;
+        } else if (p_->host_) {
+            // 仍有动画：确保帧定时器已启动（start_frame_timer 内部幂等）
+            p_->host_->start_frame_timer(8u, [](void* ud) {
+                auto* self = static_cast<Application*>(ud);
+                // 定时器回调：推进动画并渲染主窗口（若存在）
+                ui::Window* main_win = self->p_->main_window_;
+                self->tick_and_render(main_win);
+            }, this);
+        }
+    } else {
+        // 无活跃动画：直接渲染，停止可能残留的帧定时器
+        if (win) { win->render(); }
+        if (p_->host_) { p_->host_->stop_frame_timer(); }
+        p_->last_tick_ms_ = 0;
+    }
 }
 
 } // namespace mine::ui::app

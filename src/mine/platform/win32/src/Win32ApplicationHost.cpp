@@ -114,6 +114,48 @@ IMEService& Win32ApplicationHostImpl::ime() {
     return ime_service_;
 }
 
+// ── 帧定时器 ─────────────────────────────────────────────────────────────────
+
+/// 全局实例指针，供静态 TimerProc 访问（单进程单 Host，无竞争）
+static Win32ApplicationHostImpl* g_frame_timer_host = nullptr;
+
+VOID CALLBACK Win32ApplicationHostImpl::frame_timer_proc(
+    HWND /*hwnd*/, UINT /*msg*/, UINT_PTR /*id*/, DWORD /*time*/) noexcept
+{
+    if (g_frame_timer_host && g_frame_timer_host->frame_tick_fn_) {
+        g_frame_timer_host->frame_tick_fn_(g_frame_timer_host->frame_tick_user_data_);
+    }
+}
+
+void Win32ApplicationHostImpl::start_frame_timer(
+    unsigned int       interval_ms,
+    void             (*on_frame_tick)(void* user_data),
+    void*              user_data)
+{
+    if (frame_timer_id_ != 0) {
+        return;  // 幂等：已启动则忽略
+    }
+    frame_tick_fn_        = on_frame_tick;
+    frame_tick_user_data_ = user_data;
+    g_frame_timer_host    = this;
+    // 使用 8ms 间隔（< Win32 默认时钟中断粒度 15.625ms），
+    // 保证每个 vsync 周期（60Hz ≈ 16.67ms）内至少触发一次，动画帧率达到 60fps。
+    const unsigned int clamped = (interval_ms == 0) ? 8u : interval_ms;
+    frame_timer_id_ = SetTimer(nullptr, 0, clamped, &Win32ApplicationHostImpl::frame_timer_proc);
+}
+
+void Win32ApplicationHostImpl::stop_frame_timer()
+{
+    if (frame_timer_id_ == 0) {
+        return;  // 幂等
+    }
+    KillTimer(nullptr, frame_timer_id_);
+    frame_timer_id_       = 0;
+    frame_tick_fn_        = nullptr;
+    frame_tick_user_data_ = nullptr;
+    g_frame_timer_host    = nullptr;
+}
+
 // ── 工厂函数 ─────────────────────────────────────────────────────────────────
 
 /// win32 命名空间内的工厂（供需要显式指定平台的代码使用）

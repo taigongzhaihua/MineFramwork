@@ -33,7 +33,6 @@
 #include <mine/ui/event/RoutedEventArgs.h>
 #include <mine/platform/IWindow.h>
 #include <mine/platform/WindowDesc.h>
-#include <mine/ui/animation/AnimationClock.h>  // 集中动画时钟
 #include <mine/ui/style/StyleAll.h>          // Style / VisualStateManager / ControlTemplate
 #include <mine/ui/controls/Border.h>         // Border（ControlTemplate 演示用）
 
@@ -54,24 +53,8 @@ namespace math     = mine::math;
 namespace ui       = mine::ui;
 namespace input    = mine::ui::input;
 namespace core     = mine::core;
-namespace anim     = mine::ui::animation;  // 动画时钟命名空间别名
 namespace paint    = mine::paint;          // 画刷命名空间别名
 namespace style    = mine::ui::style;      // Style / VSM / ControlTemplate 命名空间别名
-
-// ── Ripple 动画驱动：Win32 Timer 回调 ────────────────────────────────────────
-
-// 前向声明（TimerProc 需要访问 DemoApp，DemoApp 定义在后面）
-struct DemoApp;
-
-/// 全局 DemoApp 实例指针，供 TimerProc 访问（由 on_startup 赋值，单实例保证）
-static DemoApp* g_demo_app = nullptr;
-
-/// Win32 Ripple 定时器 ID（任意非零值，与其他 SetTimer 区分）
-static constexpr UINT_PTR kRippleTimerId = 42u;
-
-/// Win32 TimerProc 回调：每 ~16ms 驱动一帧 ripple 渲染，无活跃 ripple 时自动停止
-static VOID CALLBACK ripple_timer_proc(
-    HWND /*hwnd*/, UINT /*msg*/, UINT_PTR /*id*/, DWORD /*time*/) noexcept;
 
 // ── 演示应用主类 ──────────────────────────────────────────────────────────────
 
@@ -116,8 +99,7 @@ struct DemoApp : public mine::ui::app::Application,
     // ── 运行时状态 ────────────────────────────────────────────────────────
     int          click_count         = 0;        ///< 点击计数器
     ui::Window*  ui_win_             = nullptr;  ///< 主窗口（由 on_startup 赋值）
-    UINT_PTR     ripple_timer_id_    = 0;        ///< 动画驱动定时器 ID（0 = 未启动）
-    DWORD        last_anim_tick_ms_  = 0;        ///< 上次 tick_all 的系统时间戳（ms）
+
 
     // ── Application 生命周期扩展点 ───────────────────────────────────────
 
@@ -126,9 +108,6 @@ struct DemoApp : public mine::ui::app::Application,
      */
     void on_startup(int /*argc*/, char** /*argv*/) override
     {
-        // 设置全局实例指针（供 Ripple TimerProc 访问）
-        g_demo_app = this;
-
         // 设置控制台输出为 UTF-8，避免中文日志乱码
         SetConsoleOutputCP(CP_UTF8);
 
@@ -180,13 +159,6 @@ struct DemoApp : public mine::ui::app::Application,
 
     void on_exit(int /*exit_code*/) override
     {
-        // 停止 Ripple 定时器（防止应用退出后回调访问已释放内存）
-        if (ripple_timer_id_ != 0) {
-            KillTimer(nullptr, ripple_timer_id_);
-            ripple_timer_id_ = 0;
-        }
-        g_demo_app = nullptr;
-
         // 取消输入事件订阅，防止窗口析构后回调访问已释放内存
         if (ui_win_) {
             ui_win_->native_window().events().unsubscribe(this);
@@ -206,64 +178,12 @@ struct DemoApp : public mine::ui::app::Application,
         case Kind::KeyDown:
         case Kind::KeyUp:
             router.on_window_event(event);
-            // 事件处理后立即 tick 并渲染：消除状态切换至首帧显示之间的延时感
-            tick_animations_and_render();
+            // 事件处理后立即 tick 并渲染：消除状态切换至首帧显示之间的延时感。
+            // 帧定时器生命周期由 Application 基类自动管理，无需 DemoApp 手动操作。
+            tick_and_render(ui_win_);
             break;
         default:
             break;
-        }
-    }
-
-    /**
-     * @brief 使用真实时间戳推进所有活跃动画并触发渲染，同时管理定时器生命周期。
-     *
-     * 在输入事件处理和定时器回调中均可安全调用：两处共享 last_anim_tick_ms_，
-     * 保证每次 tick_all 仅消耗上次调用后实际经过的时间，彻底消除：
-     *  - 动画起始延时（状态切换后立即 tick，无需等待下一个定时器周期）；
-     *  - 打断卡顿（中断时同样即时 tick，不会因硬编码 dt 与实际帧间隔不符而跳帧）。
-     */
-    void tick_animations_and_render()
-    {
-        if (anim::AnimationClock::instance().has_active()) {
-            // 用真实时间戳计算步长，消除 Win32 定时器精度误差
-            const DWORD now = GetTickCount();
-            float dt;
-            if (last_anim_tick_ms_ == 0 || now < last_anim_tick_ms_) {
-                // 首帧（动画刚注册）或时钟回绕：使用默认步长约 60fps
-                dt = 16.0f / 1000.0f;
-            } else {
-                dt = static_cast<float>(now - last_anim_tick_ms_) / 1000.0f;
-                // 限制最大步长：防止窗口最小化、调试断点后大幅跳帧
-                if (dt > 0.1f) { dt = 0.1f; }
-            }
-            last_anim_tick_ms_ = now;
-
-            const bool still_active = anim::AnimationClock::instance().tick_all(dt);
-            if (ui_win_) { ui_win_->render(); }
-
-            if (!still_active) {
-                // 所有动画已完成：停止定时器并重置时间戳
-                if (ripple_timer_id_ != 0) {
-                    KillTimer(nullptr, ripple_timer_id_);
-                    ripple_timer_id_ = 0;
-                }
-                last_anim_tick_ms_ = 0;
-            } else if (ripple_timer_id_ == 0) {
-                // 仍有动画但定时器未启动（首次从事件驱动进入）：启动定时器
-                // 注意：Win32 默认系统时钟中断间隔为 15.625ms（64Hz）。
-                // 若请求间隔 > 15.625ms（如 16ms），则需等待 2 个中断 = 31.25ms，
-                // 导致动画实际帧率降至 ~32fps，Present(1,0) 再对齐 vsync 后只剩 30fps。
-                // 使用 8ms（< 15.625ms）= 1 个中断 = 15.625ms，确保每 vsync 都有一帧。
-                ripple_timer_id_ = SetTimer(nullptr, 0, 8, ripple_timer_proc);
-            }
-        } else {
-            // 无活跃动画：直接渲染，清理可能残留的定时器
-            if (ui_win_) { ui_win_->render(); }
-            if (ripple_timer_id_ != 0) {
-                KillTimer(nullptr, ripple_timer_id_);
-                ripple_timer_id_ = 0;
-                last_anim_tick_ms_ = 0;
-            }
         }
     }
 
@@ -491,16 +411,6 @@ struct DemoApp : public mine::ui::app::Application,
         body_panel.add_child(&btn_tmpl_);
     }
 };
-
-// ── Ripple TimerProc 实现（定义于 DemoApp 之后以访问完整类型）───────────────
-
-static VOID CALLBACK ripple_timer_proc(
-    HWND /*hwnd*/, UINT /*msg*/, UINT_PTR /*id*/, DWORD /*time*/) noexcept
-{
-    if (!g_demo_app) { return; }
-    // 委托给 DemoApp 统一处理：使用真实时间戳计算 dt，推进动画并渲染
-    g_demo_app->tick_animations_and_render();
-}
 
 // ── 进程入口 ──────────────────────────────────────────────────────────────────
 

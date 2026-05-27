@@ -16,6 +16,7 @@ mine_module("mine.ui.app", {
         "mine.gfx.rhi",
         "mine.paint",
         "mine.ui.window",
-        "mine.ui.style",   -- 主题资源字典（Application::set_theme / global_resources）
+        "mine.ui.style",       -- 主题资源字典（Application::set_theme / global_resources）
+        "mine.ui.animation",   -- AnimationClock::tick_all（Application::tick_and_render 驱动）
     },
 })

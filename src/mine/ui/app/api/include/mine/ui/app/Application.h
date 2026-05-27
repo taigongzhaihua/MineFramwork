@@ -236,6 +236,22 @@ protected:
      */
     virtual core::OwnedPtr<paint::IRenderer> on_create_renderer(gfx::IDevice* device);
 
+protected:
+    // ── 动画驱动辅助 ─────────────────────────────────────────────────────────
+
+    /**
+     * @brief 推进所有活跃动画并触发指定窗口重绘，同时自动管理帧定时器生命周期。
+     *
+     * 应在每次输入事件处理后调用，以立即反映视觉状态变化（消除首帧延迟）。
+     * 内部在有活跃动画时自动启动帧定时器，动画全部完成后自动停止定时器。
+     *
+     * 调用方只需在 on_window_event 中处理完输入后调用此方法，
+     * 无需自行管理 SetTimer / KillTimer / GetTickCount / AnimationClock。
+     *
+     * @param win  需要重绘的窗口（nullptr 则跳过重绘）
+     */
+    void tick_and_render(ui::Window* win);
+
 private:
     struct Impl;
     core::Pimpl<Impl> p_;

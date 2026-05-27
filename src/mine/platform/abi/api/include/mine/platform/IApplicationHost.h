@@ -69,6 +69,31 @@ public:
 
     /// 获取 IME 服务接口（生命周期与宿主相同）
     [[nodiscard]] virtual IMEService& ime() = 0;
+
+    // ── 帧定时器（动画驱动）─────────────────────────────────────────────────
+
+    /**
+     * @brief 以指定间隔（毫秒）启动帧定时器，每次到期时回调 on_frame_tick()。
+     *
+     * 幂等：若定时器已启动则静默忽略（调用方无需判断是否已启动）。
+     * 实现须保证间隔 < 平台时钟中断粒度（Win32：< 15.625ms），以确保每个
+     * vsync 周期（60Hz ≈ 16.67ms）内至少触发一次回调，从而获得流畅动画。
+     *
+     * @param interval_ms  期望间隔（毫秒，推荐 8）
+     * @param on_frame_tick  每帧回调（不可为 nullptr，生命周期须长于定时器）
+     * @param user_data    透传给回调的用户数据指针
+     */
+    virtual void start_frame_timer(
+        unsigned int       interval_ms,
+        void             (*on_frame_tick)(void* user_data),
+        void*              user_data) = 0;
+
+    /**
+     * @brief 停止帧定时器。
+     *
+     * 幂等：若定时器未启动则静默忽略。
+     */
+    virtual void stop_frame_timer() = 0;
 };
 
 } // namespace mine::platform

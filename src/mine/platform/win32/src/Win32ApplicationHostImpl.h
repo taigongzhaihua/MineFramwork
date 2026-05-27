@@ -41,6 +41,11 @@ public:
     [[nodiscard]] IClipboard&     clipboard() override;
     [[nodiscard]] IScreenManager& screens()   override;
     [[nodiscard]] IMEService&     ime()       override;
+    void start_frame_timer(
+        unsigned int       interval_ms,
+        void             (*on_frame_tick)(void* user_data),
+        void*              user_data)                   override;
+    void stop_frame_timer()                             override;
 
 private:
     /// 当某个 Win32Window 被销毁时调用（从追踪列表中移除）
@@ -57,6 +62,21 @@ private:
 
     /// run() 的退出码（由 quit() 设置）
     int exit_code_{0};
+
+    // ── 帧定时器 ────────────────────────────────────────────────────────────
+
+    /// Win32 SetTimer 返回的定时器 ID（0 = 未启动）
+    UINT_PTR frame_timer_id_{0};
+
+    /// 用户回调（start_frame_timer 设置，stop 时清空）
+    void (*frame_tick_fn_)(void* user_data){nullptr};
+
+    /// 透传给回调的用户数据
+    void* frame_tick_user_data_{nullptr};
+
+    /// Win32 TimerProc（静态，通过 g_frame_timer_host 访问实例）
+    static VOID CALLBACK frame_timer_proc(
+        HWND hwnd, UINT msg, UINT_PTR id, DWORD time) noexcept;
 };
 
 } // namespace mine::platform::win32
