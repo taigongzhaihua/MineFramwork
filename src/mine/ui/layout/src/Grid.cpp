@@ -424,6 +424,9 @@ math::Size Grid::arrange_override(math::Size final_size)
     }
 
     // ── 安排每个子元素 ────────────────────────────────────────────────────
+    // 自身在父坐标系中的绝对起点（arrange_override 调用时 bounds_rect 已设置好）
+    const math::Rect self_bounds = bounds_rect();
+
     for (uint32_t i = 0; i < child_cnt; ++i) {
         UIElement* child = child_at(i);
 
@@ -438,9 +441,9 @@ math::Size Grid::arrange_override(math::Size final_size)
         const uint32_t r_end   = std::min(r_start + static_cast<uint32_t>(std::max(1, row_span)), num_rows);
         const uint32_t c_end   = std::min(c_start + static_cast<uint32_t>(std::max(1, col_span)), num_cols);
 
-        // 合并跨越的行/列矩形
-        const float slot_x = col_offsets[c_start];
-        const float slot_y = row_offsets[r_start];
+        // 合并跨越的行/列矩形，加上自身绝对起点得到绝对坐标
+        const float slot_x = self_bounds.x + col_offsets[c_start];
+        const float slot_y = self_bounds.y + row_offsets[r_start];
         float slot_w = 0.0f;
         float slot_h = 0.0f;
         for (uint32_t c = c_start; c < c_end; ++c) slot_w += p_->col_widths[c];

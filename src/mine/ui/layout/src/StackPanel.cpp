@@ -103,7 +103,10 @@ math::Size StackPanel::arrange_override(math::Size final_size)
     const Orientation orient = orientation();
     const bool is_vertical   = (orient == Orientation::Vertical);
 
-    float offset = 0.0f;  // 主轴方向的当前偏移量
+    // 自身在父坐标系中的绝对起点（arrange_override 调用时 bounds_rect 已设置好）
+    const math::Rect self_bounds = bounds_rect();
+
+    float offset = 0.0f;  // 主轴方向的当前偏移量（相对于自身内容区起点）
     const uint32_t count = children_count();
 
     for (uint32_t i = 0; i < count; ++i) {
@@ -112,16 +115,16 @@ math::Size StackPanel::arrange_override(math::Size final_size)
 
         math::Rect slot;
         if (is_vertical) {
-            // 垂直排列：每个子元素占用 {全宽, desiredHeight}
-            slot.x      = 0.0f;
-            slot.y      = offset;
+            // 垂直排列：x 对齐自身左边缘，y 从自身顶部累加偏移
+            slot.x      = self_bounds.x;
+            slot.y      = self_bounds.y + offset;
             slot.width  = final_size.width;
             slot.height = ds.height;
             offset += ds.height;
         } else {
-            // 水平排列：每个子元素占用 {desiredWidth, 全高}
-            slot.x      = offset;
-            slot.y      = 0.0f;
+            // 水平排列：y 对齐自身顶边缘，x 从自身左边缘累加偏移
+            slot.x      = self_bounds.x + offset;
+            slot.y      = self_bounds.y;
             slot.width  = ds.width;
             slot.height = final_size.height;
             offset += ds.width;
