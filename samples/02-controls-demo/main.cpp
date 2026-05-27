@@ -250,7 +250,11 @@ struct DemoApp : public mine::ui::app::Application,
                 last_anim_tick_ms_ = 0;
             } else if (ripple_timer_id_ == 0) {
                 // 仍有动画但定时器未启动（首次从事件驱动进入）：启动定时器
-                ripple_timer_id_ = SetTimer(nullptr, 0, 16, ripple_timer_proc);
+                // 注意：Win32 默认系统时钟中断间隔为 15.625ms（64Hz）。
+                // 若请求间隔 > 15.625ms（如 16ms），则需等待 2 个中断 = 31.25ms，
+                // 导致动画实际帧率降至 ~32fps，Present(1,0) 再对齐 vsync 后只剩 30fps。
+                // 使用 8ms（< 15.625ms）= 1 个中断 = 15.625ms，确保每 vsync 都有一帧。
+                ripple_timer_id_ = SetTimer(nullptr, 0, 8, ripple_timer_proc);
             }
         } else {
             // 无活跃动画：直接渲染，清理可能残留的定时器
