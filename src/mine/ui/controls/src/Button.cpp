@@ -28,17 +28,7 @@ namespace mine::ui {
 // ============================================================================
 // 依赖属性注册
 // ============================================================================
-
-// Button::ContentProperty — 按钮文字内容（InlineString）
-const DependencyProperty& Button::ContentProperty =
-    register_property<Button>(
-        "Content",
-        core::Variant{},
-        PropertyMetadata{
-            .affects_measure = true,
-            .affects_render  = true,
-            .changed         = &Button::on_content_changed,
-        });
+// 注意：Button::ContentProperty 已上移至 ContentControl，此处仅注册 Button 自身的属性。
 
 // Button::PaddingProperty — 内边距（Thickness，MD3 Filled Button 默认：水平 24px 垂直 10px）
 const DependencyProperty& Button::PaddingProperty =
@@ -120,7 +110,7 @@ static void s_build_default_button_template(DependencyObject& target)
     // 建立 TemplateBind：宿主属性 → 模板子元素属性
     button.bind_template(*presenter,
                          ContentPresenter::ContentProperty,
-                         Button::ContentProperty);
+                         ContentControl::ContentProperty);  // 继承自 ContentControl
     button.bind_template(*presenter,
                          ContentPresenter::PaddingProperty,
                          Button::PaddingProperty);
@@ -142,17 +132,14 @@ static const style::ControlTemplate& s_default_button_template =
 // 依赖属性变更回调
 // ============================================================================
 
-void Button::on_content_changed(DependencyObject*         sender,
-                                const DependencyProperty& /*prop*/,
-                                const core::Variant&      /*old_v*/,
-                                const core::Variant&      new_v) noexcept
+void Button::on_content_changed(const core::Variant& /*old_v*/,
+                                const core::Variant& new_v) noexcept
 {
-    auto* self = static_cast<Button*>(sender);
-    // 同步文字成员缓存
+    // 同步文字成员缓存（无模板回退路径在 on_measure/on_render 中使用）
     if (new_v.has<containers::InlineString>()) {
-        self->text_ = new_v.get<containers::InlineString>();
+        text_ = new_v.get<containers::InlineString>();
     } else {
-        self->text_ = containers::InlineString{};
+        text_ = containers::InlineString{};
     }
 }
 
@@ -215,11 +202,9 @@ core::StringView Button::text() const noexcept
 
 void Button::set_text(core::StringView text)
 {
-    text_ = text;
-    // 同步 DependencyProperty，使 bind_template 传播到模板树中的 ContentPresenter
-    set_value(ContentProperty, core::Variant{ text_ });
-    invalidate_measure();
-    invalidate_render();
+    // 委托给 ContentControl::set_content：on_content_changed 自动同步 text_ 缓存
+    // affects_measure/affects_render=true 自动触发 invalidate_measure/invalidate_render
+    set_content(text);
 }
 
 bool Button::is_enabled() const noexcept

@@ -18,7 +18,7 @@
 #pragma once
 
 #include <mine/ui/controls/Api.h>
-#include <mine/ui/visual/Control.h>
+#include <mine/ui/controls/ContentControl.h>
 #include <mine/ui/event/RoutedEvent.h>
 #include <mine/ui/property/DependencyProperty.h>
 #include <mine/containers/InlineString.h>
@@ -39,7 +39,7 @@ namespace mine::ui {
  * 所有可视属性均通过 DependencyProperty 管理（单一真相源）。
  * 动画 tick 由 AnimationClock 统一驱动，控件不暴露定时器或 tick 接口。
  */
-class MINE_UI_CONTROLS_API Button : public Control {
+class MINE_UI_CONTROLS_API Button : public ContentControl {
 public:
     // ── 路由事件 ───────────────────────────────────────────────────────────
 
@@ -48,11 +48,12 @@ public:
     // ── 依赖属性 ───────────────────────────────────────────────────────────
 
     /**
-     * @brief 内容属性（Variant 存储 InlineString，即按钮文字）。
+     * @brief 内容属性（继承自 ContentControl::ContentProperty）。
      *
      * 与 ContentPresenter::ContentProperty 通过 bind_template 连接。
+     * 向后兼容：Button::ContentProperty == ContentControl::ContentProperty。
      */
-    static const DependencyProperty& ContentProperty;
+    using ContentControl::ContentProperty;
 
     /**
      * @brief 当前渲染背景画刷（由 Storyboard 在 Animation 槽写入插值画刷）。
@@ -166,13 +167,13 @@ protected:
                                  ControlVisualState new_state) override;
 
 private:
-    // ── 依赖属性变更回调 ───────────────────────────────────────────────────
+    // ── 内容变更钩子 ──────────────────────────────────────────────────────
 
-    /// ContentProperty 变更时同步 text_ 成员缓存
-    static void on_content_changed(DependencyObject*         sender,
-                                   const DependencyProperty& prop,
-                                   const core::Variant&      old_v,
-                                   const core::Variant&      new_v) noexcept;
+    /// 重写 ContentControl::on_content_changed，同步 text_ 成员缓存
+    void on_content_changed(const core::Variant& old_v,
+                             const core::Variant& new_v) noexcept override;
+
+    // ── 依赖属性变更回调 ───────────────────────────────────────────────────
 
     /// PaddingProperty 变更时同步 padding_ 成员缓存
     static void on_padding_changed(DependencyObject*         sender,

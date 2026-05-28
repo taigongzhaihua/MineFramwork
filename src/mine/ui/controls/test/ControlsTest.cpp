@@ -260,3 +260,105 @@ TEST_CASE("controls_TextBlock_DependencyProperty与成员变量同步")
           mine::core::StringView{"Mine"});
 }
 
+// ============================================================================
+// ContentControl 测试套件（任务 17.1）
+// ============================================================================
+
+TEST_CASE("controls_ContentControl_默认状态内容为空")
+{
+    // ContentControl 是抽象概念，通过 Button 验证基类行为
+    Button button;
+    // 初始状态：ContentProperty 未设置，content() 应为空 Variant
+    CHECK(!button.content().has_value());
+    CHECK(button.content_element() == nullptr);
+    CHECK(button.content_text().empty());
+}
+
+TEST_CASE("controls_ContentControl_set_content字符串写入ContentProperty")
+{
+    Button button;
+    button.set_content(mine::core::StringView{"Hello ContentControl"});
+
+    // content_text() 应返回刚写入的字符串
+    CHECK(button.content_text() == mine::core::StringView{"Hello ContentControl"});
+    // content() 应包含 InlineString
+    CHECK(button.content().has<mine::containers::InlineString>());
+    // content_element() 应为 nullptr（非元素内容）
+    CHECK(button.content_element() == nullptr);
+}
+
+TEST_CASE("controls_ContentControl_set_content_UIElement指针写入ContentProperty")
+{
+    Button button;
+    DummyElement child;
+    button.set_content(&child);
+
+    // content_element() 应返回同一指针
+    CHECK(button.content_element() == &child);
+    // content_text() 应为空（非字符串内容）
+    CHECK(button.content_text().empty());
+}
+
+TEST_CASE("controls_ContentControl_set_content_nullptr清空内容")
+{
+    Button button;
+    DummyElement child;
+    button.set_content(&child);
+    REQUIRE(button.content_element() == &child);
+
+    // 传入 nullptr 应清空内容
+    button.set_content(static_cast<UIElement*>(nullptr));
+    CHECK(!button.content().has_value());
+    CHECK(button.content_element() == nullptr);
+}
+
+TEST_CASE("controls_ContentControl_内容变更传播到ContentPresenter（Button模板路径）")
+{
+    Button button;
+    button.measure({300.0f, 200.0f});   // 触发模板构建
+
+    // 通过 set_content 写入字符串，模板绑定应将其传播到 ContentPresenter
+    button.set_content(mine::core::StringView{"OK"});
+    button.measure({300.0f, 200.0f});
+
+    // 有模板根时，期望尺寸由 ContentPresenter 计算得出（文字宽度 > 0）
+    CHECK(button.desired_size().width > 0.0f);
+}
+
+TEST_CASE("controls_ContentControl_set_text与set_content行为一致")
+{
+    Button b1;
+    Button b2;
+    b1.set_text("MineUI");
+    b2.set_content(mine::core::StringView{"MineUI"});
+
+    // set_text 和 set_content 应写入相同的 ContentProperty 值
+    CHECK(b1.content_text() == b2.content_text());
+}
+
+TEST_CASE("controls_ContentControl_Button继承链正确")
+{
+    // 编译期验证：Button IS-A ContentControl IS-A Control
+    Button button;
+    ContentControl* cc = &button;
+    Control*        ctrl = &button;
+
+    CHECK(cc != nullptr);
+    CHECK(ctrl != nullptr);
+    // 动态类型检查（无 RTTI 时此测试仅做编译验证）
+    CHECK(static_cast<Button*>(cc) == &button);
+}
+
+TEST_CASE("controls_ContentControl_内容变更触发重新测量")
+{
+    Button button;
+    button.measure({300.0f, 200.0f});
+    const float initial_w = button.desired_size().width;
+
+    // 写入较长文字，期望宽度增大
+    button.set_content(mine::core::StringView{"A very long button label text"});
+    button.measure({300.0f, 200.0f});
+
+    CHECK(button.desired_size().width >= initial_w);
+}
+

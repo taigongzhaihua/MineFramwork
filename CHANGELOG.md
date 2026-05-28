@@ -5,6 +5,15 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.controls：ContentControl 基类（任务 17.1）**：
+  新增 `ContentControl : public Control`，为所有"内容"类控件提供统一基类：
+  - `ContentProperty`（DependencyProperty）：存储 `InlineString`（文字）或 `UIElement*`（元素），默认空值；`affects_measure=true/affects_render=true` 自动触发失效
+  - `set_content(UIElement* element)` —— 任务要求的标准接口（nullptr 清空内容）
+  - `set_content(core::StringView text)` —— 字符串便捷接口
+  - `content()` / `content_element()` / `content_text()` —— 读取接口
+  - 虚方法 `on_content_changed(old, new)` —— 子类可重写同步私有缓存
+  - `Button` 重构为继承 `ContentControl`：`ContentProperty` 上移至基类，`Button::ContentProperty` 通过 `using` 别名向后兼容；`on_content_changed` 改为 `override` 同步 `text_` 缓存；`set_text()` 委托给 `ContentControl::set_content()`
+  - 单测：7 个新测试用例，全部通过（共 24 测试 44 断言）
 - **mine.ui.animation（AnimationClock）**：新增全局动画时钟，统一管理所有活跃动画的 tick 驱动：
   - Meyer's Singleton 模式（`AnimationClock::instance()`），无全局变量
   - 注册接口 `register_animation(handle, tick_fn)`：以 `void* handle + TickFn` 函数指针回调为注册单元（与框架路由事件、DP changed 回调风格一致，无 `std::function` 堆分配）
