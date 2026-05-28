@@ -15,6 +15,13 @@
   - 新增至 `AnimationAll.h` 伞形头文件
 
 ### Changed
+- **samples/02-controls-demo（改造为继承模式+code-behind五文件分工）**：
+  将示例从组合模式（持有 `win_` 成员的包装类）重构为继承模式，完整体现 `docs/04-precompiler.md §4.4.2` 的设计契约：
+  - `mine::ui::Window::~Window()` 改为 `virtual`，支持 `DemoWindowBase` 继承
+  - 新增 `DemoWindow.g.h`：`DemoWindowBase : public mine::ui::Window`，`~DemoWindowBase()` 析构体首句 `close()`，`on_count_clicked/on_reset_clicked` 纯虚接口，`status_label_` protected 引用（`#id` 暴露）
+  - 新增 `DemoWindow.g.cpp`：视觉树构建全部调用继承自 Window 的方法（无 `win_.` 前缀），静态处理器多态分派到 method
+  - `DemoWindow.h/.cpp`（code-behind）：`DemoWindow final : DemoWindowBase`，实现两个 method，直接访问 `status_label_` 和 `render()`
+  - 更新 `xmake.lua`：`add_files` 新增 `DemoWindow.g.cpp`
 - **设计文档（docs/03-mml-language.md、04-precompiler.md、07-windowing.md）**：Window 组件架构从"组合模式"升级为"继承模式 + code-behind 五文件分工"：
   - `mine::ui::Window` 改为虚析构，支持继承和多态
   - mmlc 生成 `XxxBase : public mine::ui::Window`，析构安全由 `~XxxBase()` 中首句 `close()` 保证
