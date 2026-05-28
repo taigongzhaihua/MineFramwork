@@ -330,6 +330,10 @@ struct MockApplicationHost : public IApplicationHost {
     IClipboard&     clipboard() override { return clipboard_mock_; }
     IScreenManager& screens()   override { return screens_mock_; }
     IMEService&     ime()       override { return ime_mock_; }
+
+    // 帧定时器：测试环境下空操作（无消息循环）
+    void start_frame_timer(unsigned int, void (*)(void*), void*) override {}
+    void stop_frame_timer() override {}
 };
 
 // ============================================================================

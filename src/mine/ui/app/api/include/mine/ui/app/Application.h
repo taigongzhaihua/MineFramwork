@@ -48,6 +48,7 @@ namespace mine::paint      { class IRenderer; }
 namespace mine::ui         { class Window; }
 namespace mine::core       { template<typename T> class OwnedPtr; }
 namespace mine::ui::style  { class ResourceDictionary; }
+namespace mine::text       { class FontFace; }
 
 namespace mine::ui::app {
 
@@ -170,6 +171,22 @@ public:
      */
     [[nodiscard]] style::ResourceDictionary& global_resources() noexcept;
     [[nodiscard]] const style::ResourceDictionary& global_resources() const noexcept;
+
+    // ── 字体 ─────────────────────────────────────────────────────────────────
+
+    /**
+     * @brief 获取应用默认系统字体。
+     *
+     * run() 内部在调用 on_startup() 之前自动尝试加载平台系统字体（优先
+     * 微软雅黑 / Segoe UI 等常见字体）。如果所有候选均不存在，则返回 nullptr。
+     * 子类可在 on_startup() 中直接调用 default_font() 传给控件，
+     * 无需自行查找和加载字体文件。
+     *
+     * @return 已加载的 FontFace（生命周期与 Application 相同），或 nullptr
+     *
+     * @pre run() 已开始执行（即在 on_startup 或之后调用）
+     */
+    [[nodiscard]] text::FontFace* default_font() noexcept;
 
     // ── 基础设施访问 ─────────────────────────────────────────────────────────
 

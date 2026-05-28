@@ -6,6 +6,8 @@
 --       mine.paint（IRenderer）
 --       mine.ui.window（Window — UI 窗口包装）
 --       mine.ui.style（ResourceDictionary — 主题资源字典，Task #14）
+--       mine.ui.animation（AnimationClock::tick_all — Application::tick_and_render 驱动）
+--       mine.text（FontFace — Application::default_font 默认系统字体加载）
 
 mine_module("mine.ui.app", {
     short_name = "ui.app",
@@ -18,5 +20,6 @@ mine_module("mine.ui.app", {
         "mine.ui.window",
         "mine.ui.style",       -- 主题资源字典（Application::set_theme / global_resources）
         "mine.ui.animation",   -- AnimationClock::tick_all（Application::tick_and_render 驱动）
+        "mine.text",           -- FontFace（Application::default_font 默认系统字体）
     },
 })

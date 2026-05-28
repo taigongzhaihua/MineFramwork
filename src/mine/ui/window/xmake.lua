@@ -6,6 +6,7 @@
 --       mine.paint（IRenderer / Canvas / Brush / DisplayList）
 --       mine.ui.visual（UIElement / Visual — 视觉树与渲染树基类）
 --       mine.ui.layout（FrameworkElement — 布局协议）
+--       mine.ui.input（InputRouter — 内置输入路由，自动将鼠标/键盘事件派发到视觉树）
 
 mine_module("mine.ui.window", {
     short_name = "ui.window",
@@ -17,5 +18,6 @@ mine_module("mine.ui.window", {
         "mine.paint",
         "mine.ui.visual",
         "mine.ui.layout",
+        "mine.ui.input",       -- InputRouter：内置输入路由（set_content 自动连接根节点）
     },
 })

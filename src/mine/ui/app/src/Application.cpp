@@ -36,6 +36,9 @@
 // 动画时钟（驱动 AnimationClock::tick_all 推进全部已注册动画）
 #include <mine/ui/animation/AnimationClock.h>
 
+// 字体（默认系统字体加载）
+#include <mine/text/FontFace.h>
+
 // Core
 #include <mine/core/Memory.h>
 #include <mine/core/Assert.h>
@@ -167,7 +170,10 @@ struct Application::Impl {
 
     /// 上次 tick_all 的系统时间戳（ms，0 = 未初始化）
     unsigned long last_tick_ms_{0};
-};
+    // ── 默认字体 ──────────────────────────────────────────────────────────────
+
+    /// 应用默认系统字体（run() 内在 on_startup 前追加载载）
+    core::OwnedPtr<text::FontFace> default_font_;};
 
 // ============================================================================
 // Application 成员函数实现
@@ -196,16 +202,33 @@ int Application::run(int argc, char** argv)
     p_->renderer_ = on_create_renderer(p_->device_.get());
     MINE_ASSERT(p_->renderer_ != nullptr, "2D 渲染器创建失败（着色器编译失败？）");
 
-    // ── 步骤 5：调用应用启动回调 ─────────────────────────────────────────────
+    // ── 步骤 5：尝试加载默认系统字体（最优努力，失败则 default_font_ 为 nullptr）──
+#if defined(_WIN32)
+    {
+        const char* candidates[] = {
+            "C:\\Windows\\Fonts\\msyh.ttc",    // 微软雅黑（Windows 10/11）
+            "C:\\Windows\\Fonts\\msyh.ttf",    // 微软雅黑（Windows 7/8）
+            "C:\\Windows\\Fonts\\simhei.ttf",  // 黑体（备用中文字体）
+            "C:\\Windows\\Fonts\\segoeui.ttf", // Segoe UI（西文回退）
+            "C:\\Windows\\Fonts\\arial.ttf",   // Arial（西文回退）
+        };
+        for (const char* path : candidates) {
+            p_->default_font_ = text::FontFace::load_from_file(path);
+            if (p_->default_font_) { break; }
+        }
+    }
+#endif
+
+    // ── 步骤 6：调用应用启动回调 ────────────────────────────────────────────────
     on_startup(argc, argv);
 
-    // ── 步骤 6：进入主消息循环 ───────────────────────────────────────────────
+    // ── 步骤 7：进入主消息循环 ──────────────────────────────────────────────
     const int exit_code = p_->host_->run();
 
-    // ── 步骤 7：调用应用退出回调 ─────────────────────────────────────────────
+    // ── 步骤 8：调用应用退出回调 ──────────────────────────────────────────────
     on_exit(exit_code);
 
-    // ── 步骤 8：清理（先取消主窗口事件订阅，再销毁窗口列表）─────────────────
+    // ── 步骤 9：清理（先取消主窗口事件订阅，再销毁窗口列表）───────────────
     if (p_->main_window_ && !p_->main_window_->is_closed()) {
         p_->main_window_->native_window().events().unsubscribe(&p_->main_close_sink_);
     }
@@ -252,6 +275,11 @@ ui::Window* Application::create_window(const platform::WindowDesc& desc)
     entry.native = std::move(native);
     entry.ui_win = std::move(ui_win);
     p_->windows_.push_back(std::move(entry));
+
+    // 自动安装输入后处理回调：推进动画并触发重绘（业务代码不需手动设置）
+    result->set_on_input_processed([this, result]() {
+        tick_and_render(result);
+    });
 
     return result;
 }
@@ -431,6 +459,13 @@ void Application::tick_and_render(ui::Window* win)
         if (p_->host_) { p_->host_->stop_frame_timer(); }
         p_->last_tick_ms_ = 0;
     }
+}
+
+// ── 字体 ──────────────────────────────────────────────────────────────────────
+
+text::FontFace* Application::default_font() noexcept
+{
+    return p_->default_font_.get();
 }
 
 } // namespace mine::ui::app

@@ -23,6 +23,7 @@
 #include <mine/paint/Canvas.h>
 #include <mine/paint/Brush.h>
 #include <mine/ui/visual/UIElement.h>
+#include <mine/ui/input/InputRouter.h>
 #include <mine/core/Memory.h>
 #include <mine/core/Assert.h>
 
@@ -54,6 +55,14 @@ struct Window::Impl : public platform::IWindowEventSink {
 
     /// 交换链（Window 独占所有权）
     core::OwnedPtr<gfx::ISwapchain> swapchain_;
+
+    // ── 输入系统 ─────────────────────────────────────────────────────────────
+
+    /// 内置输入路由器（自动将鼠标/键盘事件路由到视觉树）
+    input::InputRouter router_;
+
+    /// 输入事件处理完毕后的回调（由 Application::create_window 安装 tick_and_render）
+    std::function<void()> post_input_fn_;
 
     // ── 状态 ─────────────────────────────────────────────────────────────────
 
@@ -132,6 +141,17 @@ struct Window::Impl : public platform::IWindowEventSink {
 
         case Kind::Closed:
             is_closed_ = true;
+            break;
+
+        // 输入事件：转发给 InputRouter，完成后触发 post_input_fn_ 回调
+        case Kind::MouseMove:
+        case Kind::MouseDown:
+        case Kind::MouseUp:
+        case Kind::MouseWheel:
+        case Kind::KeyDown:
+        case Kind::KeyUp:
+            router_.on_window_event(event);
+            if (post_input_fn_) { post_input_fn_(); }
             break;
 
         default:
@@ -267,6 +287,12 @@ void Window::set_content(ui::UIElement* element)
 {
     p_->content_ = element;
 
+    // 同步到 InputRouter：命中测试起点和默认键盘焦点
+    p_->router_.set_root(element);
+    if (element) {
+        p_->router_.set_keyboard_focus(element);
+    }
+
     // 内容变化后立即执行布局与渲染
     if (!p_->is_closed_) {
         const math::Size logical_size = p_->native_window_.size();
@@ -338,6 +364,18 @@ void Window::render()
     const math::Size logical_size = p_->native_window_.size();
     p_->run_layout(logical_size);
     p_->do_render(logical_size);
+}
+
+// ── 输入路由 ───────────────────────────────────────────────────────────────────
+
+input::InputRouter& Window::input_router() noexcept
+{
+    return p_->router_;
+}
+
+void Window::set_on_input_processed(std::function<void()> fn)
+{
+    p_->post_input_fn_ = std::move(fn);
 }
 
 } // namespace mine::ui

@@ -28,11 +28,14 @@
 #include <mine/math/Size.h>
 #include <mine/math/Rect.h>
 
+#include <functional>
+
 // 前向声明，避免将大型头文件拉入公共接口
-namespace mine::platform { class IWindow; }
-namespace mine::gfx       { class IDevice; class IQueue; }
-namespace mine::paint      { class IRenderer; }
-namespace mine::ui         { class UIElement; }
+namespace mine::platform   { class IWindow; }
+namespace mine::gfx        { class IDevice; class IQueue; }
+namespace mine::paint       { class IRenderer; }
+namespace mine::ui          { class UIElement; }
+namespace mine::ui::input   { class InputRouter; }
 
 namespace mine::ui {
 
@@ -127,6 +130,28 @@ public:
      * @brief 获取底层平台窗口引用（供 Application 访问事件源等）。
      */
     [[nodiscard]] platform::IWindow& native_window() noexcept;
+
+    // ── 输入路由 ──────────────────────────────────────────────────────────────
+
+    /**
+     * @brief 获取窗口内置的输入路由器。
+     *
+     * 窗口创建时已自动将 InputRouter 订阅到原生窗口事件源；
+     * set_content() 时也会自动设置路由根节点与默认键盘焦点。
+     * 调用方可通过此接口设置自定义键盘焦点元素等高级需求。
+     */
+    [[nodiscard]] input::InputRouter& input_router() noexcept;
+
+    /**
+     * @brief 注册输入事件处理完毕后的回调（用于触发动画 tick + 重绘）。
+     *
+     * 每次鼠标/键盘事件经 InputRouter 路由完成后，Window 会调用此回调。
+     * Application::create_window() 内部自动安装 tick_and_render 作为回调，
+     * 业务代码通常不需要直接调用此方法。
+     *
+     * @param fn 回调函数（nullptr 表示清除回调）
+     */
+    void set_on_input_processed(std::function<void()> fn);
 
     // ── 渲染 ─────────────────────────────────────────────────────────────────
 
