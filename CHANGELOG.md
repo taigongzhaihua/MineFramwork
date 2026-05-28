@@ -15,6 +15,12 @@
   - 新增至 `AnimationAll.h` 伞形头文件
 
 ### Changed
+- **samples/02-controls-demo（重构为 Window 组件样板代码分层结构）**：
+  将单文件混合结构拆分为符合 `docs/04-precompiler.md §4.4.2` 规定的代码生成契约：
+  - 新增 `DemoWindow.h`：Window 组件包装类头文件（模拟 `.g.h`），聚合 `mine::ui::Window win_` 值成员（最后声明=最先析构），暴露 `show/hide/close/is_closed/window()` 委托接口
+  - 新增 `DemoWindow.cpp`：包装类实现（模拟 `.g.cpp`），`_configure()` 设置窗口 pending 属性，`_build(font)` 完整视觉树构建，`_bind()/_states()` 占位实现
+  - 精简 `main.cpp` 为薄壳 `DemoApp`（<50行），`on_startup()` 仅含 `setup(font)` + 信号订阅 + `show()`
+  - 更新 `xmake.lua`：`add_files("main.cpp", "DemoWindow.cpp")`
 - **mine.ui.visual + mine.ui.layout（架构修正：FrameworkElement/Control 归还 visual 层）**：
   将 `FrameworkElement` 和 `Control` 从 `mine.ui.layout` 迁回 `mine.ui.visual`，符合设计文档 §02-modules 规定：
   - 继承关系修正为 `Visual → UIElement → FrameworkElement → Control`（全部在 mine.ui.visual）

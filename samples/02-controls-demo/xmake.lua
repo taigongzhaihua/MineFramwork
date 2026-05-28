@@ -22,7 +22,7 @@ target("sample.02-controls-demo")
         "mine.ui.animation"      -- Storyboard（VisualStateManager 依赖）
     )
 
-    add_files("main.cpp")
+    add_files("main.cpp", "DemoWindow.cpp")
 
     -- Win32 字符集与编译选项
     add_defines("UNICODE", "_UNICODE", "NOMINMAX", "WIN32_LEAN_AND_MEAN")
