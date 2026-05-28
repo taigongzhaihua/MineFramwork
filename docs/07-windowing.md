@@ -90,3 +90,81 @@ Application::Construct → Bootstrap (DI/资源/i18n)
 * **无边框 + 自绘标题栏**：通过 PAL 提供的"NCHitTest 预测函数"接入。
 * **透明/异形窗**：DWM/Compositor 透明 + Visual 树透明导出。
 * **嵌入到外部 HWND/NSView**：`Application::AttachToHost(NativeHandle)`。
+
+## 7.9 Window 与 MML 集成（Window 组件模式）
+
+### 两种层次的区分
+
+| 层次 | 类型 | 角色 |
+|------|------|------|
+| 基础设施 | `mine::ui::Window` | 平台窗口 + 渲染管线的值类型封装（Pimpl，不可派生） |
+| 视图层（MML） | `DemoWindow`（mmlc 生成） | 持有 `Window` 值成员的包装类（组合模式） |
+
+`mine::ui::Window` 是纯粹的基础设施：它封装原生窗口句柄、交换链、渲染队列，是 Pimpl 值类型，无虚函数，**不可被派生**。
+
+MML 视图层通过 `component X : Window` 声明一个**顶层窗口组件**，mmlc 生成**包装类**（不是子类）。
+这与各框架的对比：
+
+| 框架 | MML/XAML 声明 | C++ / 实现侧 | 是否继承 |
+|------|-------------|------------|---------|
+| WPF | `MainWindow : Window`（XAML） | 派生自 `System.Windows.Window` | ✅ 继承 |
+| WinUI 3 | `MainWindow : Window`（XAML） | 实践上组合（WinUI Window 已接近 sealed） | ⚠ 实质组合 |
+| QML | `ApplicationWindow { }` | 包含 `QQuickWindow` | ✅ 组合 |
+| Slint | `component X inherits Window` | Rust 侧生成包装结构体 | ✅ 组合 |
+| **MineUI** | `component X : Window` | mmlc 生成持有 `Window` 值成员的包装类 | ✅ **组合** |
+
+### 生命周期与 IWindowContext
+
+当用户在 `Application::on_startup` 中调用 `DemoWindow::show()` 时，流程如下：
+
+```
+DemoWindow::show()
+  → win_.show()                        // mine::ui::Window::show()
+    → Window::Impl::initialize()       // 首次调用时懒初始化
+      → IWindowContext::create_native_window(desc)   // 创建原生窗口
+      → IWindowContext::on_window_first_show(win_)   // Application 注册主窗口 + 渲染回调
+      → 原生窗口显示
+```
+
+`IWindowContext` 由 `Application::run()` 创建并注册，负责：
+1. 通过 PAL 创建原生窗口
+2. 将新窗口登记到 `Application` 的窗口列表（首个自动成为主窗口）
+3. 设置渲染回调（`set_on_input_processed`）
+
+### 正确的使用模式
+
+```cpp
+// DemoApp.cpp（手写薄壳，10-15 行）
+struct DemoApp : mine::ui::app::Application {
+    // Window 组件包装类声明为值成员（非指针）
+    app::DemoWindow main_win_;
+
+    void on_startup(int, char**) override {
+        // 订阅信号
+        main_win_.closeRequested().connect([this] { quit(); });
+        // show() 触发懒初始化，自动通过 IWindowContext 注册
+        main_win_.show();
+    }
+};
+```
+
+**注意**：`DemoWindow main_win_` 应声明为 `DemoApp` 的**值成员**（不是指针或局部变量），使其生命周期与 Application 绑定，`Application` 析构时自动调用 `~DemoWindow()` → `win_` 最先析构（GPU 资源释放）→ UI 元素随后析构。
+
+### 析构安全顺序保证
+
+`DemoWindow` 内部的数据成员顺序（mmlc 严格生成）：
+
+```cpp
+class DemoWindow {
+    // 1. UI 元素（先声明 = 后析构）
+    ::mine::ui::Grid    root_grid_;
+    ::mine::ui::TextBlock title_bar_;
+    // ...
+
+    // 2. win_ 最后声明 = 最先析构
+    //    析构时：swapchain 释放 → 原生窗口销毁 → IWindowContext 解注册
+    ::mine::ui::Window  win_;
+};
+```
+
+这确保在 `win_` 的渲染循环停止（`~Window()` 内同步）之后，所有 `UIElement` 才开始析构——避免析构期间的绘制回调访问已销毁对象。

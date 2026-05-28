@@ -94,6 +94,16 @@ git tag：`v0.2.0-f1`
 | 16 | ✅ `mine.ui.animation`：缓动函数库（Linear / Ease / Spring） | `src/mine/ui/animation` | 单测：40 测试 316 断言全部通过 |
 | 17 | ✅ `mine.ui.animation`：`Storyboard`、属性动画 | `src/mine/ui/animation` `src/mine/ui/style` | 单测：51 测试 355 断言通过；56 VSM 集成测试通过；与 VisualStateManager 过渡集成 |
 
+#### F2.3 控件体系完善（UserControl / ContentControl / Page 基础设施）
+
+> 说明：这些类型是 MML codegen（T 轨道）和 mine.nav 的前置条件，必须在 F3 之前完成。
+
+| # | 模块 | 路径 | 验收 |
+|---|------|------|------|
+| 17.1 | `mine.ui.controls`：`ContentControl` 基类（继承 `Control`）；重构 `Button` 使其继承 `ContentControl`；提供 `set_content(UIElement*)` 标准接口 | `src/mine/ui/controls` | Button 旧行为不变；ContentControl 单测 |
+| 17.2 | `mine.ui.controls`：`UserControl` 基类（继承 `FrameworkElement`）；提供 `data_context` 属性 + `data_context_changed` 信号；定义 `on_initialized()` / `on_loaded()` / `on_unloaded()` 生命周期虚函数 | `src/mine/ui/controls` | 生命周期钩子顺序测试；DataContext 变更通知测试 |
+| 17.3 | `mine.ui.controls`：`Page` 基类（继承 `UserControl`）；添加 `on_navigated_to(const Variant&)` / `on_navigated_from()` / `on_navigate_away() → bool` 导航生命周期虚函数（接口先行，Frame 在 F3.1 中实现） | `src/mine/ui/controls` | 接口编译通过；空 Page 可被 UserControl 容器持有 |
+
 git tag：`v0.3.0-f2`
 
 ---
@@ -108,7 +118,7 @@ git tag：`v0.3.0-f2`
 |---|------|------|
 | 18 | `mine.di`：`ServiceCollection`、`ServiceProvider`、`Scoped/Singleton/Transient`、`MINE_INJECT` 宏 | `src/mine/di` |
 | 19 | `mine.mvvm`：`ViewModelBase`、`ObservableObject`、`ObservableCollection<T>`、`RelayCommand` | `src/mine/mvvm` |
-| 20 | `mine.nav`：`Frame`、`Page`、`NavigationService`、参数传递 | `src/mine/nav` |
+| 20 | `mine.nav`：`Frame`、`NavigationService`、参数传递。**前置条件**：F2.3 中的 `Page` 基类（`mine.ui.controls`）必须先实现。 | `src/mine/nav` |
 | 21 | `mine.config`：分层配置（默认/用户/环境）+ JSON/TOML 加载 | `src/mine/config` |
 | 22 | `mine.localization`：资源字典、运行时语言切换、`tr()` 函数 | `src/mine/localization` |
 | 23 | `mine.logging`：文件/控制台 sink、级别过滤、对接 `mine.diag` | `src/mine/logging` |
@@ -127,7 +137,8 @@ git tag：`v0.3.0-f2`
 | # | 样例 | 路径 |
 |---|------|------|
 | 28 | `samples/01-pure-cpp`：纯 C++ 实现的 MVVM Todo 应用（无 MML 依赖） | `samples/01-pure-cpp` |
-| 28.1 | ✅ `samples/02-controls-demo`：窗口+控件交互演示（Button 点击计数、TextBlock 文字渲染、InputRouter 路由；DemoRoot : FrameworkElement 手动布局） | `samples/02-controls-demo` |
+| 28.1 | ✅ `samples/02-controls-demo`：窗口+控件交互演示（Button 点击计数、TextBlock 渲染、InputRouter 路由）。**当前状态**：DemoApp 同时包含视图逻辑与应用逻辑（过渡形态，UserControl/MML codegen 实现前的权宜结构）。待 F2.3 `UserControl` + T 轨道 MML codegen 完成后，重构为 `DemoWindow`（mmlc 生成包装类）+ 薄 `DemoApp` 壳。 | `samples/02-controls-demo` |
+| 28.2 | `samples/03-usercontrol-mvvm`：以 `UserControl` 子视图 + `ViewModelBase` 演示标准 MVVM 分层（视图/视图模型/模型完全分离） | `samples/03-usercontrol-mvvm` |
 
 git tag：`v0.4.0-f3`
 

@@ -81,7 +81,9 @@ rule("mine.mml")
 
 ## 4.4 生成代码契约
 
-对 `LoginView` 组件（见 §3）：
+### 4.4.1 UserControl 组件
+
+对 `LoginView`（`component LoginView : UserControl`，见 §3）：
 
 ```cpp
 // LoginView.g.h（节选）
@@ -128,6 +130,125 @@ void LoginView::_build() {
 * 所有动态分配走 `MINE_NEW`（用统一 Allocator）。
 * 绑定生成为 lambda + 依赖列表，由属性系统订阅。
 * 不使用 RTTI / dynamic_cast；类型识别经 `mine.reflect` 静态注册。
+
+---
+
+### 4.4.2 Window 组件
+
+对 `DemoWindow`（`component DemoWindow : Window`，见 §3.1 Window 示例）：
+
+`mine::ui::Window` 是 Pimpl 值类型基础设施，**无虚析构，不可派生**。
+因此 mmlc 生成**包装类（组合）**而非继承——与 Slint / WinUI3 的生成策略相同。
+
+```cpp
+// DemoWindow.g.h（完整接口）
+namespace app {
+
+class DemoWindow {
+    MINE_REFLECT_DECL();
+public:
+    DemoWindow();
+    ~DemoWindow() = default;
+
+    // ── Window 生命周期委托 ──────────────────────────────────────────────────
+    void show()    { win_.show(); }
+    void hide()    { win_.hide(); }
+    void close()   { win_.close(); }
+    [[nodiscard]] bool is_closed()           const noexcept { return win_.is_closed(); }
+    [[nodiscard]] ::mine::ui::Window& window()     noexcept { return win_; }
+
+    // ── MML 声明的属性 ──────────────────────────────────────────────────────
+    MINE_PROP(::mine::String, StatusText);
+
+    // ── MML 声明的信号 ──────────────────────────────────────────────────────
+    MINE_SIGNAL(closeRequested);
+
+private:
+    // ── 生成方法 ─────────────────────────────────────────────────────────────
+    void _configure();  // 配置 win_ 属性：title/size/resizable 等（在构造函数中调用）
+    void _build();      // 构建视觉树，最终调用 win_.set_content(...)
+    void _bind();       // 安装属性绑定
+    void _states();     // 状态机
+
+    // ── 数据成员：UI 元素声明在 win_ 之前，保证析构顺序正确 ──────────────────
+    ::mine::ui::Grid       root_grid_;
+    ::mine::ui::TextBlock  title_bar_;
+    ::mine::ui::StackPanel content_panel_;
+    ::mine::ui::TextBlock  status_label_;
+    ::mine::ui::Button     close_btn_;
+
+    // win_ 最后声明 = 最先析构（GPU 资源与 swapchain 在 UI 元素之前释放）
+    ::mine::ui::Window win_;
+};
+
+} // namespace app
+```
+
+```cpp
+// DemoWindow.g.cpp（节选）
+DemoWindow::DemoWindow() {
+    _configure();   // 设置 pending 属性，首次 show() 前生效
+    _build();       // 构建视觉树并 set_content
+    _bind();        // 安装绑定
+    _states();      // 状态机
+}
+
+void DemoWindow::_configure() {
+    win_.set_title("MineFramework - 演示");
+    win_.set_size({ .width = 800, .height = 700 });
+    win_.set_resizable(true);
+}
+
+void DemoWindow::_build() {
+    using namespace ::mine::ui;
+    root_grid_.set_row_definitions({ RowDef::pixel(60), RowDef::star() });
+
+    title_bar_.set_text("MineFramework 演示");
+    title_bar_.set_font_size(22);
+    Grid::set_row(title_bar_, 0);
+
+    status_label_.bind_text([this]{ return StatusText(); }, {prop_StatusText()});
+    close_btn_.set_content("关闭");
+    close_btn_.click().connect([this]{ closeRequested().emit(); });
+
+    content_panel_.add_child(status_label_);
+    content_panel_.add_child(close_btn_);
+    Grid::set_row(content_panel_, 1);
+
+    root_grid_.add_child(title_bar_);
+    root_grid_.add_child(content_panel_);
+
+    win_.set_content(root_grid_);
+}
+```
+
+**调用方（手写 Application）**：
+
+```cpp
+// main.cpp（手写薄壳）
+struct MyApp : mine::ui::app::Application {
+    app::DemoWindow main_win_;  // Window 组件包装类
+
+    void on_startup(int, char**) override {
+        main_win_.closeRequested().connect([this]{ quit(); });
+        main_win_.show();  // 触发 IWindowContext 懒初始化，自动登记为主窗口
+    }
+};
+```
+
+**析构顺序**（最重要的正确性保证）：
+
+```
+MyApp 析构
+  → main_win_ 析构（DemoWindow）
+    → win_ 最先析构（声明最后 = 析构最先）
+      → 原生窗口关闭、swapchain 释放、IWindowContext 解注册
+    → close_btn_ 析构
+    → status_label_ 析构
+    → content_panel_ 析构
+    → title_bar_ 析构
+    → root_grid_ 析构（内容已被 win_ 析构时清空）
+```
 
 ## 4.5 增量与缓存
 

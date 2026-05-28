@@ -10,11 +10,19 @@
  *   5. TextBlock 控件（标题 / 副标题 / 状态计数，真实字体渲染）
  *   6. Button::ClickEvent 路由事件驱动应用状态更新
  *
- * 架构说明：
+ * 架构说明（当前形态 — 过渡阶段）：
  *   DemoApp 仅继承 mine::ui::app::Application。平台实例化、图形设备、渲染器、
  *   鼠标/键盘输入路由、帧定时器和默认字体加载均由基类自动管理。
  *   Window 以值类型成员 ui_win_ 声明（pending 状态），on_startup() 中仅需
  *   set_title/set_size/show() 即可完成窗口创建与显示。
+ *
+ * 注意：当前 DemoApp 将视图逻辑（UI 元素、build_ui）与应用逻辑混合在同一类中。
+ *   这是 UserControl 基类与 MML codegen 实现之前的权宜形态。
+ *   待 F2.3（mine.ui.controls::UserControl）+ T 轨道 mmlc 完成后，
+ *   应重构为标准分层：
+ *     - DemoWindow（mmlc 从 DemoWindow.mml 生成，聚合 mine::ui::Window 值成员）
+ *     - DemoApp（薄壳，仅含 DemoWindow main_win_ 和 on_startup()）
+ *   参见 docs/04-precompiler.md §4.4.2 和 docs/07-windowing.md §7.9。
  */
 
 // Win32 API：用于设置控制台 UTF-8 代码页（xmake 已通过 add_defines 定义宏，此处无需重复）
