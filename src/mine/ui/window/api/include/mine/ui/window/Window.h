@@ -101,7 +101,12 @@ public:
            gfx::IQueue&       queue,
            paint::IRenderer&  renderer);
 
-    ~Window();
+    /**
+     * @brief 虚析构（支持 mmlc 生成的 XxxBase : public Window 继承链）。
+     *
+     * DemoWindowBase 等生成类的析构体第一句调用 close()，基类析构时已是 no-op。
+     */
+    virtual ~Window();
 
     // ── 内容根 ───────────────────────────────────────────────────────────────
 

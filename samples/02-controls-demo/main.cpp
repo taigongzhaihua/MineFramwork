@@ -2,13 +2,13 @@
  * @file main.cpp
  * @brief 02-controls-demo 应用入口（薄壳 DemoApp）。
  *
- * 本文件模拟 mmlc 工具链完成后手写 Application 子类的标准形态：
+ * 本文件演示 mmlc 工具链完成后手写 Application 子类的标准形态：
  *   - DemoApp 仅继承 mine::ui::app::Application
- *   - 持有 DemoWindow（Window 组件包装类）作为值成员
+ *   - 持有 DemoWindow（IS-A Window，继承自 DemoWindowBase : public Window）作为值成员
  *   - on_startup() 仅负责资源注入、信号订阅、调用 show()
  *
  * 待 ResourceDictionary 实现后，setup(font) 步骤将移除，
- * DemoWindow 的构造函数将在内部自动解析字体资源。
+ * DemoWindowBase 的构造函数将在内部自动解析字体资源。
  *
  * 参见 docs/04-precompiler.md §4.4.2 和 docs/07-windowing.md §7.9。
  */
@@ -28,10 +28,13 @@
  *   1. 注入外部资源（字体）
  *   2. 订阅 DemoWindow 的信号
  *   3. 调用 main_win_.show() 启动窗口
+ *
+ * DemoWindow IS-A Window（继承链：DemoWindow : DemoWindowBase : public Window），
+ * 可直接传给任何需要 Window& 的 API。
  */
 struct DemoApp : public mine::ui::app::Application {
 
-    // Window 组件包装类（值成员，最先声明即最后析构；win_ 在内部最先析构）
+    // DemoWindow IS-A Window，多态链完整（DemoWindow : DemoWindowBase : public Window）
     app::DemoWindow main_win_;
 
     void on_startup(int /*argc*/, char** /*argv*/) override
