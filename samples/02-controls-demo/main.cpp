@@ -13,7 +13,8 @@
  * 架构说明：
  *   DemoApp 仅继承 mine::ui::app::Application。平台实例化、图形设备、渲染器、
  *   鼠标/键盘输入路由、帧定时器和默认字体加载均由基类自动管理。
- *   应用代码只需在 on_startup() 中创建窗口和构建 UI 树。
+ *   Window 以值类型成员 ui_win_ 声明（pending 状态），on_startup() 中仅需
+ *   set_title/set_size/show() 即可完成窗口创建与显示。
  */
 
 // Win32 API：用于设置控制台 UTF-8 代码页（xmake 已通过 add_defines 定义宏，此处无需重复）
@@ -23,10 +24,10 @@
 
 #include <mine/ui/window/Window.h>
 #include <mine/ui/layout/LayoutAll.h>
+// WindowDesc 和 WindowKind 由框架内部处理，无需在 sample 中 include
 #include <mine/ui/controls/Button.h>
 #include <mine/ui/controls/TextBlock.h>
 #include <mine/ui/event/RoutedEventArgs.h>
-#include <mine/platform/WindowDesc.h>
 #include <mine/ui/style/StyleAll.h>          // Style / VisualStateManager / ControlTemplate
 #include <mine/ui/controls/Border.h>         // Border（ControlTemplate 演示用）
 
@@ -41,7 +42,6 @@
 
 // ── 命名空间别名 ──────────────────────────────────────────────────────────────
 
-namespace platform = mine::platform;
 namespace text     = mine::text;
 namespace math     = mine::math;
 namespace ui       = mine::ui;
@@ -84,9 +84,11 @@ struct DemoApp : public mine::ui::app::Application {
 
 
     // ── 运行时状态 ────────────────────────────────────────────────────────
-    int          click_count         = 0;        ///< 点击计数器
-    ui::Window*  ui_win_             = nullptr;  ///< 主窗口（由 on_startup 赋值）
+    int          click_count = 0;  ///< 点击计数器
 
+    /// 主窗口（值成员，无参构造，pending 状态）
+    /// 最后声明确保最先析构（渲染先停，后析构 UI 元素），由 show() 完成懒初始化
+    ui::Window   ui_win_;
 
     // ── Application 生命周期扩展点 ───────────────────────────────────────
 
@@ -100,24 +102,21 @@ struct DemoApp : public mine::ui::app::Application {
         // 设置控制台输出为 UTF-8，避免中文日志乱码
         SetConsoleOutputCP(CP_UTF8);
 
-        // 创建主窗口（Application 内部自动创建交换链并订阅 Resized/DpiChanged）
-        platform::WindowDesc desc{};
-        desc.title         = "MineFramework - 控件交互演示";
-        desc.size          = { 800.0f, 700.0f };
-        desc.auto_position = true;
-        desc.resizable     = true;
-        desc.kind          = platform::WindowKind::Normal;
-
-        ui_win_ = create_window(desc);
-        set_main_window(ui_win_);
+        // 配置窗口属性（pending 状态下缓存，首次 show() 时应用到原生窗口）
+        ui_win_.set_title("MineFramework - 控件交互演示");
+        ui_win_.set_size({ 800.0f, 700.0f });
+        // auto_position=true / resizable=true / kind=Normal 均为默认值，无需显式设置
 
         // 构建 UI 控件树并连接事件（default_font() 由基类在此前自动加载）
         build_ui();
 
         // 将控件树挂载到窗口，触发首次布局 + 渲染
         // set_content 同时自动设置 InputRouter 的路由根节点和默认键盘焦点
-        ui_win_->set_content(&root_grid);
-        ui_win_->show();
+        ui_win_.set_content(&root_grid);
+
+        // 首次 show()：通过 IWindowContext 创建原生窗口、绑定图形资源，
+        // 安装 tick_and_render 回调，自动成为主窗口
+        ui_win_.show();
     }
 
     // ── 按钮点击回调 ──────────────────────────────────────────────────────
@@ -155,7 +154,7 @@ struct DemoApp : public mine::ui::app::Application {
         char buf[128];
         std::snprintf(buf, sizeof(buf), "当前计数：%d 次", click_count);
         status_label.set_text(buf);
-        if (ui_win_) { ui_win_->render(); }
+        ui_win_.render();
     }
 
     // ── UI 树构建 ─────────────────────────────────────────────────────────

@@ -11,10 +11,13 @@
  */
 
 #include <mine/ui/window/Window.h>
+#include <mine/ui/window/WindowContext.h>
 
 #include <mine/platform/IWindow.h>
 #include <mine/platform/IWindowEventSink.h>
 #include <mine/platform/WindowEvent.h>
+#include <mine/platform/WindowDesc.h>
+#include <mine/platform/WindowKind.h>
 #include <mine/gfx/IDevice.h>
 #include <mine/gfx/IQueue.h>
 #include <mine/gfx/ISwapchain.h>
@@ -26,6 +29,7 @@
 #include <mine/ui/input/InputRouter.h>
 #include <mine/core/Memory.h>
 #include <mine/core/Assert.h>
+#include <mine/containers/InlineString.h>
 
 #include <algorithm>  // std::max
 #include <cmath>      // std::round
@@ -37,23 +41,47 @@ namespace mine::ui {
 // ============================================================================
 
 struct Window::Impl : public platform::IWindowEventSink {
-    // ── 引用（不持有所有权）──────────────────────────────────────────────────
+    // ── pending 配置（无参构造后、show() 前有效）───────────────────────────────
+    //    首次 show() 时用于构建 WindowDesc，之后不再使用。
 
-    /// 平台原生窗口（生命周期由外部 Application 管理）
-    platform::IWindow& native_window_;
+    /// 窗口标题（pending 状态下缓存）
+    containers::InlineString pending_title_;
 
-    /// 图形设备（用于创建/重建交换链）
-    gfx::IDevice& device_;
+    /// 客户区逻辑尺寸（pending 状态下缓存）
+    math::Size pending_size_{800.0f, 600.0f};
 
-    /// 图形命令队列（resize 前 wait_idle）
-    gfx::IQueue& queue_;
+    /// 是否允许用户调整大小（pending 状态下缓存）
+    bool pending_resizable_{true};
 
-    /// 2D 渲染器（提交 Canvas DisplayList）
-    paint::IRenderer& renderer_;
+    /// 是否由系统决定初始位置（pending 状态下缓存）
+    bool pending_auto_position_{true};
+
+    /// 窗口类型（pending 状态下缓存）
+    platform::WindowKind pending_kind_{platform::WindowKind::Normal};
+
+    /// 是否已完成懒初始化（绑定了原生窗口和图形资源）
+    bool is_initialized_{false};
+
+    // ── 非拥有指针（初始化后由外部管理生命周期）────────────────────────────────
+
+    /// 平台原生窗口（生命周期：路径 A 由 owned_native_ 管理，路径 B 由 Application 管理）
+    platform::IWindow* native_window_{nullptr};
+
+    /// 图形设备（生命周期由 Application 管理）
+    gfx::IDevice* device_{nullptr};
+
+    /// 图形命令队列（生命周期由 Application 管理）
+    gfx::IQueue* queue_{nullptr};
+
+    /// 2D 渲染器（生命周期由 Application 管理）
+    paint::IRenderer* renderer_{nullptr};
 
     // ── 自有资源 ─────────────────────────────────────────────────────────────
 
-    /// 交换链（Window 独占所有权）
+    /// 原生窗口所有权（仅路径 A：无参构造 + show() 创建时持有）
+    core::OwnedPtr<platform::IWindow> owned_native_;
+
+    /// 交换链（Window 独占所有权，析构时在 owned_native_ 之前销毁）
     core::OwnedPtr<gfx::ISwapchain> swapchain_;
 
     // ── 输入系统 ─────────────────────────────────────────────────────────────
@@ -61,7 +89,7 @@ struct Window::Impl : public platform::IWindowEventSink {
     /// 内置输入路由器（自动将鼠标/键盘事件路由到视觉树）
     input::InputRouter router_;
 
-    /// 输入事件处理完毕后的回调（由 Application::create_window 安装 tick_and_render）
+    /// 输入事件处理完毕后的回调（由 Application 安装 tick_and_render）
     std::function<void()> post_input_fn_;
 
     // ── 状态 ─────────────────────────────────────────────────────────────────
@@ -77,47 +105,76 @@ struct Window::Impl : public platform::IWindowEventSink {
 
     // ── 构造 ─────────────────────────────────────────────────────────────────
 
+    /// 默认构造（pending 状态，路径 A）
+    Impl() = default;
+
+    /// 带参构造（立即初始化，路径 B：Application::create_window 使用）
     Impl(platform::IWindow& native_window,
          gfx::IDevice&      device,
          gfx::IQueue&       queue,
          paint::IRenderer&  renderer)
-        : native_window_(native_window)
-        , device_(device)
-        , queue_(queue)
-        , renderer_(renderer)
     {
+        initialize(native_window, device, queue, renderer);
+    }
+
+    /**
+     * @brief 执行实际的图形资源绑定（由路径 A 的 show() 或路径 B 的构造函数调用）。
+     *
+     * 内部操作：
+     *   1. 设置非拥有指针（native_window_, device_, queue_, renderer_）
+     *   2. 计算初始 DPI 缩放因子
+     *   3. 创建 ISwapchain（物理像素尺寸）
+     *   4. 同步 DPI 到渲染器
+     *   5. 订阅平台窗口事件
+     */
+    void initialize(platform::IWindow& native_window,
+                    gfx::IDevice&      device,
+                    gfx::IQueue&       queue,
+                    paint::IRenderer&  renderer)
+    {
+        native_window_ = &native_window;
+        device_        = &device;
+        queue_         = &queue;
+        renderer_      = &renderer;
+
         // 计算初始 DPI 缩放因子
-        dpi_scale_ = std::max(0.01f, native_window_.dpi() / 96.0f);
+        dpi_scale_ = std::max(0.01f, native_window_->dpi() / 96.0f);
 
         // 根据当前逻辑尺寸计算物理像素尺寸，创建交换链
-        const math::Size logical_size = native_window_.size();
+        const math::Size logical_size = native_window_->size();
         const auto phys_w = static_cast<uint32_t>(
             std::max(1.0f, std::round(logical_size.width  * dpi_scale_)));
         const auto phys_h = static_cast<uint32_t>(
             std::max(1.0f, std::round(logical_size.height * dpi_scale_)));
 
         gfx::SwapchainDesc sc_desc{};
-        sc_desc.native_window = native_window_.native_handle().ptr;
+        sc_desc.native_window = native_window_->native_handle().ptr;
         sc_desc.width         = phys_w;
         sc_desc.height        = phys_h;
         sc_desc.image_count   = 2;
         sc_desc.format        = gfx::PixelFormat::BGRA8_UNorm;
         sc_desc.vsync         = gfx::Vsync::On;
 
-        swapchain_ = device_.create_swapchain(sc_desc);
+        swapchain_ = device_->create_swapchain(sc_desc);
         MINE_ASSERT_MSG(swapchain_ != nullptr, "mine.ui.window: 交换链创建失败");
 
         // 同步 DPI 缩放到渲染器
-        renderer_.set_dpi_scale(dpi_scale_);
+        renderer_->set_dpi_scale(dpi_scale_);
 
         // 订阅平台窗口事件
-        native_window_.events().subscribe(this);
+        native_window_->events().subscribe(this);
+
+        is_initialized_ = true;
     }
 
     ~Impl()
     {
-        // 在销毁交换链前先取消事件订阅
-        native_window_.events().unsubscribe(this);
+        // 取消事件订阅（必须先于 swapchain_ 和 owned_native_ 的析构）
+        if (native_window_) {
+            native_window_->events().unsubscribe(this);
+        }
+        // swapchain_ 在 owned_native_ 之前析构（声明顺序靠前 → 析构顺序靠后 → 先析构），
+        // 确保原生窗口销毁前交换链已释放。
     }
 
     // ── IWindowEventSink 实现 ──────────────────────────────────────────────
@@ -176,7 +233,7 @@ struct Window::Impl : public platform::IWindowEventSink {
             std::max(1.0f, std::round(new_logical_size.height * dpi_scale_)));
 
         // 等待 GPU 完成当前帧，然后调整交换链大小
-        queue_.wait_idle();
+        queue_->wait_idle();
         swapchain_->resize(phys_w, phys_h);
 
         // 布局 + 渲染
@@ -195,16 +252,16 @@ struct Window::Impl : public platform::IWindowEventSink {
 
         // 更新缩放因子
         dpi_scale_ = std::max(0.01f, new_dpi / 96.0f);
-        renderer_.set_dpi_scale(dpi_scale_);
+        renderer_->set_dpi_scale(dpi_scale_);
 
         // 以当前逻辑尺寸重新计算物理像素并 resize
-        const math::Size logical_size = native_window_.size();
+        const math::Size logical_size = native_window_->size();
         const auto phys_w = static_cast<uint32_t>(
             std::max(1.0f, std::round(logical_size.width  * dpi_scale_)));
         const auto phys_h = static_cast<uint32_t>(
             std::max(1.0f, std::round(logical_size.height * dpi_scale_)));
 
-        queue_.wait_idle();
+        queue_->wait_idle();
         swapchain_->resize(phys_w, phys_h);
 
         // 布局 + 渲染
@@ -259,9 +316,9 @@ struct Window::Impl : public platform::IWindowEventSink {
         // 获取 DisplayList 并提交到 GPU
         paint::DisplayList dl = canvas.end();
 
-        renderer_.begin_frame();
-        renderer_.render(dl, back_buf);
-        renderer_.end_frame();
+        renderer_->begin_frame();
+        renderer_->render(dl, back_buf);
+        renderer_->end_frame();
 
         // 将后缓冲呈现到屏幕
         swapchain_->present();
@@ -272,6 +329,12 @@ struct Window::Impl : public platform::IWindowEventSink {
 // Window 公共实现
 // ============================================================================
 
+/// 无参构造（pending 状态，路径 A）
+Window::Window()
+    : p_{ core::make_pimpl<Impl>() }
+{}
+
+/// 带参构造（立即初始化，路径 B）
 Window::Window(platform::IWindow& native_window,
                gfx::IDevice&      device,
                gfx::IQueue&       queue,
@@ -293,9 +356,9 @@ void Window::set_content(ui::UIElement* element)
         p_->router_.set_keyboard_focus(element);
     }
 
-    // 内容变化后立即执行布局与渲染
-    if (!p_->is_closed_) {
-        const math::Size logical_size = p_->native_window_.size();
+    // 仅已初始化且未关闭时才触发立即布局与渲染
+    if (p_->is_initialized_ && !p_->is_closed_) {
+        const math::Size logical_size = p_->native_window_->size();
         p_->run_layout(logical_size);
         p_->do_render(logical_size);
     }
@@ -310,37 +373,109 @@ ui::UIElement* Window::content() const noexcept
 
 void Window::show()
 {
-    p_->native_window_.show();
+    if (!p_->is_initialized_) {
+        // 路径 A：首次 show() 触发懒初始化
+        auto* ctx = get_application_window_context();
+        MINE_ASSERT_MSG(ctx != nullptr,
+            "Window::show() 在 Application 初始化前调用，"
+            "请确保在 Application::on_startup() 回调中调用 show()");
+
+        // 从 pending 属性构建 WindowDesc
+        platform::WindowDesc desc{};
+        desc.title          = core::StringView{p_->pending_title_.data(),
+                                               p_->pending_title_.size()};
+        desc.size           = p_->pending_size_;
+        desc.resizable      = p_->pending_resizable_;
+        desc.auto_position  = p_->pending_auto_position_;
+        desc.kind           = p_->pending_kind_;
+        desc.startup_hidden = true;  // 避免原生窗口创建时自动显示，由本函数最后显式 show
+
+        // 创建原生窗口（路径 A：Window 自身持有所有权）
+        p_->owned_native_ = ctx->create_native_window(desc);
+        MINE_ASSERT_MSG(p_->owned_native_ != nullptr, "mine.ui.window: 原生窗口创建失败");
+
+        // 绑定图形资源（创建交换链、订阅事件）
+        p_->initialize(*p_->owned_native_, ctx->device(), ctx->queue(), ctx->renderer());
+
+        // 通知 Application：安装 tick_and_render 回调、自动设为主窗口（如有必要）
+        ctx->on_window_first_show(*this);
+    }
+
+    p_->native_window_->show();
 }
 
 void Window::hide()
 {
-    p_->native_window_.hide();
+    if (p_->is_initialized_) {
+        p_->native_window_->hide();
+    }
 }
 
 void Window::close()
 {
-    p_->native_window_.close();
+    if (p_->is_initialized_) {
+        p_->native_window_->close();
+    }
 }
 
 void Window::set_title(core::StringView title)
 {
-    p_->native_window_.set_title(title);
+    if (p_->is_initialized_) {
+        p_->native_window_->set_title(title);
+    } else {
+        // pending 状态：缓存标题，首次 show() 时应用
+        p_->pending_title_ = containers::InlineString{title};
+    }
 }
 
 void Window::set_size(math::Size size)
 {
-    p_->native_window_.set_size(size);
+    if (p_->is_initialized_) {
+        p_->native_window_->set_size(size);
+    } else {
+        // pending 状态：缓存尺寸，首次 show() 时应用
+        p_->pending_size_ = size;
+    }
+}
+
+void Window::set_resizable(bool resizable)
+{
+    // 仅 pending 状态下有效（初始化后原生窗口不支持动态修改）
+    if (!p_->is_initialized_) {
+        p_->pending_resizable_ = resizable;
+    }
+}
+
+void Window::set_auto_position(bool auto_position)
+{
+    // 仅 pending 状态下有效
+    if (!p_->is_initialized_) {
+        p_->pending_auto_position_ = auto_position;
+    }
+}
+
+void Window::set_kind(platform::WindowKind kind)
+{
+    // 仅 pending 状态下有效
+    if (!p_->is_initialized_) {
+        p_->pending_kind_ = kind;
+    }
 }
 
 math::Size Window::size() const
 {
-    return p_->native_window_.size();
+    if (p_->is_initialized_) {
+        return p_->native_window_->size();
+    }
+    return p_->pending_size_;
 }
 
 float Window::dpi() const
 {
-    return p_->native_window_.dpi();
+    if (p_->is_initialized_) {
+        return p_->native_window_->dpi();
+    }
+    return 96.0f;
 }
 
 bool Window::is_closed() const noexcept
@@ -352,16 +487,18 @@ bool Window::is_closed() const noexcept
 
 platform::IWindow& Window::native_window() noexcept
 {
-    return p_->native_window_;
+    MINE_ASSERT_MSG(p_->is_initialized_,
+        "Window::native_window() 在 pending 状态下不可用（尚未调用 show()）");
+    return *p_->native_window_;
 }
 
 // ── 渲染 ─────────────────────────────────────────────────────────────────────
 
 void Window::render()
 {
-    if (p_->is_closed_) return;
+    if (!p_->is_initialized_ || p_->is_closed_) return;
 
-    const math::Size logical_size = p_->native_window_.size();
+    const math::Size logical_size = p_->native_window_->size();
     p_->run_layout(logical_size);
     p_->do_render(logical_size);
 }

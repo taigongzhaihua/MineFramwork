@@ -29,6 +29,7 @@
 
 // UI 窗口
 #include <mine/ui/window/Window.h>
+#include <mine/ui/window/WindowContext.h>
 
 // 样式系统（主题资源字典）
 #include <mine/ui/style/ResourceDictionary.h>
@@ -83,6 +84,7 @@ struct MainWindowCloseSink final : public platform::IWindowEventSink {
 };
 
 // ============================================================================
+// ============================================================================
 // Application::Impl 实现
 // ============================================================================
 
@@ -127,12 +129,15 @@ struct Application::Impl {
         WindowEntry& operator=(WindowEntry&&) = default;
     };
 
-    /// 所有已创建的窗口列表（Application 拥有生命周期）
+    /// 路径 B 窗口：Application 持有 native + ui_win 完整生命周期
     containers::SmallVector<WindowEntry, 4> windows_;
+
+    /// 路径 A 窗口（pending/show() 路径）：Application 不持有，仅追踪裸指针
+    containers::SmallVector<ui::Window*, 4> tracked_windows_;
 
     // ── 主窗口语义 ───────────────────────────────────────────────────────────
 
-    /// 主窗口（非拥有指针，指向 windows_ 中某个 ui_win.get()）
+    /// 主窗口（非拥有指针，路径 A/B 均可指向）
     ui::Window* main_window_{nullptr};
 
     /// 主窗口关闭监听器（订阅主窗口的原生事件源）
@@ -176,6 +181,47 @@ struct Application::Impl {
     core::OwnedPtr<text::FontFace> default_font_;};
 
 // ============================================================================
+// 进程级窗口上下文：供 ui::Window::show() 懒初始化使用
+// ============================================================================
+
+/**
+ * @brief 进程级窗口上下文实现，由 Application::run() 在栈上创建并注册为全局 context。
+ *
+ * 全部功能通过回调函数注入，不持有 Application::Impl 引用（后者是 private），
+ * 避免访问控制问题的同时保持代码清晰。
+ * 具体的 Impl 访问、protected tick_and_render 调用均由 run() 内的 lambda 封装。
+ */
+class ApplicationWindowContext final : public ui::IWindowContext {
+    using CreateFn    = std::function<core::OwnedPtr<platform::IWindow>(const platform::WindowDesc&)>;
+    using FirstShowFn = std::function<void(ui::Window&)>;
+
+    CreateFn          create_fn_;      ///< 创建原生窗口回调（委托 host_->create_window）
+    gfx::IDevice&     device_ref_;     ///< 图形设备引用
+    gfx::IQueue&      queue_ref_;      ///< 图形命令队列引用
+    paint::IRenderer& renderer_ref_;   ///< 2D 渲染器引用
+    FirstShowFn       first_show_fn_;  ///< 首次 show() 时的后处理回调
+
+public:
+    ApplicationWindowContext(CreateFn create, gfx::IDevice& dev, gfx::IQueue& q,
+                             paint::IRenderer& r, FirstShowFn first_show)
+        : create_fn_{std::move(create)}, device_ref_{dev}, queue_ref_{q},
+          renderer_ref_{r}, first_show_fn_{std::move(first_show)}
+    {}
+
+    [[nodiscard]] core::OwnedPtr<platform::IWindow>
+        create_native_window(const platform::WindowDesc& desc) override
+    {
+        return create_fn_(desc);
+    }
+
+    [[nodiscard]] gfx::IDevice& device() noexcept override { return device_ref_; }
+    [[nodiscard]] gfx::IQueue& queue() noexcept override { return queue_ref_; }
+    [[nodiscard]] paint::IRenderer& renderer() noexcept override { return renderer_ref_; }
+
+    void on_window_first_show(ui::Window& win) override { first_show_fn_(win); }
+};
+
+// ============================================================================
 // Application 成员函数实现
 // ============================================================================
 
@@ -201,6 +247,23 @@ int Application::run(int argc, char** argv)
     // ── 步骤 4：初始化 2D 渲染器 ─────────────────────────────────────────────
     p_->renderer_ = on_create_renderer(p_->device_.get());
     MINE_ASSERT(p_->renderer_ != nullptr, "2D 渲染器创建失败（着色器编译失败？）");
+
+    // ── 步骤 4.5：注册进程级窗口上下文（供 ui::Window::show() 懒初始化使用）──
+    //   window_ctx 生命周期绑定到 run() 调用栈，退出时自动失效
+    //   run() 是 Application 的成员函数，可合法访问 protected tick_and_render 和 private p_
+    ApplicationWindowContext window_ctx{
+        [&](const platform::WindowDesc& desc) { return p_->host_->create_window(desc); },
+        *p_->device_, *p_->queue_, *p_->renderer_,
+        [this](ui::Window& win) {
+            // 安装输入后处理回调：推进动画并触发重绘（tick_and_render 是 protected）
+            win.set_on_input_processed([this, &win]() { tick_and_render(&win); });
+            // 追踪此窗口（路径 A：Window 是调用方成员，Application 不拥有生命周期）
+            p_->tracked_windows_.push_back(&win);
+            // 若尚无主窗口，自动将本窗口设为主窗口
+            if (!p_->main_window_) { set_main_window(&win); }
+        }
+    };
+    ui::set_application_window_context(&window_ctx);
 
     // ── 步骤 5：尝试加载默认系统字体（最优努力，失败则 default_font_ 为 nullptr）──
 #if defined(_WIN32)
@@ -228,13 +291,21 @@ int Application::run(int argc, char** argv)
     // ── 步骤 8：调用应用退出回调 ──────────────────────────────────────────────
     on_exit(exit_code);
 
-    // ── 步骤 9：清理（先取消主窗口事件订阅，再销毁窗口列表）───────────────
+    // ── 步骤 9：清理 ─────────────────────────────────────────────────────────
+
+    // 先注销全局 context（防止清理过程中再次触发 Window::show()）
+    ui::set_application_window_context(nullptr);
+
+    // 取消主窗口关闭事件订阅（路径 A/B 均适用）
     if (p_->main_window_ && !p_->main_window_->is_closed()) {
         p_->main_window_->native_window().events().unsubscribe(&p_->main_close_sink_);
     }
     p_->main_window_ = nullptr;
 
-    // 清空窗口列表时，每个 WindowEntry 按 ui_win → native 顺序析构
+    // 路径 A 窗口（Application 不拥有）：清空追踪指针列表即可
+    p_->tracked_windows_.clear();
+
+    // 路径 B 窗口（Application 拥有）：每个 WindowEntry 按 ui_win → native 顺序析构
     p_->windows_.clear();
 
     return exit_code;
