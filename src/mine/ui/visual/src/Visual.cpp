@@ -110,11 +110,15 @@ Visual::~Visual()
 {
     // 从父节点的子列表中移除自身，防止悬空指针
     if (p_->parent_ != nullptr) {
-        p_->parent_->remove_child(this);
+        Visual* old_parent = p_->parent_;
+        old_parent->remove_child(this);
+        // 注意：remove_child 内部已将 parent_ 置为 nullptr 并调用 on_parent_changed
     }
     // 将所有子节点的父指针置为 nullptr（子节点不被析构，由调用方管理生命周期）
     for (Visual* child : p_->children_) {
+        Visual* old_p = child->p_->parent_;
         child->p_->parent_ = nullptr;
+        child->on_parent_changed(old_p, nullptr);
     }
 }
 
@@ -147,6 +151,8 @@ void Visual::add_child(Visual* child)
 
     child->p_->parent_ = this;
     p_->children_.push_back(child);
+    // 通知子节点父节点已变更（old=nullptr → new=this）
+    child->on_parent_changed(nullptr, this);
     // 添加子节点后子树已变化，触发渲染失效
     invalidate_render();
 }
@@ -157,8 +163,11 @@ void Visual::remove_child(Visual* child)
 
     for (auto it = p_->children_.begin(); it != p_->children_.end(); ++it) {
         if (*it == child) {
+            Visual* old_parent = child->p_->parent_;
             child->p_->parent_ = nullptr;
             p_->children_.erase(it);
+            // 通知子节点父节点已变更（old=this → new=nullptr）
+            child->on_parent_changed(old_parent, nullptr);
             invalidate_render();
             return;
         }
@@ -168,11 +177,24 @@ void Visual::remove_child(Visual* child)
 
 void Visual::remove_all_children()
 {
-    for (Visual* child : p_->children_) {
+    // 先收集所有子节点，再逐个置空并通知（避免遍历时修改容器）
+    containers::Vector<Visual*> children_copy{ p_->children_ };
+    for (Visual* child : children_copy) {
+        Visual* old_parent = child->p_->parent_;
         child->p_->parent_ = nullptr;
+        child->on_parent_changed(old_parent, nullptr);
     }
     p_->children_.clear();
     invalidate_render();
+}
+
+// ============================================================================
+// 父节点变更钩子
+// ============================================================================
+
+void Visual::on_parent_changed(Visual* /*old_parent*/, Visual* /*new_parent*/) noexcept
+{
+    // 默认空实现，子类（如 UserControl）可覆盖以响应"加入/离开视觉树"事件
 }
 
 // ============================================================================

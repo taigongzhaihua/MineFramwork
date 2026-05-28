@@ -362,3 +362,161 @@ TEST_CASE("controls_ContentControl_内容变更触发重新测量")
     CHECK(button.desired_size().width >= initial_w);
 }
 
+// ============================================================================
+// UserControl 测试套件（任务 17.2）
+// ============================================================================
+
+namespace {
+
+/// 记录生命周期钩子调用顺序的测试专用 UserControl 子类
+class LifecycleUserControl : public UserControl {
+public:
+    // 记录各钩子调用次数
+    int initialized_count{ 0 };
+    int loaded_count{ 0 };
+    int unloaded_count{ 0 };
+    int data_context_changed_count{ 0 };
+
+    // 最后收到的 DataContext 值
+    mine::core::Variant last_new_ctx{};
+
+protected:
+    void on_initialized() noexcept override { ++initialized_count; }
+    void on_loaded()      noexcept override { ++loaded_count; }
+    void on_unloaded()    noexcept override { ++unloaded_count; }
+    void on_data_context_changed(const mine::core::Variant& /*old_ctx*/,
+                                  const mine::core::Variant& new_ctx) noexcept override
+    {
+        ++data_context_changed_count;
+        last_new_ctx = new_ctx;
+    }
+};
+
+} // namespace
+
+TEST_CASE("controls_UserControl_默认状态DataContext为空")
+{
+    UserControl uc{};
+    // 默认 DataContext 应为空 Variant
+    CHECK_FALSE(uc.data_context().has_value());
+}
+
+TEST_CASE("controls_UserControl_set_data_context写入DataContextProperty")
+{
+    LifecycleUserControl uc{};
+    int value = 42;
+    mine::core::Variant ctx{ static_cast<void*>(&value) };
+    uc.set_data_context(ctx);
+
+    // DataContext 已写入
+    REQUIRE(uc.data_context().has_value());
+    CHECK(uc.data_context().get<void*>() == static_cast<void*>(&value));
+}
+
+TEST_CASE("controls_UserControl_DataContext变更触发on_data_context_changed")
+{
+    LifecycleUserControl uc{};
+    CHECK(uc.data_context_changed_count == 0);
+
+    int v1 = 1;
+    mine::core::Variant ctx1{ static_cast<void*>(&v1) };
+    uc.set_data_context(ctx1);
+    CHECK(uc.data_context_changed_count == 1);
+    CHECK(uc.last_new_ctx.get<void*>() == static_cast<void*>(&v1));
+
+    int v2 = 2;
+    mine::core::Variant ctx2{ static_cast<void*>(&v2) };
+    uc.set_data_context(ctx2);
+    CHECK(uc.data_context_changed_count == 2);
+    CHECK(uc.last_new_ctx.get<void*>() == static_cast<void*>(&v2));
+}
+
+TEST_CASE("controls_UserControl_set_content_UIElement加入视觉子树")
+{
+    UserControl uc{};
+    TextBlock tb{};
+
+    // set_content 前，tb 无父节点
+    CHECK(tb.parent() == nullptr);
+
+    uc.set_content(&tb);
+
+    // set_content 后，tb 的父节点应为 uc
+    CHECK(tb.parent() == &uc);
+    CHECK(uc.content_element() == &tb);
+}
+
+TEST_CASE("controls_UserControl_set_content_nullptr清空视觉子树")
+{
+    UserControl uc{};
+    TextBlock tb{};
+    uc.set_content(&tb);
+    CHECK(tb.parent() == &uc);
+
+    // 清空内容
+    uc.set_content(static_cast<UIElement*>(nullptr));
+    CHECK(tb.parent() == nullptr);
+    CHECK(uc.content_element() == nullptr);
+}
+
+TEST_CASE("controls_UserControl_on_initialized仅触发一次")
+{
+    LifecycleUserControl uc{};
+    CHECK(uc.initialized_count == 0);
+
+    // 第一次测量 → on_initialized
+    uc.measure({400.0f, 300.0f});
+    CHECK(uc.initialized_count == 1);
+
+    // 再次测量 → 不重复触发
+    uc.measure({400.0f, 300.0f});
+    CHECK(uc.initialized_count == 1);
+}
+
+TEST_CASE("controls_UserControl_on_loaded和on_unloaded随父节点变化触发")
+{
+    LifecycleUserControl uc{};
+    Border parent_border{};
+
+    CHECK(uc.loaded_count   == 0);
+    CHECK(uc.unloaded_count == 0);
+
+    // 加入父树 → on_loaded
+    parent_border.add_child(&uc);
+    CHECK(uc.loaded_count   == 1);
+    CHECK(uc.unloaded_count == 0);
+
+    // 从父树移除 → on_unloaded
+    parent_border.remove_child(&uc);
+    CHECK(uc.loaded_count   == 1);
+    CHECK(uc.unloaded_count == 1);
+}
+
+TEST_CASE("controls_UserControl_measure委托给内容元素")
+{
+    UserControl uc{};
+    TextBlock tb{};
+    tb.set_text(mine::core::StringView{"Hello"});
+    uc.set_content(&tb);
+
+    uc.measure({500.0f, 400.0f});
+
+    // UserControl 的 desired_size 应反映内容元素的期望尺寸
+    CHECK(uc.desired_size().width  > 0.0f);
+    CHECK(uc.desired_size().height > 0.0f);
+    // 内容元素期望尺寸应与 UserControl 一致
+    CHECK(uc.desired_size().width  == doctest::Approx(tb.desired_size().width));
+    CHECK(uc.desired_size().height == doctest::Approx(tb.desired_size().height));
+}
+
+TEST_CASE("controls_UserControl_继承链正确（IS-A ContentControl）")
+{
+    UserControl uc{};
+    // 编译期验证：UserControl IS-A ContentControl IS-A Control
+    ContentControl* cc = &uc;
+    Control*        ct = &uc;
+    CHECK(cc != nullptr);
+    CHECK(ct != nullptr);
+    // DataContextProperty 是 UserControl 特有的
+    CHECK(&UserControl::DataContextProperty != &ContentControl::ContentProperty);
+}

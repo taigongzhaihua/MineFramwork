@@ -271,6 +271,20 @@ public:
 
 protected:
     /**
+     * @brief 父节点变更钩子，子类可覆盖以响应"加入/离开视觉树"事件。
+     *
+     * 由 add_child / remove_child / 析构时调用。
+     * 典型用途：UserControl 覆盖此方法，当 old_parent == nullptr 且
+     * new_parent != nullptr 时调用 on_loaded()，反之调用 on_unloaded()。
+     *
+     * 默认实现为空操作，不影响现有子类行为。
+     *
+     * @param old_parent 变更前的父节点（nullptr 表示原来是根节点）
+     * @param new_parent 变更后的父节点（nullptr 表示成为根节点）
+     */
+    virtual void on_parent_changed(Visual* old_parent, Visual* new_parent) noexcept;
+
+    /**
      * @brief 自身绘制虚方法，子类覆盖以实现自定义绘制逻辑。
      *
      * 此方法在 canvas 已完成 save/transform/clip 之后调用，

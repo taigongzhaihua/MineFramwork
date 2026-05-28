@@ -5,6 +5,18 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.controls：UserControl 基类（任务 17.2）**：
+  新增 `UserControl : public ContentControl`，作为所有自定义 UI 组件的基类：
+  - `DataContextProperty`（DependencyProperty）：MVVM 数据绑定上下文，`affects_measure=false/affects_render=false`，changed 回调通知 `on_data_context_changed`
+  - `set_data_context()` / `data_context()` —— 数据上下文读写接口
+  - 生命周期虚方法：`on_initialized()`（首次测量后触发，仅一次）、`on_loaded()`（加入视觉树时触发）、`on_unloaded()`（离开视觉树时触发）
+  - `on_data_context_changed(old, new)` —— 数据上下文变更通知，子类可重写
+  - `on_content_changed` override：通过直接管理视觉子树（`remove_child`/`add_child`）自动将 `UIElement*` 内容挂入子树
+  - `on_parent_changed` override：在父节点变化时调度 `on_loaded`/`on_unloaded`
+  - `measure_override`：委托给内容元素，首次调用后触发 `on_initialized`
+  - `arrange_override`：将内容元素排列至全部内容区域
+  - **mine.ui.visual：Visual 新增 `on_parent_changed` 虚方法钩子**：`add_child`/`remove_child`/`remove_all_children`/析构时自动调用，子类可覆盖以响应加入/离开视觉树事件
+  - 单测：8 个新 UserControl 测试用例，全部通过（共 33 测试 74 断言）
 - **mine.ui.controls：ContentControl 基类（任务 17.1）**：
   新增 `ContentControl : public Control`，为所有"内容"类控件提供统一基类：
   - `ContentProperty`（DependencyProperty）：存储 `InlineString`（文字）或 `UIElement*`（元素），默认空值；`affects_measure=true/affects_render=true` 自动触发失效
