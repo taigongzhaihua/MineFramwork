@@ -15,6 +15,13 @@
   - 新增至 `AnimationAll.h` 伞形头文件
 
 ### Changed
+- **设计文档（docs/03-mml-language.md、04-precompiler.md、07-windowing.md）**：Window 组件架构从"组合模式"升级为"继承模式 + code-behind 五文件分工"：
+  - `mine::ui::Window` 改为虚析构，支持继承和多态
+  - mmlc 生成 `XxxBase : public mine::ui::Window`，析构安全由 `~XxxBase()` 中首句 `close()` 保证
+  - 新增 `method` 关键字（BNF + §3.2 关键字表）：声明纯虚 code-behind 接口
+  - 新增 `#id` 暴露语义：标记元素以 `protected` 引用成员形式暴露给 code-behind
+  - 定义五文件分工契约：.mml / .g.h / .g.cpp / .h / .cpp
+  - mmlc 文件发现规则：检测同目录 `.h` 文件判断 code-behind 存在
 - **samples/02-controls-demo（重构为 Window 组件样板代码分层结构）**：
   将单文件混合结构拆分为符合 `docs/04-precompiler.md §4.4.2` 规定的代码生成契约：
   - 新增 `DemoWindow.h`：Window 组件包装类头文件（模拟 `.g.h`），聚合 `mine::ui::Window win_` 值成员（最后声明=最先析构），暴露 `show/hide/close/is_closed/window()` 委托接口

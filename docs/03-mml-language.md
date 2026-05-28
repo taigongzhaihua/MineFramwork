@@ -129,7 +129,7 @@ component DemoWindow : Window {
 * 标识符：`[A-Za-z_][A-Za-z0-9_]*`。
 * 数字字面量：`123`, `1.5`, `12px`, `1.5em`, `200ms`, `#RRGGBB[AA]`。
 * 字符串：双引号 `"..."`，支持 `${expr}` 插值（编译期或绑定）。
-* 关键字：`component`, `property`, `signal`, `state`, `transition`, `when`, `animate`, `if`, `else`, `for`, `in`, `resources`, `states`, `using`, `module`, `viewmodel`, `template`, `style`, `null`, `true`, `false`。
+* 关键字：`component`, `property`, `signal`, `method`, `state`, `transition`, `when`, `animate`, `if`, `else`, `for`, `in`, `resources`, `states`, `using`, `module`, `viewmodel`, `template`, `style`, `null`, `true`, `false`。
 * Window 组件专属属性命名空间：`window.title`、`window.size`、`window.resizable`、`window.auto_position`、`window.kind`（仅在 `component X : Window` 中有效，由 mmlc 生成到 `_configure()` 内）。
 * `@` 前缀**顶部指令**（编译器指令，词法上独立于关键字）：`@module`, `@using`, `@import`, `@viewmodel`。顶部指令只允许出现在文件开头，不参与表达式/语句语法，词法器在行首遇到 `@` 时切换到指令模式识别。
 * 操作符：`= == != < <= > >= && || ! + - * / % ?: ?? -> => <=>`。
@@ -146,12 +146,14 @@ directive  := '@module'    qid ';'
             // 注：directive 前缀 '@' 由词法器在文件头部特殊处理，不属于普通关键字
 declaration:= component | resourceBlock | styleBlock | templateBlock
 component  := 'component' ident (':' qid)? '{' member* '}'
-member     := propertyDecl | signalDecl | childElement | statesBlock
+member     := propertyDecl | signalDecl | methodDecl | childElement | statesBlock
             | resourceBlock | styleBlock | windowAttr
 windowAttr := 'window' '.' ident ':' expr ';'   // 仅 component X : Window 中有效
 propertyDecl:= 'property' type ident ('=' expr)? ';'
 signalDecl  := 'signal' ident '(' paramList? ')' ';'
-childElement:= qid ('#' ident)? '{' attribute* '}'
+methodDecl  := 'method' type ident '(' paramList? ')' ';'  // code-behind 纯虚接口
+childElement:= qid ('#' ident)? '{' attribute* '}'         // '#' ident 将元素标记为具名元素，
+                                                            //   生成的 Base 类将其暴露为 protected 成员
 attribute   := ident ':' expr ';'                  // 单向赋值/属性
             |  ident '<=>' expr ';'                // 双向绑定
             |  ident '=>' block                    // 事件
@@ -166,20 +168,29 @@ MML `component X : Base { }` 中的 `Base` 决定生成代码的**继承体系**
 | Base | 对应 C++ 类型 | 用途 | WPF 对应 |
 |------|-------------|------|----------|
 | `UserControl` | `mine::ui::UserControl`（继承 `FrameworkElement`） | 可复用 UI 组件、子视图 | `UserControl` |
-| `Window` | 生成**包装类**（持有 `mine::ui::Window` 值成员，非继承） | 顶层独立窗口 | `Window` |
+| `Window` | 生成 `XxxBase : public mine::ui::Window`（真正的 is-a Window，mmlc 保证析构安全） | 顶层独立窗口 | `Window` |
 | `Page` | `mine::ui::Page`（继承 `UserControl`） | 导航单元，配合 `Frame` 使用 | `Page` |
 | `ContentControl` | `mine::ui::ContentControl`（继承 `Control`） | 单内容宿主，可扩展 | `ContentControl` |
 | *(另一组件名)* | 该组件生成的 C++ 类型 | 组件继承/扩展 | `UserControl` 派生 |
 
 ### Window 组件的特殊规则
 
-`component X : Window` **不产生 `mine::ui::Window` 的 C++ 子类**（`Window` 是 Pimpl 值类型，无虚析构，不可派生）。
-`mmlc` 生成一个**包装类**（与 Slint 的 `inherits Window` 在 C++ 侧的生成策略相同）：
+`component X : Window` 生成一个继承自 `mine::ui::Window` 的 **Base 类**（`XxxBase : public mine::ui::Window`）。  
+`mine::ui::Window` 提供虚析构函数，因此 `DemoWindow IS-A Window`，多态链完整，可直接传给任何需要 `Window&` 的 API（`Application::show_window`、导航系统等）。
 
-* 包装类持有一个 `mine::ui::Window win_` 值成员，**声明为最后一个数据成员**（确保最先析构 → 渲染停止先于 UI 元素析构）。
-* 视觉树元素均声明在 `win_` 之前。
-* 包装类对外暴露 `show()` / `hide()` / `close()` / `is_closed()` / `window()` 委托到 `win_`。
-* `window.xxx` 属性在生成的 `_configure()` 中生成对应 `win_.set_title(...)` 等调用，`Application::on_startup` 调用 `show()` 之前会先调用 `_configure()`（实际上 `_configure()` 在构造函数中完成，`show()` 触发懒初始化时才真正应用到原生窗口）。
+**析构顺序保证**：mmlc 在生成的 `~XxxBase()` 析构体中**第一句调用 `close()`**，确保渲染循环停止在任何数据成员析构之前；之后 C++ 按声明逆序析构 UI 成员，最后析构基类 `Window`（此时已是 no-op）。
+
+**`#id` 与 `method` 关键字的作用**：
+
+* `Button#btn_count { ... }` — 带 `#id` 的元素，mmlc 将其声明为 `protected` 成员（通过引用），code-behind 可直接访问，等同于 WPF XAML 中的 `x:Name="btnCount"`。
+* `method void on_click()` — 声明 code-behind 必须 `override` 的纯虚函数，对应 WPF 中在 code-behind 里实现的事件处理函数。
+
+**Code-Behind 文件发现规则**（mmlc 编译时自动判断）：
+
+* 若同目录下存在 `Xxx.h`，mmlc 识别为 code-behind 存在，`XxxBase` 只声明纯虚接口，不再自动生成 `Xxx` 最终类。
+* 若无 `Xxx.h`，mmlc 自动生成空的 `Xxx : XxxBase` 最终类（此时 MML 中不应使用 `method`）。
+
+`window.xxx` 属性在生成的 `_configure()` 中生成对应 `set_title(...)` 等调用（继承自 `Window`，无需 `win_.` 前缀），`_configure()` 在 `XxxBase` 构造函数中调用，`show()` 触发懒初始化时才真正应用到原生窗口。
 
 ### 生命周期钩子（UserControl / Page）
 

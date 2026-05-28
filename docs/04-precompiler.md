@@ -137,48 +137,56 @@ void LoginView::_build() {
 
 对 `DemoWindow`（`component DemoWindow : Window`，见 §3.1 Window 示例）：
 
-`mine::ui::Window` 是 Pimpl 值类型基础设施，**无虚析构，不可派生**。
-因此 mmlc 生成**包装类（组合）**而非继承——与 Slint / WinUI3 的生成策略相同。
+`mine::ui::Window` 提供虚析构函数，支持继承和多态。mmlc 生成一个**继承自 `Window` 的 Base 类**（`DemoWindowBase : public ::mine::ui::Window`），用户的 code-behind 类再继承 Base——这与 WPF 的 `.xaml` / `.xaml.cpp` 分层完全对应。
+
+**析构顺序保证**：mmlc 在生成的 `~DemoWindowBase()` 析构体中**第一句调用 `close()`**，确保渲染循环停止在任何数据成员析构之前；之后 C++ 析构数据成员（UI 元素），最后析构基类 `Window`（此时已是 no-op）。
+
+---
+
+#### 生成文件：DemoWindow.g.h / DemoWindow.g.cpp（不可手改）
 
 ```cpp
-// DemoWindow.g.h（完整接口）
+// DemoWindow.g.h
 namespace app {
 
-class DemoWindow {
+// !! 由 mmlc 自动生成，请勿手动修改 !!
+// 用户在 DemoWindow.h / DemoWindow.cpp 中继承本类完成 code-behind
+
+class DemoWindowBase : public ::mine::ui::Window {
     MINE_REFLECT_DECL();
 public:
-    DemoWindow();
-    ~DemoWindow() = default;
+    DemoWindowBase();
+    ~DemoWindowBase() override;   // 生成体第一句调用 close()，保证析构安全
 
-    // ── Window 生命周期委托 ──────────────────────────────────────────────────
-    void show()    { win_.show(); }
-    void hide()    { win_.hide(); }
-    void close()   { win_.close(); }
-    [[nodiscard]] bool is_closed()           const noexcept { return win_.is_closed(); }
-    [[nodiscard]] ::mine::ui::Window& window()     noexcept { return win_; }
-
-    // ── MML 声明的属性 ──────────────────────────────────────────────────────
+    // ── MML property / signal ────────────────────────────────────────────
     MINE_PROP(::mine::String, StatusText);
-
-    // ── MML 声明的信号 ──────────────────────────────────────────────────────
     MINE_SIGNAL(closeRequested);
 
+    // ── MML method → 纯虚，code-behind 必须 override ────────────────────
+    virtual void on_count_clicked() = 0;
+    virtual void on_reset_clicked() = 0;
+
+protected:
+    // ── #id 元素 → protected 成员（通过引用暴露），code-behind 可直接访问 ──
+    //    对应 WPF 中的 x:Name，等效于在 code-behind 中访问命名控件
+    ::mine::ui::Button&    btn_count_    { btn_count_s_    };
+    ::mine::ui::TextBlock& status_label_ { status_label_s_ };
+
 private:
-    // ── 生成方法 ─────────────────────────────────────────────────────────────
-    void _configure();  // 配置 win_ 属性：title/size/resizable 等（在构造函数中调用）
-    void _build();      // 构建视觉树，最终调用 win_.set_content(...)
+    void _configure();  // 配置窗口属性（title/size/resizable），构造函数中调用
+    void _build();      // 构建视觉树
     void _bind();       // 安装属性绑定
     void _states();     // 状态机
 
-    // ── 数据成员：UI 元素声明在 win_ 之前，保证析构顺序正确 ──────────────────
+    // 无 #id 的元素（私有，code-behind 不可直接访问）
     ::mine::ui::Grid       root_grid_;
-    ::mine::ui::TextBlock  title_bar_;
     ::mine::ui::StackPanel content_panel_;
-    ::mine::ui::TextBlock  status_label_;
-    ::mine::ui::Button     close_btn_;
 
-    // win_ 最后声明 = 最先析构（GPU 资源与 swapchain 在 UI 元素之前释放）
-    ::mine::ui::Window win_;
+    // 有 #id 的元素存储体（通过 protected 引用暴露给 code-behind）
+    ::mine::ui::Button     btn_count_s_;
+    ::mine::ui::TextBlock  status_label_s_;
+
+    // 注意：无 win_ 成员——Window 本身就是 this（继承而非组合）
 };
 
 } // namespace app
@@ -186,69 +194,140 @@ private:
 
 ```cpp
 // DemoWindow.g.cpp（节选）
-DemoWindow::DemoWindow() {
+DemoWindowBase::DemoWindowBase() {
     _configure();   // 设置 pending 属性，首次 show() 前生效
     _build();       // 构建视觉树并 set_content
     _bind();        // 安装绑定
     _states();      // 状态机
 }
 
-void DemoWindow::_configure() {
-    win_.set_title("MineFramework - 演示");
-    win_.set_size({ .width = 800, .height = 700 });
-    win_.set_resizable(true);
+DemoWindowBase::~DemoWindowBase() {
+    // 第一句调用 close()：停止渲染循环，释放 swapchain，解注册 IWindowContext
+    // 之后 C++ 析构数据成员（btn_count_s_, root_grid_, ...）→ 基类 ~Window()（no-op）
+    if (!is_closed()) close();
 }
 
-void DemoWindow::_build() {
+void DemoWindowBase::_configure() {
+    set_title("MineFramework - 演示");     // 直接调用继承自 Window 的方法（无 win_. 前缀）
+    set_size({ 800.0f, 700.0f });
+    set_resizable(true);
+}
+
+void DemoWindowBase::_build() {
     using namespace ::mine::ui;
     root_grid_.set_row_definitions({ RowDef::pixel(60), RowDef::star() });
 
-    title_bar_.set_text("MineFramework 演示");
-    title_bar_.set_font_size(22);
-    Grid::set_row(title_bar_, 0);
+    status_label_s_.bind_text([this]{ return StatusText(); }, {prop_StatusText()});
+    btn_count_s_.set_content("计数 +1");
+    btn_count_s_.click().connect([this]{ on_count_clicked(); });   // 调用 method（多态分派）
 
-    status_label_.bind_text([this]{ return StatusText(); }, {prop_StatusText()});
-    close_btn_.set_content("关闭");
-    close_btn_.click().connect([this]{ closeRequested().emit(); });
-
-    content_panel_.add_child(status_label_);
-    content_panel_.add_child(close_btn_);
+    content_panel_.add_child(status_label_s_);
+    content_panel_.add_child(btn_count_s_);
     Grid::set_row(content_panel_, 1);
-
-    root_grid_.add_child(title_bar_);
     root_grid_.add_child(content_panel_);
 
-    win_.set_content(root_grid_);
+    set_content(root_grid_);   // 继承自 Window，直接调用
 }
 ```
 
-**调用方（手写 Application）**：
+---
+
+#### Code-Behind 文件：DemoWindow.h / DemoWindow.cpp（用户手写）
+
+mmlc 检测到同目录下存在 `DemoWindow.h` 时，识别为 code-behind 存在，不再自动生成 `DemoWindow` 最终类。
+
+```cpp
+// DemoWindow.h（用户手写，code-behind 头文件）
+#pragma once
+#include "DemoWindow.g.h"
+
+namespace app {
+
+class DemoWindow final : public DemoWindowBase {
+public:
+    DemoWindow() = default;
+
+    // 实现 MML 声明的 method
+    void on_count_clicked() override;
+    void on_reset_clicked() override;
+
+private:
+    int click_count_ = 0;   // 视图局部状态（不属于业务逻辑，不放 ViewModel）
+};
+
+} // namespace app
+```
+
+```cpp
+// DemoWindow.cpp（用户手写，code-behind 实现）
+#include "DemoWindow.h"
+#include <cstdio>
+
+namespace app {
+
+void DemoWindow::on_count_clicked() {
+    ++click_count_;
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "当前计数：%d 次", click_count_);
+    // 直接访问 protected 的 #id 元素（与 WPF code-behind 中访问命名控件一致）
+    status_label_.set_text(buf);
+    render();   // 继承自 Window，直接调用
+}
+
+void DemoWindow::on_reset_clicked() {
+    click_count_ = 0;
+    status_label_.set_text("当前计数：0 次");
+    render();
+}
+
+} // namespace app
+```
+
+---
+
+#### 调用方：Application 薄壳（手写）
 
 ```cpp
 // main.cpp（手写薄壳）
 struct MyApp : mine::ui::app::Application {
-    app::DemoWindow main_win_;  // Window 组件包装类
+    app::DemoWindow main_win_;  // DemoWindow IS-A Window，多态链完整
+                                // 可直接传给任何 Window& / Window* 参数
 
     void on_startup(int, char**) override {
         main_win_.closeRequested().connect([this]{ quit(); });
-        main_win_.show();  // 触发 IWindowContext 懒初始化，自动登记为主窗口
+        main_win_.show();   // 继承自 Window，直接调用
     }
 };
+MINE_APPLICATION_MAIN(MyApp)
 ```
 
-**析构顺序**（最重要的正确性保证）：
+---
+
+#### 析构顺序说明
 
 ```
 MyApp 析构
   → main_win_ 析构（DemoWindow）
-    → win_ 最先析构（声明最后 = 析构最先）
-      → 原生窗口关闭、swapchain 释放、IWindowContext 解注册
-    → close_btn_ 析构
-    → status_label_ 析构
-    → content_panel_ 析构
-    → title_bar_ 析构
-    → root_grid_ 析构（内容已被 win_ 析构时清空）
+    → ~DemoWindowBase() 体：if (!is_closed()) close()
+      → 渲染循环停止、swapchain 释放、IWindowContext 解注册
+    → 析构数据成员（btn_count_s_, status_label_s_, content_panel_, root_grid_）
+    → ~Window()（基类析构，此时已是 no-op）
 ```
+
+---
+
+#### 五文件分工
+
+| 文件 | 来源 | 是否可手改 | 说明 |
+|------|------|-----------|------|
+| `DemoWindow.mml` | 用户写 | ✅ | MML 声明：属性/信号/method/#id/视觉树 |
+| `DemoWindow.g.h` | mmlc 生成 | ❌ | `DemoWindowBase : Window`，Base 类接口 |
+| `DemoWindow.g.cpp` | mmlc 生成 | ❌ | `_configure/_build/_bind/_states` + 析构保证 |
+| `DemoWindow.h` | 用户写 | ✅ | code-behind 头：`DemoWindow : DemoWindowBase` |
+| `DemoWindow.cpp` | 用户写 | ✅ | code-behind 实现，可操作 `protected` UI 元素 |
+
+若无需 code-behind（纯 MML 声明即可），则 `DemoWindow.h/.cpp` 可省略；mmlc 自动生成空的 `DemoWindow : DemoWindowBase` 最终类（此时 `method` 声明会导致编译错误，不应使用）。
+
 
 ## 4.5 增量与缓存
 

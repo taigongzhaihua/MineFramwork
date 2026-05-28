@@ -97,12 +97,13 @@ Application::Construct → Bootstrap (DI/资源/i18n)
 
 | 层次 | 类型 | 角色 |
 |------|------|------|
-| 基础设施 | `mine::ui::Window` | 平台窗口 + 渲染管线的值类型封装（Pimpl，不可派生） |
-| 视图层（MML） | `DemoWindow`（mmlc 生成） | 持有 `Window` 值成员的包装类（组合模式） |
+| 基础设施 | `mine::ui::Window` | 平台窗口 + 渲染管线的封装（Pimpl，虚析构，可继承） |
+| 视图层（MML，生成） | `DemoWindowBase`（mmlc 生成） | 继承 `Window` 的 Base 类（`DemoWindowBase : public Window`） |
+| 视图层（code-behind） | `DemoWindow`（用户手写） | 继承 `DemoWindowBase`，实现 `method` 纯虚函数 |
 
-`mine::ui::Window` 是纯粹的基础设施：它封装原生窗口句柄、交换链、渲染队列，是 Pimpl 值类型，无虚函数，**不可被派生**。
+`mine::ui::Window` 是平台窗口的 C++ 封装，提供虚析构函数，支持继承和多态操作。
 
-MML 视图层通过 `component X : Window` 声明一个**顶层窗口组件**，mmlc 生成**包装类**（不是子类）。
+MML 视图层通过 `component X : Window` 声明一个**顶层窗口组件**，mmlc 生成**继承自 `Window` 的 Base 类**（`XxxBase : public mine::ui::Window`），用户的 code-behind 类再继承 Base——多态链完整，可直接传给任何需要 `Window&` 的 API。
 这与各框架的对比：
 
 | 框架 | MML/XAML 声明 | C++ / 实现侧 | 是否继承 |
@@ -111,16 +112,15 @@ MML 视图层通过 `component X : Window` 声明一个**顶层窗口组件**，
 | WinUI 3 | `MainWindow : Window`（XAML） | 实践上组合（WinUI Window 已接近 sealed） | ⚠ 实质组合 |
 | QML | `ApplicationWindow { }` | 包含 `QQuickWindow` | ✅ 组合 |
 | Slint | `component X inherits Window` | Rust 侧生成包装结构体 | ✅ 组合 |
-| **MineUI** | `component X : Window` | mmlc 生成持有 `Window` 值成员的包装类 | ✅ **组合** |
+| **MineUI** | `component X : Window` | mmlc 生成 `XxxBase : public Window`，code-behind 继承 Base | ✅ **继承** |
 
 ### 生命周期与 IWindowContext
 
 当用户在 `Application::on_startup` 中调用 `DemoWindow::show()` 时，流程如下：
 
 ```
-DemoWindow::show()
-  → win_.show()                        // mine::ui::Window::show()
-    → Window::Impl::initialize()       // 首次调用时懒初始化
+DemoWindow::show()                     // 继承自 mine::ui::Window::show()
+  → Window::Impl::initialize()         // 首次调用时懒初始化
       → IWindowContext::create_native_window(desc)   // 创建原生窗口
       → IWindowContext::on_window_first_show(win_)   // Application 注册主窗口 + 渲染回调
       → 原生窗口显示
@@ -136,35 +136,31 @@ DemoWindow::show()
 ```cpp
 // DemoApp.cpp（手写薄壳，10-15 行）
 struct DemoApp : mine::ui::app::Application {
-    // Window 组件包装类声明为值成员（非指针）
+    // DemoWindow IS-A Window，可直接传给任何 Window& 参数
     app::DemoWindow main_win_;
 
     void on_startup(int, char**) override {
         // 订阅信号
         main_win_.closeRequested().connect([this] { quit(); });
-        // show() 触发懒初始化，自动通过 IWindowContext 注册
+        // show() 继承自 Window，触发懒初始化，自动通过 IWindowContext 注册
         main_win_.show();
     }
 };
+MINE_APPLICATION_MAIN(DemoApp)
 ```
 
-**注意**：`DemoWindow main_win_` 应声明为 `DemoApp` 的**值成员**（不是指针或局部变量），使其生命周期与 Application 绑定，`Application` 析构时自动调用 `~DemoWindow()` → `win_` 最先析构（GPU 资源释放）→ UI 元素随后析构。
+**注意**：`DemoWindow main_win_` 应声明为 `DemoApp` 的**值成员**（不是指针或局部变量），使其生命周期与 Application 绑定。`Application` 析构时自动调用 `~DemoWindowBase()`，其体内第一句 `close()` 确保 GPU 资源在 UI 成员析构前释放。
 
 ### 析构安全顺序保证
 
-`DemoWindow` 内部的数据成员顺序（mmlc 严格生成）：
+继承模式下，mmlc 在生成的 `~DemoWindowBase()` 析构体中**第一句调用 `close()`**：
 
 ```cpp
-class DemoWindow {
-    // 1. UI 元素（先声明 = 后析构）
-    ::mine::ui::Grid    root_grid_;
-    ::mine::ui::TextBlock title_bar_;
-    // ...
-
-    // 2. win_ 最后声明 = 最先析构
-    //    析构时：swapchain 释放 → 原生窗口销毁 → IWindowContext 解注册
-    ::mine::ui::Window  win_;
-};
+DemoWindowBase::~DemoWindowBase() {
+    // 第一句：停止渲染循环（swapchain 释放、IWindowContext 解注册）
+    if (!is_closed()) close();
+    // 之后 C++ 析构数据成员（root_grid_, btn_..., 等 UI 元素）→ 基类 Window（no-op）
+}
 ```
 
-这确保在 `win_` 的渲染循环停止（`~Window()` 内同步）之后，所有 `UIElement` 才开始析构——避免析构期间的绘制回调访问已销毁对象。
+这确保渲染循环停止在任何 UI 成员析构之前，与原来"win_ 最后声明"的效果完全等价，且无需依赖成员声明顺序的隐性规则。
