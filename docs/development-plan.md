@@ -101,7 +101,7 @@ git tag：`v0.2.0-f1`
 | # | 模块 | 路径 | 验收 |
 |---|------|------|------|
 | 17.1 | `mine.ui.controls`：`ContentControl` 基类（继承 `Control`）；重构 `Button` 使其继承 `ContentControl`；提供 `set_content(UIElement*)` 标准接口 | `src/mine/ui/controls` | Button 旧行为不变；ContentControl 单测 |
-| 17.2 | `mine.ui.controls`：`UserControl` 基类（继承 `FrameworkElement`）；提供 `data_context` 属性 + `data_context_changed` 信号；定义 `on_initialized()` / `on_loaded()` / `on_unloaded()` 生命周期虚函数 | `src/mine/ui/controls` | 生命周期钩子顺序测试；DataContext 变更通知测试 |
+| 17.2 | `mine.ui.controls`：`UserControl` 基类（继承 `ContentControl`）；视觉树根通过 `ContentProperty` 持有；提供 `data_context` 属性 + `data_context_changed` 信号；定义 `on_initialized()` / `on_loaded()` / `on_unloaded()` 生命周期虚函数 | `src/mine/ui/controls` | 生命周期钩子顺序测试；DataContext 变更通知测试 |
 | 17.3 | `mine.ui.controls`：`Page` 基类（继承 `UserControl`）；添加 `on_navigated_to(const Variant&)` / `on_navigated_from()` / `on_navigate_away() → bool` 导航生命周期虚函数（接口先行，Frame 在 F3.1 中实现） | `src/mine/ui/controls` | 接口编译通过；空 Page 可被 UserControl 容器持有 |
 
 git tag：`v0.3.0-f2`

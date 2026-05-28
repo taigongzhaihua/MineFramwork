@@ -167,7 +167,7 @@ MML `component X : Base { }` 中的 `Base` 决定生成代码的**继承体系**
 
 | Base | 对应 C++ 类型 | 用途 | WPF 对应 |
 |------|-------------|------|----------|
-| `UserControl` | `mine::ui::UserControl`（继承 `FrameworkElement`） | 可复用 UI 组件、子视图 | `UserControl` |
+| `UserControl` | `mine::ui::UserControl`（继承 `ContentControl`） | 可复用 UI 组件、子视图 | `UserControl` |
 | `Window` | 生成 `XxxBase : public mine::ui::Window`（真正的 is-a Window，mmlc 保证析构安全） | 顶层独立窗口 | `Window` |
 | `Page` | `mine::ui::Page`（继承 `UserControl`） | 导航单元，配合 `Frame` 使用 | `Page` |
 | `ContentControl` | `mine::ui::ContentControl`（继承 `Control`） | 单内容宿主，可扩展 | `ContentControl` |
