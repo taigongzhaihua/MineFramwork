@@ -5,6 +5,21 @@
 ## [Unreleased]
 
 ### Added
+- **mine.nav：路由导航框架（任务 20）**：
+  实现 `mine.nav` 模块，提供路由导航所需的所有核心组件：
+  - `INavigationService`：导航服务抽象接口，解耦应用层与具体控件，
+    定义路由注册（`add_route`）、导航（`navigate_to`）、回退（`go_back`/`can_go_back`）、
+    查询（`current_route`）和事件订阅（`subscribe`/`unsubscribe`）等接口
+  - `Frame`：路由导航容器控件（继承 `UserControl`，实现 `INavigationService`），
+    通过 `set_content()` 切换显示的 `Page`，历史栈使用 `OwnedPtr<Page>` 管理生命周期，
+    页面工厂类型 `PageFactory = Page* (*)(void*)` 支持 C 函数指针 + user_data 模式
+  - 导航生命周期：`on_navigate_away()` 拦截 → `on_navigated_from()` 旧页离开 → `on_navigated_to()` 新页到达
+  - 导航事件广播：`NavigationEventType`（Navigating / Navigated / NavigationFailed / NavigationCancelled）
+  - 订阅/取消订阅：token 模式，`unsubscribe` 使用 swap-with-back 保持 O(1)
+  - `mine.ui.controls`：`Page` 的三个导航生命周期方法改为 `public virtual`（框架接口设计）
+  - 依赖：`mine.core`、`mine.containers`、`mine.math`、`mine.ui.property`、
+    `mine.ui.visual`、`mine.ui.controls`
+  - 单测：28 个测试用例 67 个断言，全部通过
 - **mine.mvvm：MVVM 模式基础模块（任务 19）**：
   实现 `mine.mvvm` 模块，提供 MVVM 架构所需的核心组件：
   - `ObservableObject`：属性变更通知基类，实现 `INotifyPropertyChanged`，

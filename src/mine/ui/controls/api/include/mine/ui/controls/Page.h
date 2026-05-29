@@ -57,6 +57,7 @@ namespace mine::ui {
  *
  * @note Frame 控件（mine.nav）在 F3.1 中实现，本类仅提供接口定义。
  */
+
 class MINE_UI_CONTROLS_API Page : public UserControl {
 public:
     // ── 生命周期 ──────────────────────────────────────────────────────────
@@ -69,8 +70,10 @@ public:
     Page(Page&&)                 = default;
     Page& operator=(Page&&)      = default;
 
-protected:
     // ── 导航生命周期虚函数（由 Frame 显式调用，子类可覆盖）────────────────
+    //
+    // 这些方法作为框架接口（Frame 调用）+ 子类扩展点（应用层覆盖）公开。
+    // 虽然是 public，但应用层通常不应直接调用，而应通过 Frame 的导航操作触发。
 
     /**
      * @brief 导航到本页面后触发。
