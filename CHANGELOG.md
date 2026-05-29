@@ -5,6 +5,22 @@
 ## [Unreleased]
 
 ### Added
+- **mine.localization：本地化模块（任务 22）**：
+  实现 `mine.localization` 模块，提供多语言资源字典、运行时语言切换和 `tr()` 翻译查询：
+  - `LocalizationManager`：核心管理器（Pimpl + MINE_LOCALIZATION_API），
+    维护三层回退策略（当前语言 → 回退语言（默认 `"en"`）→ key 原文）
+  - 资源包格式支持：
+    - JSON 格式（平面对象）：`{"翻译键":"翻译文本",...}`，支持转义序列和 UTF-8，非字符串值跳过
+    - KeyValue 格式：`翻译键=翻译文本`（每行一条，`#`/`;` 开头为注释行，空行跳过）
+  - `load_catalog(lang, data, fmt)`：加载资源包，多次加载同语言合并（后者覆盖前者重复键）
+  - `add_translation(lang, key, value)`：手动注册单条翻译
+  - `tr(key)`：翻译查询（未找到返回 key 原文）
+  - `tr_format(key, {0}~{3})`：带位置参数替换的翻译查询
+  - `tr_plural(key, n)`：单复数查找（n==1 使用 key，n!=1 优先查 `key_plural` 后缀）
+  - `subscribe`/`unsubscribe`：语言切换通知（函数指针 + token，swap-with-back O(1) 删除）
+  - `global_manager()` 单例 + `tr()`/`tr_format()` 全局快捷函数
+  - 依赖：`mine.core`、`mine.containers`
+  - 单测：57 个测试用例 99 个断言，全部通过
 - **mine.config：分层配置模块（任务 21）**：
   实现 `mine.config` 模块，提供三层优先级配置系统（Env > File > Default）：
   - `ConfigValue`：四种基础值类型（`Null/Bool/Integer/Float/String`），
