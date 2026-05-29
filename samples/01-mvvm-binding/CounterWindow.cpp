@@ -16,8 +16,9 @@
  *             → count_bind_.re_evaluate()
  *               → count_label_.set_value(TextProperty, new_variant, TemplateBind)
  *                 → TextBlock::on_text_changed() → 更新内部文字字段
+ *                 → invalidate_render() → 向上传播脏标志
  *         → set_hint_text(new_hint)        [发出 "hint_text" 通知 → 同上路径]
- *     → render()                           [重绘窗口，将新文字绘制到屏幕]
+ *   输入事件处理完毕 → Application::tick_and_render → win.render() [自动重绘]
  */
 
 #include "CounterWindow.h"
@@ -190,9 +191,8 @@ void CounterWindow::s_on_click_inc(void* /*sender*/,
 {
     auto* self = static_cast<CounterWindow*>(user_data);
     // 执行命令（ViewModel 内部更新属性 → 绑定链自动同步到 UI）
+    // Application::tick_and_render 在输入事件处理完毕后自动重绘，无需手动调用 render()
     self->vm_.increment_cmd_.execute({});
-    // 显式重绘（确保当前帧立即更新；未来框架层应自动调度）
-    self->render();
 }
 
 void CounterWindow::s_on_click_dec(void* /*sender*/,
@@ -201,7 +201,6 @@ void CounterWindow::s_on_click_dec(void* /*sender*/,
 {
     auto* self = static_cast<CounterWindow*>(user_data);
     self->vm_.decrement_cmd_.execute({});
-    self->render();
 }
 
 void CounterWindow::s_on_click_reset(void* /*sender*/,
@@ -210,7 +209,6 @@ void CounterWindow::s_on_click_reset(void* /*sender*/,
 {
     auto* self = static_cast<CounterWindow*>(user_data);
     self->vm_.reset_cmd_.execute({});
-    self->render();
 }
 
 void CounterWindow::s_on_click_quit(void* /*sender*/,
