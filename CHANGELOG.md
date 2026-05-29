@@ -5,6 +5,23 @@
 ## [Unreleased]
 
 ### Added
+- **mine.config：分层配置模块（任务 21）**：
+  实现 `mine.config` 模块，提供三层优先级配置系统（Env > File > Default）：
+  - `ConfigValue`：四种基础值类型（`Null/Bool/Integer/Float/String`），
+    字符串使用 `InlineString` 就地存储（无堆分配 ≤23 字节），
+    `as_xxx()` 精确类型访问，`to_xxx(fallback)` 带类型提升的宽松转换
+  - `ConfigManager`：三层配置管理器（Pimpl + MINE_CONFIG_API），
+    `ConfigLayer`（Default=0/File=1/Env=2）优先级递增，高层覆盖低层；
+    接口：`set_default`/`load_file`/`load_string`/`reload`/`load_env`/
+    `clear_layer`/`clear_all`/`has`/`get`/`which_layer`/`get_bool`/`get_integer`/`get_float`/`get_string`
+  - `JsonParser`（内部）：手写递归下降解析器，嵌套对象展平为点分隔键（`a.b.c`），
+    支持 null/bool/number/string，数组跳过，处理转义序列
+  - `TomlParser`（内部）：逐行扫描解析器，支持注释/节头 `[section]`/键值对/
+    基础字符串（带引号 & 字面字符串）/整数/浮点/布尔
+  - 环境变量加载：前缀过滤 + 下划线转点分隔，Windows 用 `GetEnvironmentStringsA`
+    前向声明（无需 windows.h），POSIX 用 `environ`
+  - 依赖：`mine.core`、`mine.containers`（不依赖 mine.io）
+  - 单测：41 个测试用例 158 个断言，全部通过
 - **mine.nav：路由导航框架（任务 20）**：
   实现 `mine.nav` 模块，提供路由导航所需的所有核心组件：
   - `INavigationService`：导航服务抽象接口，解耦应用层与具体控件，
