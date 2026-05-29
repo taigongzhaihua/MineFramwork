@@ -5,6 +5,27 @@
 ## [Unreleased]
 
 ### Added
+- **mine.logging：日志 sink 模块（任务 23）**：
+  实现 `mine.logging` 模块，同时为 `mine.diag` 添加 `Logger` 日志接口：
+  - **mine.diag::Logger**（新增）：全局日志调度器（Pimpl + MINE_DIAG_API），
+    维护最多 16 个并发 sink（固定数组，无堆分配）；
+    `set_min_level()`：全局最低级别快速过滤（低于此级别不分发）；
+    `add_sink()`：返回注销 token；`remove_sink()`：调用 `destroy_fn` 释放资源；
+    `clear_sinks()`：批量注销所有 sink；`write()`：分发到满足级别条件的 sink；
+    `flush()`：通知所有 sink 刷新缓冲区
+  - **mine.diag::LogSink**（新增）：函数指针描述符（`write_fn/flush_fn/destroy_fn/ctx/min_level`），
+    无虚函数、无 RTTI、无异常
+  - **mine.diag 宏**（新增）：`MINE_LOG(level, cat, msg)` / `MINE_LOGF(level, cat, fmt, ...)` +
+    各级别快捷宏 `MINE_LOG_TRACE/DEBUG/INFO/WARN/ERROR/FATAL` 和 `MINE_LOGF_*`
+  - **mine.logging::ConsoleSink**：彩色控制台 sink；
+    ANSI 颜色（Trace=灰/Debug=青/Info=绿/Warn=黄/Error=红/Fatal=洋红）；
+    `use_stderr_for_warn`：Warn 及以上输出到 stderr；`use_color`：可禁用颜色
+  - **mine.logging::FileSink**：文件 sink（C 标准库 `FILE*`，不依赖 mine.io）；
+    `append/overwrite` 两种模式；`auto_flush`：每条日志后可选立即 fflush；
+    `max_bytes`：最大写入字节数限制（超出后静默丢弃，0=无限制）
+  - 输出格式：`[YYYY-MM-DD HH:MM:SS] [LEVEL] [category] message\n`
+  - 依赖：`mine.diag` → `mine.core`；`mine.logging` → `mine.diag` + `mine.core`
+  - 单测：44 个测试用例 94 个断言，全部通过
 - **mine.localization：本地化模块（任务 22）**：
   实现 `mine.localization` 模块，提供多语言资源字典、运行时语言切换和 `tr()` 翻译查询：
   - `LocalizationManager`：核心管理器（Pimpl + MINE_LOCALIZATION_API），
