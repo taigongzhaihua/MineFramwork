@@ -73,10 +73,11 @@ void CounterWindow::build_(mine::text::FontFace* font)
 
     // ── 主计数显示（绑定到 vm_.count_text）────────────────────────────────────
     //
-    // 初始文字将在 bind_() 中由 BindingExpression 首次求值写入，
-    // 此处设置 fallback 风格（深色背景区域）
+    // 注意：此处不调用 set_text()，因为 set_text() 使用 Local(50) 优先级写入，
+    // 而绑定系统使用 TemplateBind(40) 写入，Local 优先级高会压制绑定更新。
+    // 初始文字由 bind_() 中 attach() 后的首次求值（TemplateBind）写入，
+    // 此时没有 Local 值存在，TemplateBind 可正常生效。
     //
-    count_label_.set_text("当前计数：0");                               // 初始文字（bind 后被覆盖）
     count_label_.set_font_size(42.0f);
     count_label_.set_foreground(paint::Brush::solid_rgb(0xE8EAF6));    // 浅靛蓝文字
     count_label_.set_background(paint::Brush::solid_rgb(0x283593));    // 靛蓝背景
@@ -86,8 +87,8 @@ void CounterWindow::build_(mine::text::FontFace* font)
     body_panel_.add_child(&count_label_);
 
     // ── 提示文字（绑定到 vm_.hint_text）──────────────────────────────────────
+    // 同上：不调用 set_text()，由绑定首次求值写入初始文字。
 
-    hint_label_.set_text("点击下方按钮改变计数");                        // 初始文字（bind 后被覆盖）
     hint_label_.set_font_size(13.0f);
     hint_label_.set_foreground(paint::Brush::solid_rgb(0x9FA8DA));     // 灰蓝色
     hint_label_.set_background(paint::Brush::solid_rgb(0x283593));    // 与计数背景一致
