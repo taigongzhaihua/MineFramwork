@@ -5,6 +5,14 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.controls：Page 基类（任务 17.3）**：
+  新增 `Page : public UserControl`，作为 mine.nav 导航系统的页面单元：
+  - 导航生命周期虚方法（接口先行，由 F3.1 的 Frame 控件调用）：
+    - `on_navigated_to(const Variant& param)`：导航到达时触发，接收导航参数
+    - `on_navigated_from()`：离开页面时触发，用于保存状态/取消异步操作
+    - `on_navigate_away() → bool`：询问是否允许离开，返回 false 可拦截导航（默认 true）
+  - 完全继承 UserControl 的 DataContext、生命周期（on_initialized/on_loaded/on_unloaded）等所有能力
+  - 单测：8 个新 Page 测试用例，全部通过（共 41 测试 88 断言）
 - **mine.ui.controls：UserControl 基类（任务 17.2）**：
   新增 `UserControl : public ContentControl`，作为所有自定义 UI 组件的基类：
   - `DataContextProperty`（DependencyProperty）：MVVM 数据绑定上下文，`affects_measure=false/affects_render=false`，changed 回调通知 `on_data_context_changed`

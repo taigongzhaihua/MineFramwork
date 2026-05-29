@@ -520,3 +520,111 @@ TEST_CASE("controls_UserControl_继承链正确（IS-A ContentControl）")
     // DataContextProperty 是 UserControl 特有的
     CHECK(&UserControl::DataContextProperty != &ContentControl::ContentProperty);
 }
+
+// ============================================================================
+// Page 测试（任务 17.3）
+// ============================================================================
+
+namespace {
+
+/// 测试用 Page 子类：覆盖导航虚函数以记录调用情况
+struct TestPage : public Page {
+    // 记录导航回调调用次数和参数
+    int navigated_to_count{ 0 };
+    int navigated_from_count{ 0 };
+    mine::core::Variant last_navigated_to_param{};
+    bool block_navigate_away{ false };   // true 时拦截导航
+
+    void on_navigated_to(const mine::core::Variant& param) noexcept override {
+        ++navigated_to_count;
+        last_navigated_to_param = param;
+    }
+    void on_navigated_from() noexcept override {
+        ++navigated_from_count;
+    }
+    bool on_navigate_away() noexcept override {
+        return !block_navigate_away;
+    }
+};
+
+/// 验证 Page 基类默认导航行为的包装器（通过子类访问 protected 虚函数）
+struct DefaultPage : public Page {
+    bool call_navigate_away() noexcept { return on_navigate_away(); }
+    void call_navigated_to(const mine::core::Variant& p) noexcept { on_navigated_to(p); }
+    void call_navigated_from() noexcept { on_navigated_from(); }
+};
+
+} // namespace（Page 测试辅助类）
+
+TEST_CASE("controls_Page_默认导航行为_on_navigate_away返回true")
+{
+    DefaultPage page{};
+    // 默认实现：始终允许导航离开
+    CHECK(page.call_navigate_away() == true);
+}
+
+TEST_CASE("controls_Page_on_navigated_to默认为空操作")
+{
+    DefaultPage page{};
+    // 不崩溃即通过（默认空实现）
+    page.call_navigated_to(mine::core::Variant{});
+    page.call_navigated_to(mine::core::Variant{ 42 });
+    CHECK(true);
+}
+
+TEST_CASE("controls_Page_on_navigated_from默认为空操作")
+{
+    DefaultPage page{};
+    // 不崩溃即通过（默认空实现）
+    page.call_navigated_from();
+    CHECK(true);
+}
+
+TEST_CASE("controls_Page_继承链正确（IS-A UserControl）")
+{
+    Page page{};
+    // 编译期验证：Page IS-A UserControl IS-A ContentControl
+    UserControl*    uc = &page;
+    ContentControl* cc = &page;
+    Control*        ct = &page;
+    CHECK(uc != nullptr);
+    CHECK(cc != nullptr);
+    CHECK(ct != nullptr);
+}
+
+TEST_CASE("controls_Page_可被UserControl容器持有")
+{
+    // 验证：空 Page 可作为 UIElement* 内容被 UserControl 持有
+    UserControl container{};
+    Page        page{};
+    container.set_content(&page);
+    CHECK(container.content_element() == &page);
+    CHECK(page.parent() == &container);
+}
+
+TEST_CASE("controls_Page_子类可拦截导航")
+{
+    // 验证：子类覆盖 on_navigate_away() 返回 false 可拦截导航
+    TestPage locked{};
+    locked.block_navigate_away = true;
+    CHECK(locked.on_navigate_away() == false);
+}
+
+TEST_CASE("controls_Page_子类可响应导航参数")
+{
+    // 验证：子类覆盖 on_navigated_to 可接收导航参数
+    TestPage pp{};
+    pp.on_navigated_to(mine::core::Variant{ 99 });
+    CHECK(pp.navigated_to_count == 1);
+    CHECK(pp.last_navigated_to_param.has<int>());
+    CHECK(pp.last_navigated_to_param.get<int>() == 99);
+}
+
+TEST_CASE("controls_Page_DataContext继承自UserControl")
+{
+    Page page{};
+    // Page 继承 UserControl 的 DataContext 接口，不崩溃即通过
+    page.set_data_context(mine::core::Variant{ 123 });
+    CHECK(page.data_context().has<int>());
+    CHECK(page.data_context().get<int>() == 123);
+}
