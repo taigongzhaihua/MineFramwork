@@ -5,6 +5,27 @@
 ## [Unreleased]
 
 ### Added
+- **mine.di：DI/IoC 容器模块（任务 18）**：
+  实现 `mine.di` 依赖注入容器，支持三种服务生命周期管理：
+  - `ServiceCollection`：服务注册器，支持链式调用：
+    - `add_singleton<ISvc, Impl, Deps...>()`：进程级单例（MINE_INJECT 自动发现依赖）
+    - `add_scoped<ISvc, Impl, Deps...>()`：作用域级单例（同 Scope 内共享）
+    - `add_transient<ISvc, Impl, Deps...>()`：每次创建新实例
+    - `add_instance<ISvc>(ptr)`：预注册实例（不拥有所有权）
+    - `add_factory<ISvc>(fn, lifetime)`：用户自定义工厂函数
+    - `add_module<Module>()`：批量注册（`IServiceModule` 接口）
+    - `build()`：消耗注册表，生成 `ServiceProvider`
+  - `ServiceProvider`：服务解析容器（由 `build()` 创建，仅可移动）：
+    - `resolve<T>()`：必须已注册，否则断言失败
+    - `try_resolve<T>()`：未注册返回 nullptr
+    - `create_scope()`：创建子作用域
+  - `Scope`：子作用域（Scoped 服务隔离；Singleton 委托给根 Provider）
+  - `MINE_INJECT(Class, Deps...)` 宏：在类内声明可注入构造函数，配合 `add_singleton<ISvc, Impl>()` 使用
+  - `IServiceModule` 接口：`configure(ServiceCollection&)` 方法，支持模块化批量注册
+  - 无 RTTI，使用 `mine::core::TypeId` 作为类型键
+  - 正确处理多重继承指针偏移（`FactoryResult` 同时持有 service_ptr 和 impl_ptr）
+  - 全部实例按注册逆序析构（LIFO）
+  - 单测：21 个测试用例 44 个断言，全部通过
 - **mine.ui.controls：Page 基类（任务 17.3）**：
   新增 `Page : public UserControl`，作为 mine.nav 导航系统的页面单元：
   - 导航生命周期虚方法（接口先行，由 F3.1 的 Frame 控件调用）：
