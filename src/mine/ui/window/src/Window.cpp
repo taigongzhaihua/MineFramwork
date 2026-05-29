@@ -27,6 +27,8 @@
 #include <mine/paint/Brush.h>
 #include <mine/ui/visual/UIElement.h>
 #include <mine/ui/input/InputRouter.h>
+#include <mine/ui/property/PropertyMetadata.h>
+#include <mine/ui/property/ValuePriority.h>
 #include <mine/core/Memory.h>
 #include <mine/core/Assert.h>
 #include <mine/containers/InlineString.h>
@@ -35,6 +37,25 @@
 #include <cmath>      // std::round
 
 namespace mine::ui {
+
+// ============================================================================
+// 依赖属性静态注册
+// ============================================================================
+
+// DataContext 属性：以 Window 为注册所有者，inherits=true
+// 使得视觉子树中的所有 Visual 能够自动继承窗口级别的 ViewModel
+// changed 回调将新值以 Inherited 优先级写入内容根，
+// Visual::on_property_changed 册中的 inherits 传播逻辑把它推送到整棵子树
+const DependencyProperty& Window::DataContextProperty =
+    register_property<Window>(
+        "DataContext",
+        core::Variant{},          // 默认值：空 Variant（无数据上下文）
+        PropertyMetadata{
+            .affects_measure = false,
+            .affects_render  = false,
+            .inherits        = true,  // Visual 层将自动向子树传播
+            .changed         = &Window::s_on_data_context_changed
+        });
 
 // ============================================================================
 // Impl 内部实现（同时实现 IWindowEventSink）
@@ -356,6 +377,12 @@ void Window::set_content(ui::UIElement* element)
         p_->router_.set_keyboard_focus(element);
     }
 
+    // DataContext 传播：若窗口已有数据上下文，将其以 Inherited 优先级写入内容根
+    // 内容根的 Visual::on_property_changed 将将5176其进一步向下传播到整棵子树
+    if (element != nullptr && data_context().has_value()) {
+        element->set_value(DataContextProperty, data_context(), ValuePriority::Inherited);
+    }
+
     // 仅已初始化且未关闭时才触发立即布局与渲染
     if (p_->is_initialized_ && !p_->is_closed_) {
         const math::Size logical_size = p_->native_window_->size();
@@ -513,6 +540,33 @@ input::InputRouter& Window::input_router() noexcept
 void Window::set_on_input_processed(std::function<void()> fn)
 {
     p_->post_input_fn_ = std::move(fn);
+}
+
+// ── 数据上下文 ───────────────────────────────────────────────────────────────
+
+void Window::set_data_context(const core::Variant& ctx)
+{
+    // Local 优先级写入 DataContextProperty
+    // changed 回调 s_on_data_context_changed 将自动将新值以 Inherited 优先级写入内容根
+    set_value(DataContextProperty, ctx);
+}
+
+const core::Variant& Window::data_context() const noexcept
+{
+    return get_value(DataContextProperty);
+}
+
+void Window::s_on_data_context_changed(DependencyObject*         sender,
+                                       const DependencyProperty& prop,
+                                       const core::Variant&      /*old_v*/,
+                                       const core::Variant&      new_v) noexcept
+{
+    auto* self = static_cast<Window*>(sender);
+    // 将 DataContext 以 Inherited 优先级写入内容根（六个内容根是视觉树入口）
+    // Visual::on_property_changed 尾部的 inherits 传播逻辑将进一步向下推送到整棵子树
+    if (self->p_->content_ != nullptr) {
+        self->p_->content_->set_value(prop, new_v, ValuePriority::Inherited);
+    }
 }
 
 } // namespace mine::ui

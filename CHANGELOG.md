@@ -5,6 +5,21 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.window：Window 接入依赖属性（DP）系统**：
+  `Window` 现在继承 `DependencyObject`，可持有任意依赖属性值：
+  - 新增 `Window::DataContextProperty`（`inherits = true`）：作为窗口级 ViewModel 上下文属性，
+    通过 Visual 层的 inherits 传播机制自动向下扩散到整棵视觉子树
+  - 新增 `set_data_context(ctx)` / `data_context()` 接口
+  - `set_content(element)` 时若已设置 DataContext，自动以 `Inherited` 优先级写入内容根
+  - DataContext 变更回调 `s_on_data_context_changed` 将新值推送到内容根，
+    视觉树通过 `Visual::on_property_changed` 的 inherits 传播机制继续向下
+  - `xmake.lua` 新增对 `mine.ui.property` 的直接依赖声明（原为间接依赖）
+- **mine.ui.visual：实现 inherits=true 依赖属性向下传播**：
+  `Visual::on_property_changed()` 中，当 `prop.metadata().inherits == true` 时，
+  自动以 `ValuePriority::Inherited` 将新值写入所有直接子节点；子节点的
+  `on_property_changed` 递归继续传播，整棵子树无需手动遍历
+
+### Added
 - **samples/01-mvvm-binding：MVVM + 数据绑定计数器演示（任务 28 阶段一）**：
   新增 `samples/01-mvvm-binding/` 示例，以纯 C++ 演示 MVVM 分层与 BindingExpression 工作原理：
   - `CounterViewModel`（头文件）：继承 `ViewModelBase`，使用 `MINE_OBSERVABLE` 宏声明

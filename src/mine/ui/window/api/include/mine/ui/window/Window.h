@@ -33,8 +33,11 @@
 #pragma once
 
 #include <mine/ui/window/Api.h>
+#include <mine/ui/property/DependencyObject.h>
+#include <mine/ui/property/DependencyProperty.h>
 #include <mine/core/StringView.h>
 #include <mine/core/Pimpl.h>
+#include <mine/core/Variant.h>
 #include <mine/math/Size.h>
 #include <mine/math/Rect.h>
 
@@ -71,8 +74,20 @@ namespace mine::ui {
  *   auto* win = application->create_window(desc);  // 立即初始化
  * @endcode
  */
-class MINE_UI_WINDOW_API Window {
+class MINE_UI_WINDOW_API Window : public DependencyObject {
 public:
+    // ── 依赖属性 ─────────────────────────────────────────────────────────────
+
+    /**
+     * @brief 窗口数据上下文属性（Variant 存储 ViewModel 指针或值）。
+     *
+     * MVVM 绑定时，绑定表达式从此属性解析 ViewModel。
+     * inherits = true：属性变更时通过视觉子树自动向下传播（Inherited 优先级），
+     * 子控件无需手动设置 DataContext，即可自动继承窗口级 ViewModel。
+     * 默认值为空 Variant（无数据上下文）。
+     */
+    static const DependencyProperty& DataContextProperty;
+
     /**
      * @brief 无参构造（pending 状态）。
      *
@@ -107,6 +122,24 @@ public:
      * DemoWindowBase 等生成类的析构体第一句调用 close()，基类析构时已是 no-op。
      */
     virtual ~Window();
+
+    // ── 数据上下文接口 ────────────────────────────────────────────────────────
+
+    /**
+     * @brief 设置窗口数据上下文（以 Local 优先级写入 DataContextProperty）。
+     *
+     * 若当前已有内容根（content() != nullptr），DataContext 变更回调会立即
+     * 以 Inherited 优先级将新值写入内容根，视觉子树的 inherits=true 传播
+     * 机制随后将其向下推送到整棵子树。
+     *
+     * @param ctx 上下文值（通常是 INotifyPropertyChanged* 包装为 Variant<void*>）
+     */
+    void set_data_context(const core::Variant& ctx);
+
+    /**
+     * @brief 返回当前数据上下文（DataContextProperty 的生效值）。
+     */
+    [[nodiscard]] const core::Variant& data_context() const noexcept;
 
     // ── 内容根 ───────────────────────────────────────────────────────────────
 
@@ -233,6 +266,17 @@ public:
     void render();
 
 private:
+    /**
+     * @brief DataContextProperty 静态变更回调。
+     *
+     * 在 set_value(DataContextProperty, ...) 触发生效值变更时自动调用。
+     * 负责将新值以 Inherited 优先级写入当前内容根，使视觉子树能够继承。
+     */
+    static void s_on_data_context_changed(DependencyObject*         sender,
+                                          const DependencyProperty& prop,
+                                          const core::Variant&      old_v,
+                                          const core::Variant&      new_v) noexcept;
+
     struct Impl;
     core::Pimpl<Impl> p_;
 };

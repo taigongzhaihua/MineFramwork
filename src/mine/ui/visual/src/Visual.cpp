@@ -350,10 +350,17 @@ void Visual::on_property_changed(const DependencyProperty& prop,
     // 调用基类通知（触发订阅者回调）
     DependencyObject::on_property_changed(prop, old_value, new_value);
 
-    // opacity 需要额外钳制（set_value 写入时已钳制，此处不重复处理）
-    (void)prop;
-    (void)old_value;
-    (void)new_value;
+    // 继承属性（inherits = true）：以 Inherited 优先级向下传播到所有直接子节点。
+    // 子节点收到 set_value 后，其 on_property_changed 会递归继续向下传播，
+    // 形成整棵子树的自动传播，无需手动遍历深层节点。
+    // 如果子节点有本地（Local 及以上优先级）值，生效值不会被 Inherited 覆盖，
+    // 但 Inherited 槽仍会被写入，以备本地值被 clear 后回退。
+    if (prop.metadata().inherits) {
+        const uint32_t n = child_count();
+        for (uint32_t i = 0; i < n; ++i) {
+            child_at(i)->set_value(prop, new_value, ValuePriority::Inherited);
+        }
+    }
 }
 
 // ============================================================================

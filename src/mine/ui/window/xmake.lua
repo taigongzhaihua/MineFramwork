@@ -4,6 +4,7 @@
 --       mine.platform.abi（IWindow / IApplicationHost / IWindowEventSink）
 --       mine.gfx.rhi（IDevice / IQueue / ISwapchain / ITexture）
 --       mine.paint（IRenderer / Canvas / Brush / DisplayList）
+--       mine.ui.property（DependencyObject / DependencyProperty — Window 接入 DP 系统）
 --       mine.ui.visual（UIElement / Visual — 视觉树与渲染树基类）
 --       mine.ui.layout（FrameworkElement — 布局协议）
 --       mine.ui.input（InputRouter — 内置输入路由，自动将鼠标/键盘事件派发到视觉树）
@@ -16,6 +17,7 @@ mine_module("mine.ui.window", {
         "mine.platform.abi",
         "mine.gfx.rhi",
         "mine.paint",
+        "mine.ui.property",    -- DependencyObject / DependencyProperty（Window 继承 DO）
         "mine.ui.visual",
         "mine.ui.layout",
         "mine.ui.input",       -- InputRouter：内置输入路由（set_content 自动连接根节点）
