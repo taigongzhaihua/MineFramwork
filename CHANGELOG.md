@@ -5,6 +5,19 @@
 ## [Unreleased]
 
 ### Added
+- **samples/01-mvvm-binding：MVVM + 数据绑定计数器演示（任务 28 阶段一）**：
+  新增 `samples/01-mvvm-binding/` 示例，以纯 C++ 演示 MVVM 分层与 BindingExpression 工作原理：
+  - `CounterViewModel`（头文件）：继承 `ViewModelBase`，使用 `MINE_OBSERVABLE` 宏声明
+    `count(int)`、`count_text(InlineString)`、`hint_text(InlineString)` 三个可观察属性；
+    通过 `RelayCommand` 封装加一（上限 10）、减一（下限 0）、重置三个操作，
+    并在 `update_display_()` 中同步格式化字符串与命令可执行状态通知
+  - `CounterWindow`（View 层）：继承 `mine::ui::Window`，持有 ViewModel 作为值成员；
+    通过 `BindingExpression::from_inpc(vm_, "count_text")` / `"hint_text"` 订阅 ViewModel 属性变更，
+    自动同步到对应 `TextBlock` 的 `TextProperty`；
+    按钮点击通过静态路由桩调用 ViewModel 命令，View 层不含业务逻辑
+  - 成员声明顺序：`vm_` 先声明（后析构），`count_bind_`/`hint_bind_` 后声明（先析构），
+    保证 `detach()/unsubscribe()` 时 ViewModel 仍存活
+  - 构建：`xmake build sample.01-mvvm-binding`，仅有 C4251/C4275 已知警告，无错误
 - **mine.logging：日志 sink 模块（任务 23）**：
   实现 `mine.logging` 模块，同时为 `mine.diag` 添加 `Logger` 日志接口：
   - **mine.diag::Logger**（新增）：全局日志调度器（Pimpl + MINE_DIAG_API），
