@@ -394,15 +394,16 @@ void Button::on_render(paint::Canvas& canvas)
     // MD3 Ripple 涟漪动画：在背景之上、文字之下绘制涟漪圆
     // elapsed_ms 由 AnimationClock 驱动的 anim_tick_callback 每帧累加
     if (ripple_.active) {
-        constexpr float kRippleDurationMs = 200.0f;  // MD3 Ripple 动画时长
+        // MD3 medium2 = 300ms（md.sys.motion.duration.medium2）
+        constexpr float kRippleDurationMs = 300.0f;
         const float t = ripple_.elapsed_ms / kRippleDurationMs;
         if (t < 1.0f) {
             // 半径：从 0 扩展到按钮对角线的 60%（确保覆盖整个按钮）
             const float max_r = std::sqrt(rect.width  * rect.width
                                         + rect.height * rect.height) * 0.6f;
             const float ripple_r = max_r * t;
-            // alpha：从 0.24 线性淡出到 0（MD3 Ripple 使用 On Primary 颜色）
-            const float alpha = 0.24f * (1.0f - t);
+            // alpha：MD3 Pressed State Layer opacity = 0.12，线性淡出到 0
+            const float alpha = 0.12f * (1.0f - t);
             const math::Vec2 center{
                 rect.x + ripple_.center_x,
                 rect.y + ripple_.center_y,
@@ -567,7 +568,7 @@ bool Button::anim_tick_callback(void* user_data, float dt) noexcept
 
     // ── Ripple 涟漪动画 ─────────────────────────────────────────────────────
     if (self->ripple_.active) {
-        constexpr float kRippleDurationMs = 200.0f;
+        constexpr float kRippleDurationMs = 300.0f;  // MD3 medium2
         self->ripple_.elapsed_ms += dt * 1000.0f;
         if (self->ripple_.elapsed_ms < kRippleDurationMs) {
             any_active = true;
