@@ -5,6 +5,28 @@
 ## [Unreleased]
 
 ### Added
+- **mine.mvvm：MVVM 模式基础模块（任务 19）**：
+  实现 `mine.mvvm` 模块，提供 MVVM 架构所需的核心组件：
+  - `ObservableObject`：属性变更通知基类，实现 `INotifyPropertyChanged`，
+    提供 `set<T>(field, value, name)` 模板（等值不通知）和 `raise(name)` 手动触发，
+    通过 Pimpl 隐藏订阅者列表，不可拷贝/不可移动（避免悬空指针）
+  - `MINE_OBSERVABLE(Type, Name, ...)` 宏：在 `ObservableObject` 子类内一行声明可观察属性，
+    自动生成私有字段、const-ref getter 和 set_ setter（值不变则不触发通知）
+  - `ViewModelBase`：MVVM ViewModel 完整基类（继承 `ObservableObject`），
+    新增六个生命周期虚方法钩子（默认空实现）：
+    `on_initialize()`、`on_navigated_to(param)`、`on_navigated_from()`、
+    `on_appear()`、`on_disappear()`、`on_dispose()`；
+    框架层（mine.nav Frame/Page）通过对应公开方法触发
+  - `ObservableCollectionBase`：集合变更通知非模板基类，实现 `INotifyCollectionChanged`，
+    将订阅者管理移入 .cpp 确保 ABI 稳定，提供 `notify_subscribers()` 供子模板类调用
+  - `ObservableCollection<T>`：带变更通知的动态数组容器（继承 `ObservableCollectionBase`），
+    `add()`、`insert(index,item)`、`remove_at(index)`、`remove(item)`、
+    `replace(index,item)`、`move(from,to)`、`clear()` 均自动触发对应 `CollectionChangedAction` 通知
+  - `CollectionChangedArgs`：集合变更参数（action / new_index / old_index / count）
+  - `INotifyCollectionChanged`：集合变更通知接口（函数指针 + token 订阅模式）
+  - 重导出 `mine.ui.event` 的 `ICommand` / `RelayCommand`，无需额外包含头文件
+  - 依赖：`mine.core`、`mine.containers`、`mine.ui.binding`（INotifyPropertyChanged）、`mine.ui.event`（ICommand）
+  - 单测：22 个测试用例 76 个断言，全部通过
 - **mine.di：DI/IoC 容器模块（任务 18）**：
   实现 `mine.di` 依赖注入容器，支持三种服务生命周期管理：
   - `ServiceCollection`：服务注册器，支持链式调用：
