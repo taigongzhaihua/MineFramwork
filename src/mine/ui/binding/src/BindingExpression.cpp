@@ -339,4 +339,23 @@ bool BindingExpression::is_attached() const noexcept {
     return p_ && p_->target_obj != nullptr;
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// bind_inpc：INPC OneWay 绑定便捷工厂
+// ────────────────────────────────────────────────────────────────────────────
+
+void BindingExpression::bind_inpc(
+    BindingExpression&        out,
+    INotifyPropertyChanged&   src,
+    core::StringView          prop_name,
+    Getter                    getter,
+    DependencyObject&         target,
+    const DependencyProperty& target_prop,
+    BindingMode               mode) noexcept
+{
+    out.getter = std::move(getter);
+    out.deps.push_back(PropertyDependency::from_inpc(src, prop_name));
+    out.mode   = mode;
+    out.attach(target, target_prop);
+}
+
 } // namespace mine::ui

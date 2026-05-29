@@ -46,6 +46,7 @@ namespace mine::ui {
 class DependencyObject;
 class DependencyProperty;
 struct IConverter;
+struct INotifyPropertyChanged;
 
 /**
  * @brief 运行时绑定表达式。
@@ -158,6 +159,36 @@ public:
 
     /// 检查绑定是否已激活（已调用 attach() 且未 detach()）
     [[nodiscard]] bool is_attached() const noexcept;
+
+    // ── 便捷工厂 ─────────────────────────────────────────────────────────────
+
+    /**
+     * @brief 一步建立 INPC → DependencyProperty 的 OneWay 绑定。
+     *
+     * 等价于手动设置 getter/deps/mode 后调用 attach()，但更简洁：
+     * @code
+     *   BindingExpression::bind_inpc(expr,
+     *       vm, "Name",
+     *       [&vm]() noexcept -> core::Variant { return core::Variant{vm.name()}; },
+     *       label, TextBlock::TextProperty);
+     * @endcode
+     *
+     * @param out        待激活的 BindingExpression（须未 attach）
+     * @param src        INotifyPropertyChanged 源对象（生命周期须覆盖 out）
+     * @param prop_name  要监听的属性名（须为字符串字面量或长期存活的字符串）
+     * @param getter     源值求值 lambda
+     * @param target     目标 DependencyObject（生命周期须覆盖 out）
+     * @param target_prop 目标属性描述符
+     * @param mode       绑定方向，默认 OneWay
+     */
+    static void bind_inpc(
+        BindingExpression&        out,
+        INotifyPropertyChanged&   src,
+        core::StringView          prop_name,
+        Getter                    getter,
+        DependencyObject&         target,
+        const DependencyProperty& target_prop,
+        BindingMode               mode = BindingMode::OneWay) noexcept;
 
 private:
     struct Impl;

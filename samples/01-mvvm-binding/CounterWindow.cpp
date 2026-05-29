@@ -166,32 +166,20 @@ void CounterWindow::build_(mine::text::FontFace* font)
 
 void CounterWindow::bind_()
 {
-    // ── 绑定 1：vm_.count_text → count_label_.TextProperty ────────────────────
-    //
-    // getter：每次触发时从 ViewModel 读取 count_text（InlineString），
-    //         包装为 core::Variant 返回给绑定引擎。
-    // deps：  订阅 vm_ 的 "count_text" 属性变更（通过 INotifyPropertyChanged）。
-    // 效果：  vm_.set_count_text(x) → 绑定自动更新 count_label_ 的文字。
-    //
-    count_bind_.getter = [this]() noexcept -> core::Variant {
-        // 从 ViewModel 读取当前 count_text，复制到 Variant（InlineString 可拷贝）
-        return core::Variant{ vm_.count_text() };
-    };
-    count_bind_.deps.push_back(
-        ui::PropertyDependency::from_inpc(vm_, "count_text"));
-    count_bind_.mode = ui::BindingMode::OneWay;
-    // attach：立即求值一次（写入当前值），并开始订阅后续变更
-    count_bind_.attach(count_label_, ui::TextBlock::TextProperty);
+    // INPC → DependencyProperty OneWay 绑定，一次调用完成配置与激活。
+    // 签名：bind_inpc(out, src, prop_name, getter, target, target_prop)
 
-    // ── 绑定 2：vm_.hint_text → hint_label_.TextProperty ─────────────────────
+    // 绑定 1：vm_.count_text → count_label_.TextProperty
+    ui::BindingExpression::bind_inpc(
+        count_bind_, vm_, "count_text",
+        [this]() noexcept -> core::Variant { return core::Variant{ vm_.count_text() }; },
+        count_label_, ui::TextBlock::TextProperty);
 
-    hint_bind_.getter = [this]() noexcept -> core::Variant {
-        return core::Variant{ vm_.hint_text() };
-    };
-    hint_bind_.deps.push_back(
-        ui::PropertyDependency::from_inpc(vm_, "hint_text"));
-    hint_bind_.mode = ui::BindingMode::OneWay;
-    hint_bind_.attach(hint_label_, ui::TextBlock::TextProperty);
+    // 绑定 2：vm_.hint_text → hint_label_.TextProperty
+    ui::BindingExpression::bind_inpc(
+        hint_bind_, vm_, "hint_text",
+        [this]() noexcept -> core::Variant { return core::Variant{ vm_.hint_text() }; },
+        hint_label_, ui::TextBlock::TextProperty);
 }
 
 // ── 事件处理：静态路由桩 ──────────────────────────────────────────────────────
