@@ -18,6 +18,8 @@
 #include <mine/platform/WindowEvent.h>
 #include <mine/platform/WindowDesc.h>
 #include <mine/platform/WindowKind.h>
+#include <mine/platform/WindowChromeDesc.h>
+#include <mine/platform/WindowCornerPreference.h>
 #include <mine/gfx/IDevice.h>
 #include <mine/gfx/IQueue.h>
 #include <mine/gfx/ISwapchain.h>
@@ -55,7 +57,6 @@ const DependencyProperty& Window::DataContextProperty =
             .affects_measure = false,
             .affects_render  = false,
             .inherits        = true,  // Visual 层将自动向子树传播
-            .changed         = &Window::s_on_data_context_changed
         });
 
 // 将 DataContextProperty 描述符注入绑定系统，使得 FrameworkElement::set_binding()
@@ -73,6 +74,64 @@ const DependencyProperty& Window::PaddingProperty =
             .affects_measure = false,
             .affects_render  = false,
             .changed         = &Window::s_on_padding_changed
+        });
+
+// ── 自定义 Chrome DP 属性注册 ──────────────────────────────────────────────────
+
+// IsCustomChrome：是否启用自定义 Chrome（隐藏系统 NC 区域，由应用自绘标题栏）
+// 变更时通过 s_on_chrome_changed 回调将新配置提交到平台层
+const DependencyProperty& Window::IsCustomChromeProperty =
+    register_property<Window, bool>(
+        "IsCustomChrome",
+        false,              // 默认禁用，使用系统标准标题栏
+        PropertyMetadata{
+            .affects_measure = false,
+            .affects_render  = false,
+            .changed         = &Window::s_on_chrome_changed
+        });
+
+// CaptionHeight：可拖拽标题栏区域高度（逻辑像素）
+const DependencyProperty& Window::CaptionHeightProperty =
+    register_property<Window, float>(
+        "CaptionHeight",
+        32.0f,              // 默认 32 逻辑像素，与常见设计系统标题栏高度一致
+        PropertyMetadata{
+            .affects_measure = false,
+            .affects_render  = false,
+            .changed         = &Window::s_on_chrome_changed
+        });
+
+// ResizeBorderThickness：可调整大小的边框厚度（逻辑像素，四边各自独立）
+const DependencyProperty& Window::ResizeBorderThicknessProperty =
+    register_property<Window, math::Thickness>(
+        "ResizeBorderThickness",
+        math::Thickness::uniform(4.0f),  // 默认四边各 4 逻辑像素
+        PropertyMetadata{
+            .affects_measure = false,
+            .affects_render  = false,
+            .changed         = &Window::s_on_chrome_changed
+        });
+
+// CornerPreference：窗口圆角首选项（以 int 存储 WindowCornerPreference 枚举值）
+const DependencyProperty& Window::CornerPreferenceProperty =
+    register_property<Window, int>(
+        "CornerPreference",
+        static_cast<int>(platform::WindowCornerPreference::SystemDefault),
+        PropertyMetadata{
+            .affects_measure = false,
+            .affects_render  = false,
+            .changed         = &Window::s_on_chrome_changed
+        });
+
+// GlassFrameThickness：DWM 玻璃帧延伸厚度（逻辑像素）
+const DependencyProperty& Window::GlassFrameThicknessProperty =
+    register_property<Window, math::Thickness>(
+        "GlassFrameThickness",
+        math::Thickness{},   // 默认全零，不延伸
+        PropertyMetadata{
+            .affects_measure = false,
+            .affects_render  = false,
+            .changed         = &Window::s_on_chrome_changed
         });
 
 // ============================================================================
@@ -453,6 +512,18 @@ void Window::show()
 
         // 通知 Application：安装 tick_and_render 回调、自动设为主窗口（如有必要）
         ctx->on_window_first_show(*this);
+
+        // 若用户在 pending 期间已设置自定义 Chrome 属性，在原生窗口创建后立即应用
+        // （s_on_chrome_changed 在未初始化时为空操作，此处补一次）
+        if (is_custom_chrome()) {
+            platform::WindowChromeDesc chrome{};
+            chrome.enabled                = true;
+            chrome.caption_height         = caption_height();
+            chrome.resize_border_thickness = resize_border_thickness();
+            chrome.corner_preference      = corner_preference();
+            chrome.glass_frame_thickness  = glass_frame_thickness();
+            p_->native_window_->set_chrome(chrome);
+        }
     }
 
     p_->native_window_->show();
@@ -573,27 +644,21 @@ void Window::set_on_input_processed(std::function<void()> fn)
 
 void Window::set_data_context(const core::Variant& ctx)
 {
-    // Local 优先级写入 DataContextProperty
-    // changed 回调 s_on_data_context_changed 将自动将新值以 Inherited 优先级写入内容根
+    // 仅在 Window 自身写入 Local 槽。
+    // 若内容根已存在，再由此处显式把新值推到内容根的 Inherited 槽，
+    // 后续由 Visual::on_property_changed 的 inherits 传播机制递归下发到整棵子树。
+    // 不能把这段逻辑放进 DataContextProperty 的 changed 回调：
+    // 因为该属性会继承到所有子节点，子节点 set_value() 时同样会触发 changed，
+    // 从而把普通 Visual 错误当成 Window 处理，导致访问越界。
     set_value(DataContextProperty, ctx);
+    if (p_->content_ != nullptr) {
+        p_->content_->set_value(DataContextProperty, ctx, ValuePriority::Inherited);
+    }
 }
 
 const core::Variant& Window::data_context() const noexcept
 {
     return get_value(DataContextProperty);
-}
-
-void Window::s_on_data_context_changed(DependencyObject*         sender,
-                                       const DependencyProperty& prop,
-                                       const core::Variant&      /*old_v*/,
-                                       const core::Variant&      new_v) noexcept
-{
-    auto* self = static_cast<Window*>(sender);
-    // 将 DataContext 以 Inherited 优先级写入内容根（六个内容根是视觉树入口）
-    // Visual::on_property_changed 尾部的 inherits 传播逻辑将进一步向下推送到整棵子树
-    if (self->p_->content_ != nullptr) {
-        self->p_->content_->set_value(prop, new_v, ValuePriority::Inherited);
-    }
 }
 
 // ── 内边距 ─────────────────────────────────────────────────────────────────────
@@ -620,6 +685,97 @@ void Window::s_on_padding_changed(DependencyObject*         sender,
         self->p_->run_layout(logical_size);
         self->p_->do_render(logical_size);
     }
+}
+
+// ── 自定义 Chrome 访问器实现 ─────────────────────────────────────────────────
+
+void Window::set_custom_chrome(bool enabled)
+{
+    set_value(IsCustomChromeProperty, core::Variant{enabled});
+}
+
+bool Window::is_custom_chrome() const noexcept
+{
+    const auto& v = get_value(IsCustomChromeProperty);
+    return v.has_value() ? v.get<bool>() : false;
+}
+
+void Window::set_caption_height(float height)
+{
+    set_value(CaptionHeightProperty, core::Variant{height});
+}
+
+float Window::caption_height() const noexcept
+{
+    const auto& v = get_value(CaptionHeightProperty);
+    return v.has_value() ? v.get<float>() : 32.0f;
+}
+
+void Window::set_resize_border_thickness(const math::Thickness& thickness)
+{
+    set_value(ResizeBorderThicknessProperty, core::Variant{thickness});
+}
+
+math::Thickness Window::resize_border_thickness() const noexcept
+{
+    const auto& v = get_value(ResizeBorderThicknessProperty);
+    return v.has_value() ? v.get<math::Thickness>() : math::Thickness::uniform(4.0f);
+}
+
+void Window::set_corner_preference(platform::WindowCornerPreference pref)
+{
+    set_value(CornerPreferenceProperty, core::Variant{static_cast<int>(pref)});
+}
+
+platform::WindowCornerPreference Window::corner_preference() const noexcept
+{
+    const auto& v = get_value(CornerPreferenceProperty);
+    if (v.has_value()) {
+        return static_cast<platform::WindowCornerPreference>(v.get<int>());
+    }
+    return platform::WindowCornerPreference::SystemDefault;
+}
+
+void Window::set_glass_frame_thickness(const math::Thickness& thickness)
+{
+    set_value(GlassFrameThicknessProperty, core::Variant{thickness});
+}
+
+math::Thickness Window::glass_frame_thickness() const noexcept
+{
+    const auto& v = get_value(GlassFrameThicknessProperty);
+    return v.has_value() ? v.get<math::Thickness>() : math::Thickness{};
+}
+
+/**
+ * @brief 所有 Chrome DP 属性的统一变更回调。
+ *
+ * 当任意一个 Chrome 相关属性（IsCustomChrome / CaptionHeight / ResizeBorderThickness /
+ * CornerPreference / GlassFrameThickness）发生变更时，将整个 chrome 配置打包
+ * 为 WindowChromeDesc 并通过 IWindow::set_chrome() 提交到平台层。
+ * 平台层内部调用 DWM API 并触发 WM_NCCALCSIZE 重新计算，全程不涉及平台相关代码。
+ */
+void Window::s_on_chrome_changed(DependencyObject*         sender,
+                                  const DependencyProperty& /*prop*/,
+                                  const core::Variant&      /*old_v*/,
+                                  const core::Variant&      /*new_v*/) noexcept
+{
+    auto* self = static_cast<Window*>(sender);
+    // 仅窗口已初始化且未关闭时向平台层提交
+    if (!self->p_->is_initialized_ || self->p_->is_closed_) {
+        return;
+    }
+
+    // 从 DP 系统读取最新的 Chrome 配置，打包为 WindowChromeDesc
+    platform::WindowChromeDesc chrome{};
+    chrome.enabled               = self->is_custom_chrome();
+    chrome.caption_height        = self->caption_height();
+    chrome.resize_border_thickness = self->resize_border_thickness();
+    chrome.corner_preference     = self->corner_preference();
+    chrome.glass_frame_thickness = self->glass_frame_thickness();
+
+    // 提交到平台层（IWindow::set_chrome 默认空操作，Win32 后端完整实现）
+    self->p_->native_window_->set_chrome(chrome);
 }
 
 } // namespace mine::ui

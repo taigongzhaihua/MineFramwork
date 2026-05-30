@@ -10,6 +10,7 @@
 #include <mine/math/Point.h>
 #include <mine/platform/NativeHandle.h>
 #include <mine/platform/IWindowEventSource.h>
+#include <mine/platform/WindowChromeDesc.h>
 
 namespace mine::platform {
 
@@ -72,6 +73,22 @@ public:
 
     /// 获取事件分发器，用于订阅/取消订阅窗口事件
     [[nodiscard]] virtual IWindowEventSource& events() = 0;
+
+    // ── 自定义 Chrome（可选功能）─────────────────────────────────────────────
+
+    /**
+     * @brief 应用自定义窗口 Chrome 配置。
+     *
+     * 默认实现为空操作（no-op），各平台后端可按需重写：
+     *   - Win32：处理 WM_NCCALCSIZE / WM_NCHITTEST，调用 DWM API
+     *   - macOS：使用 NSWindow 标题栏/透明 API
+     *   - 其他平台：忽略不支持的功能字段
+     *
+     * 窗口创建后可随时调用，立即生效。
+     *
+     * @param chrome 自定义 Chrome 描述符
+     */
+    virtual void set_chrome(const WindowChromeDesc& chrome) {}
 };
 
 } // namespace mine::platform

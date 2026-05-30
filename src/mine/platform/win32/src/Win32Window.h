@@ -7,6 +7,7 @@
 
 #include <mine/platform/IWindow.h>
 #include <mine/platform/WindowDesc.h>
+#include <mine/platform/WindowChromeDesc.h>
 #include "Win32Helpers.h"
 #include "Win32WindowEventSource.h"
 #include "Win32IMEService.h"
@@ -64,6 +65,21 @@ public:
     [[nodiscard]] NativeHandle       native_handle() const override;
     [[nodiscard]] IWindowEventSource& events()        override;
 
+    // ── 自定义 Chrome 实现 ──────────────────────────────────────────────────
+
+    /**
+     * @brief 应用自定义窗口 Chrome 配置（IWindow 接口实现）。
+     *
+     * 具体操作：
+     *   1. 存储 chrome 描述符
+     *   2. 调用 DwmExtendFrameIntoClientArea 配置玻璃帧延伸
+     *   3. 调用 DwmSetWindowAttribute 配置圆角（Windows 11+）
+     *   4. 调用 SetWindowPos(SWP_FRAMECHANGED) 触发 WM_NCCALCSIZE 重新计算
+     *
+     * 当 chrome.enabled = false 时，恢复系统默认行为（重新调用 DefWindowProc 处理 NC 消息）。
+     */
+    void set_chrome(const WindowChromeDesc& chrome) override;
+
     // ── 内部接口（供 Win32ApplicationHost 使用）──────────────────────────────
 
     /// 返回 Win32 HWND
@@ -87,6 +103,25 @@ private:
     LRESULT handle_message(
         HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) noexcept;
 
+    /**
+     * @brief 应用当前 chrome_ 配置到窗口（内部实现，在 HWND 有效时调用）。
+     *
+     * 调用 DWM API 设置玻璃帧和圆角，并通过 SWP_FRAMECHANGED 触发 NC 区域重新计算。
+     */
+    void apply_chrome_() noexcept;
+
+    /**
+     * @brief 处理 WM_NCCALCSIZE 消息：在自定义 Chrome 模式下将客户区扩展至整个窗口区域。
+     * @return 消息处理返回值
+     */
+    LRESULT handle_nccalcsize_(WPARAM wparam, LPARAM lparam) noexcept;
+
+    /**
+     * @brief 处理 WM_NCHITTEST 消息：在自定义 Chrome 模式下提供标题栏/边框命中测试。
+     * @return 命中测试结果（HTCAPTION / HTLEFT 等），或 HTCLIENT
+     */
+    LRESULT handle_nchittest_(LPARAM lparam) noexcept;
+
     /// 获取当前窗口 DPI（系统 API）
     [[nodiscard]] float query_dpi() const noexcept;
 
@@ -103,6 +138,9 @@ private:
     Win32WindowEventSource   event_source_;
     WindowDestroyCallback    on_destroy_;
     Win32IMEService*         ime_service_{nullptr};     ///< IME 服务（弱引用，由宿主持有）
+
+    /// 当前自定义 Chrome 配置（默认 enabled=false，即使用系统标题栏）
+    WindowChromeDesc         chrome_{};
 };
 
 } // namespace mine::platform::win32

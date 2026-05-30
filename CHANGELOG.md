@@ -5,7 +5,32 @@
 ## [Unreleased]
 
 ### Added
-- **mine.mvvm：`MINE_COMMAND` 宏 + mine.ui.controls：Button Command 绑定（WPF 风格命令系统）**：
+- **mine.ui.window / mine.platform.abi / mine.platform.win32：自定义标题栏 WindowChrome DP 属性接口及 Win32 实现**：
+  在 `Window` 类新增 5 个 DependencyProperty，实现 WPF WindowChrome 风格的自定义无边框窗口 API，
+  全部平台相关代码隔离在 `mine.platform.win32`：
+
+  **`Window` 新增 DP 属性（mine.ui.window）**：
+  - `IsCustomChromeProperty`（bool，默认 false）：启用/禁用自定义 Chrome；
+  - `CaptionHeightProperty`（float，默认 32.0f）：可拖拽标题栏区域高度（逻辑像素）；
+  - `ResizeBorderThicknessProperty`（Thickness，默认 4.0f 各边）：resize 热区厚度；
+  - `CornerPreferenceProperty`（WindowCornerPreference，默认 SystemDefault）：窗口圆角策略；
+  - `GlassFrameThicknessProperty`（Thickness，默认全零）：DWM 玻璃帧延伸区域。
+
+  **平台抽象层（mine.platform.abi）**：
+  - 新增 `WindowCornerPreference.h`：跨平台圆角策略枚举（SystemDefault / DoNotRound / Round / RoundSmall）；
+  - 新增 `WindowChromeDesc.h`：Chrome 配置描述符结构体；
+  - `IWindow::set_chrome(const WindowChromeDesc&)`：平台可选虚方法接口，默认空实现。
+
+  **Win32 实现（mine.platform.win32）**：
+  - `Win32Window::set_chrome()`：存储描述符并调用 `apply_chrome_()`；
+  - `Win32Window::apply_chrome_()`：调用 `DwmExtendFrameIntoClientArea`（玻璃帧延伸，含全窗口玻璃模式），
+    `DwmSetWindowAttribute(33)` 设置 Windows 11+ 圆角，`SetWindowPos(SWP_FRAMECHANGED)` 触发重计算；
+  - `WM_NCCALCSIZE`：启用 Chrome 时将客户区扩展到整个窗口（WPF WindowChrome 同款方案），
+    最大化时自动内缩 `SM_CXFRAME + SM_CXPADDEDBORDER` 防止溢出工作区；
+  - `WM_NCHITTEST`：按 CaptionHeight / ResizeBorderThickness 实现自定义命中测试，
+    支持四角拉伸、四边拉伸、标题栏拖拽和客户区透传。
+
+
   通过三层协同，View 层实现零业务路由桩的完整命令绑定：
 
   **`MINE_COMMAND(Name)` 宏**（新建 `Command.h`，`Mvvm.h` 自动导入）：
@@ -34,6 +59,25 @@
   - `CounterWindow`：删除所有业务命令路由桩（`s_on_click_inc/dec/reset`），
     改为 `bind_()` 中三行 `set_binding(CommandProperty, "cmd_name")`；
     仅保留 `s_on_click_quit`（跨层信号，不属于 ViewModel 业务）
+
+### Fixed
+- **mine.gfx.d3d11 / mine.ui.window：修复窗口 resize 时视口尺寸不更新**：
+  - `D3D11Queue::wait_idle()` 不再仅调用 `Flush()`；改为使用可复用的 `D3D11_QUERY_EVENT`
+    精确等待 GPU 执行到命令流尾部
+  - `D3D11Queue::submit()` 在 `ExecuteCommandList()` 返回后立即释放旧
+    `ID3D11CommandList`；避免上一帧命令列表继续持有 swapchain 后缓冲引用，
+    导致 resize 发生在两帧之间时 `ResizeBuffers()` 无法成功
+  - 修复 `Window::handle_resized()` 在交换链 `ResizeBuffers()` 前 GPU 仍持有旧后缓冲引用的风险，
+    避免 resize 失败后 DWM 继续拉伸旧表面，表现为“窗口变大但视口不跟着变化”
+  - 样例链路构建通过，`sample.01-mvvm-binding` 可正常启动
+- **mine.ui.controls / mine.ui.animation：修复 Button 从 Hovered/Pressed/Disabled 回到 Normal 时外观停留在前一状态**：
+  - `Storyboard` 新增显式 `from/to` 注册路径，允许调用方直接提供动画起止值，
+    不再需要通过改写目标属性的 `Local` 槽来喂 `capture_from_values()`
+  - `Button::on_visual_state_changed()` 改为基于 `old_state` 采样当前可见背景；
+    其中 `Disabled` 起始色取渲染期禁用色，而非错误读取当前 `is_enabled_` 后的目标色
+  - Button 背景过渡不再污染 `BackgroundProperty` 的语义 Normal 值，
+    修复 `Pressed→Hovered→Normal` 回到 Pressed 外观、`Normal→Disabled→Normal` 停留在 Disabled 外观的问题
+  - 新增回归测试覆盖 `Normal→Disabled→Normal` 与 `Pressed→Hovered→Normal`
 
 
   通过 `struct Binding` 描述符，`set_binding()` 现可承载 converter/conv_param/fallback 完整配置：

@@ -44,7 +44,7 @@
 #include <functional>
 
 // 前向声明，避免将大型头文件拉入公共接口
-namespace mine::platform   { class IWindow; enum class WindowKind : int; }
+namespace mine::platform   { class IWindow; enum class WindowKind : int; enum class WindowCornerPreference : int; }
 namespace mine::gfx        { class IDevice; class IQueue; }
 namespace mine::paint       { class IRenderer; }
 namespace mine::ui          { class UIElement; }
@@ -102,6 +102,58 @@ public:
      * 变更时自动触发重新布局与渲染（与窗口尺寸变化行为一致）。
      */
     static const DependencyProperty& PaddingProperty;
+
+    // ── 自定义 Chrome 属性（窗口 NC 区域控制，类似 WPF WindowChrome）────────────
+
+    /**
+     * @brief 是否启用自定义 Chrome（bool，默认 false）。
+     *
+     * true 时隐藏系统标题栏/边框，将整个窗口区域（含原 NC 区域）划归客户区，
+     * 由应用自行绘制标题栏内容。同时接管 WM_NCCALCSIZE / WM_NCHITTEST 处理。
+     * false 时恢复系统默认标题栏行为。
+     *
+     * @note 仅对 WindowKind::Normal（WS_OVERLAPPEDWINDOW 风格）有意义；
+     *       Popup / Splash 等无边框窗口无需此属性。
+     */
+    static const DependencyProperty& IsCustomChromeProperty;
+
+    /**
+     * @brief 可拖拽标题栏区域高度（float，逻辑像素，默认 32.0f）。
+     *
+     * IsCustomChrome = true 时，窗口顶部该高度范围内的区域被识别为 HTCAPTION，
+     * 用户可在此处拖拽移动窗口、双击最大化/还原。
+     * 0 表示不提供可拖拽区域，应用须自行调用系统拖拽 API（如 ReleaseCapture + WM_NCLBUTTONDOWN）。
+     */
+    static const DependencyProperty& CaptionHeightProperty;
+
+    /**
+     * @brief 可调整大小的边框厚度（Thickness，逻辑像素，默认四边 4.0f）。
+     *
+     * IsCustomChrome = true 时，窗口四边内侧该厚度范围内的区域被识别为 resize 区域
+     * （HTLEFT / HTTOP / HTRIGHT / HTBOTTOM 及四角）。
+     * 当窗口最大化时此设置自动失效。
+     */
+    static const DependencyProperty& ResizeBorderThicknessProperty;
+
+    /**
+     * @brief 窗口圆角首选项（WindowCornerPreference 枚举值 int，默认 SystemDefault）。
+     *
+     * 由平台层映射到对应系统 API（Windows 11: DWM_WINDOW_CORNER_PREFERENCE）。
+     * 在不支持圆角首选项的旧系统（Windows 10 及以下）上此属性被忽略。
+     */
+    static const DependencyProperty& CornerPreferenceProperty;
+
+    /**
+     * @brief DWM 玻璃帧延伸厚度（Thickness，逻辑像素，默认全零）。
+     *
+     * 将 DWM 毛玻璃半透明帧延伸到客户区对应厚度的范围内。
+     *   - 全为 0（默认）：不延伸，客户区无玻璃效果
+     *   - 正值：向客户区延伸对应宽度
+     *   - 任一边 < 0（如 Thickness::uniform(-1.0f)）：延伸覆盖整个客户区（全窗口玻璃）
+     *
+     * 仅在 DWM 组合开启时生效（Windows 8 以上默认开启）。
+     */
+    static const DependencyProperty& GlassFrameThicknessProperty;
 
     /**
      * @brief 无参构造（pending 状态）。
@@ -172,6 +224,70 @@ public:
      * @brief 返回当前内边距（PaddingProperty 的生效值）。
      */
     [[nodiscard]] math::Thickness padding() const noexcept;
+
+    // ── 自定义 Chrome 访问器 ─────────────────────────────────────────────────
+
+    /**
+     * @brief 启用或禁用自定义 Chrome（以 Local 优先级写入 IsCustomChromeProperty）。
+     *
+     * 变更立即生效：若窗口已初始化，平台层将实时调整 NC 区域处理方式。
+     *
+     * @param enabled true 启用自定义标题栏，false 恢复系统默认标题栏
+     */
+    void set_custom_chrome(bool enabled);
+
+    /**
+     * @brief 返回是否启用自定义 Chrome（IsCustomChromeProperty 的生效值）。
+     */
+    [[nodiscard]] bool is_custom_chrome() const noexcept;
+
+    /**
+     * @brief 设置可拖拽标题栏区域高度（以 Local 优先级写入 CaptionHeightProperty）。
+     *
+     * @param height 逻辑像素高度，通常为 30 ~ 48，默认 32
+     */
+    void set_caption_height(float height);
+
+    /**
+     * @brief 返回当前标题栏可拖拽区域高度（CaptionHeightProperty 的生效值）。
+     */
+    [[nodiscard]] float caption_height() const noexcept;
+
+    /**
+     * @brief 设置可调整大小的边框厚度（以 Local 优先级写入 ResizeBorderThicknessProperty）。
+     *
+     * @param thickness 各边厚度（逻辑像素），通常为 4 ~ 8
+     */
+    void set_resize_border_thickness(const math::Thickness& thickness);
+
+    /**
+     * @brief 返回当前可调整大小边框厚度（ResizeBorderThicknessProperty 的生效值）。
+     */
+    [[nodiscard]] math::Thickness resize_border_thickness() const noexcept;
+
+    /**
+     * @brief 设置窗口圆角首选项（以 Local 优先级写入 CornerPreferenceProperty）。
+     *
+     * @param pref 圆角首选项（SystemDefault / DoNotRound / Round / RoundSmall）
+     */
+    void set_corner_preference(platform::WindowCornerPreference pref);
+
+    /**
+     * @brief 返回当前圆角首选项（CornerPreferenceProperty 的生效值）。
+     */
+    [[nodiscard]] platform::WindowCornerPreference corner_preference() const noexcept;
+
+    /**
+     * @brief 设置 DWM 玻璃帧延伸厚度（以 Local 优先级写入 GlassFrameThicknessProperty）。
+     *
+     * @param thickness 各边延伸厚度（逻辑像素）；任一边 < 0 则为全窗口玻璃模式
+     */
+    void set_glass_frame_thickness(const math::Thickness& thickness);
+
+    /**
+     * @brief 返回当前 DWM 玻璃帧延伸厚度（GlassFrameThicknessProperty 的生效值）。
+     */
+    [[nodiscard]] math::Thickness glass_frame_thickness() const noexcept;
 
     // ── 内容根 ───────────────────────────────────────────────────────────────
 
@@ -299,17 +415,6 @@ public:
 
 private:
     /**
-     * @brief DataContextProperty 静态变更回调。
-     *
-     * 在 set_value(DataContextProperty, ...) 触发生效值变更时自动调用。
-     * 负责将新值以 Inherited 优先级写入当前内容根，使视觉子树能够继承。
-     */
-    static void s_on_data_context_changed(DependencyObject*         sender,
-                                          const DependencyProperty& prop,
-                                          const core::Variant&      old_v,
-                                          const core::Variant&      new_v) noexcept;
-
-    /**
      * @brief PaddingProperty 静态变更回调。
      *
      * 在 set_value(PaddingProperty, ...) 触发生效值变更时自动调用。
@@ -319,6 +424,18 @@ private:
                                      const DependencyProperty& prop,
                                      const core::Variant&      old_v,
                                      const core::Variant&      new_v) noexcept;
+
+    /**
+     * @brief Chrome 相关 DP 属性的统一变更回调。
+     *
+     * 当 IsCustomChromeProperty / CaptionHeightProperty / ResizeBorderThicknessProperty /
+     * CornerPreferenceProperty / GlassFrameThicknessProperty 任一发生变更时调用。
+     * 将整个 Chrome 配置打包为 WindowChromeDesc 并提交到平台层。
+     */
+    static void s_on_chrome_changed(DependencyObject*         sender,
+                                    const DependencyProperty& prop,
+                                    const core::Variant&      old_v,
+                                    const core::Variant&      new_v) noexcept;
 
     struct Impl;
     core::Pimpl<Impl> p_;

@@ -14,6 +14,8 @@
 #include <shellscalingapi.h>
 // 提供 GET_X_LPARAM / GET_Y_LPARAM 鼠标坐标辅助宏
 #include <windowsx.h>
+// DWM（Desktop Window Manager）API：玻璃帧延伸、窗口圆角等
+#include <dwmapi.h>
 
 #include <algorithm>
 #include <cstring>
@@ -259,6 +261,176 @@ IWindowEventSource& Win32Window::events() {
     return event_source_;
 }
 
+// ── 自定义 Chrome 实现 ────────────────────────────────────────────────────────
+
+void Win32Window::set_chrome(const WindowChromeDesc& chrome) {
+    // 存储 chrome 配置，供 WM_NCCALCSIZE / WM_NCHITTEST 使用
+    chrome_ = chrome;
+
+    if (!hwnd_) {
+        // 窗口尚未创建（不应发生，保护性检查）
+        return;
+    }
+
+    // 应用当前配置（调用 DWM API + 触发 NC 区域重新计算）
+    apply_chrome_();
+}
+
+void Win32Window::apply_chrome_() noexcept {
+    if (!hwnd_) {
+        return;
+    }
+
+    if (chrome_.enabled) {
+        // ── 1. 配置 DWM 玻璃帧延伸 ──────────────────────────────────────────
+        // MARGINS 中的值为物理像素；全负值（-1）表示将整个客户区覆盖为玻璃帧
+        const auto& gft = chrome_.glass_frame_thickness;
+        MARGINS margins{};
+        if (gft.left < 0.0f || gft.top < 0.0f ||
+            gft.right < 0.0f || gft.bottom < 0.0f) {
+            // 只要有一边为负值，采用全窗口玻璃模式（-1）
+            margins = {-1, -1, -1, -1};
+        } else {
+            // 将逻辑像素转换为物理像素
+            margins.cxLeftWidth    = static_cast<int>(gft.left   * dpi_ / 96.0f);
+            margins.cxRightWidth   = static_cast<int>(gft.right  * dpi_ / 96.0f);
+            margins.cyTopHeight    = static_cast<int>(gft.top    * dpi_ / 96.0f);
+            margins.cyBottomHeight = static_cast<int>(gft.bottom * dpi_ / 96.0f);
+        }
+        DwmExtendFrameIntoClientArea(hwnd_, &margins);
+
+        // ── 2. 配置窗口圆角（Windows 11+ 支持，旧系统自动跳过）────────────────
+        // DWMWA_WINDOW_CORNER_PREFERENCE = 33（Windows 11 SDK 中定义，旧 SDK 需手动声明）
+        constexpr DWORD kDwmwaCornerPreference = 33;
+        switch (chrome_.corner_preference) {
+        case WindowCornerPreference::DoNotRound: {
+            const DWORD pref = 1u; // DWMWCP_DONOTROUND
+            DwmSetWindowAttribute(hwnd_, kDwmwaCornerPreference, &pref, sizeof(pref));
+            break;
+        }
+        case WindowCornerPreference::Round: {
+            const DWORD pref = 2u; // DWMWCP_ROUND
+            DwmSetWindowAttribute(hwnd_, kDwmwaCornerPreference, &pref, sizeof(pref));
+            break;
+        }
+        case WindowCornerPreference::RoundSmall: {
+            const DWORD pref = 3u; // DWMWCP_ROUNDSMALL
+            DwmSetWindowAttribute(hwnd_, kDwmwaCornerPreference, &pref, sizeof(pref));
+            break;
+        }
+        case WindowCornerPreference::SystemDefault:
+        default:
+            // 不主动调用 API，保留系统默认行为
+            break;
+        }
+    } else {
+        // 禁用自定义 Chrome：撤销 DWM 玻璃帧延伸（设置为零边距）
+        const MARGINS zero_margins{0, 0, 0, 0};
+        DwmExtendFrameIntoClientArea(hwnd_, &zero_margins);
+        // 圆角：恢复系统默认
+        constexpr DWORD kDwmwaCornerPreference = 33;
+        const DWORD default_pref = 0u; // DWMWCP_DEFAULT
+        DwmSetWindowAttribute(hwnd_, kDwmwaCornerPreference, &default_pref, sizeof(default_pref));
+    }
+
+    // ── 3. 触发 WM_NCCALCSIZE 重新计算 NC 区域 ───────────────────────────────
+    // SWP_FRAMECHANGED 告知系统 NC 区域参数已变更，需重新发送 WM_NCCALCSIZE
+    SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                 SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+
+LRESULT Win32Window::handle_nccalcsize_(WPARAM wparam, LPARAM lparam) noexcept {
+    // 仅在自定义 Chrome 启用时干预，否则交由系统默认处理
+    if (!chrome_.enabled) {
+        return DefWindowProcW(hwnd_, WM_NCCALCSIZE, wparam, lparam);
+    }
+
+    if (wparam == TRUE) {
+        // wParam=TRUE：lparam 指向 NCCALCSIZE_PARAMS，系统希望我们填写客户区矩形。
+        // 我们直接返回 0，表示整个窗口区域（包括原系统标题栏）都归客户区使用。
+        // 最大化时 Windows 会将窗口扩展到屏幕之外（隐藏系统边框），
+        // 需将客户区内缩一个系统边框宽度，防止溢出到相邻显示器工作区。
+        if (IsZoomed(hwnd_)) {
+            auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam);
+            // 取 SM_CXFRAME + SM_CXPADDEDBORDER 之和作为最大化边框补偿量
+            const int frame_x = GetSystemMetrics(SM_CXFRAME) +
+                                 GetSystemMetrics(SM_CXPADDEDBORDER);
+            const int frame_y = GetSystemMetrics(SM_CYFRAME) +
+                                 GetSystemMetrics(SM_CXPADDEDBORDER);
+            // 内缩调整：保证最大化后客户区恰好充满工作区
+            params->rgrc[0].left   += frame_x;
+            params->rgrc[0].top    += frame_y;
+            params->rgrc[0].right  -= frame_x;
+            params->rgrc[0].bottom -= frame_y;
+        }
+        return 0;
+    }
+
+    // wParam=FALSE：lparam 指向单个 RECT，直接返回 0 表示整个区域均为客户区
+    return 0;
+}
+
+LRESULT Win32Window::handle_nchittest_(LPARAM lparam) noexcept {
+    // 仅在自定义 Chrome 启用时接管命中测试，否则交由系统默认处理
+    if (!chrome_.enabled) {
+        return DefWindowProcW(hwnd_, WM_NCHITTEST, 0, lparam);
+    }
+
+    // 获取鼠标屏幕坐标（物理像素）
+    POINT pt{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+
+    // 获取窗口屏幕矩形（物理像素）
+    RECT window_rect{};
+    GetWindowRect(hwnd_, &window_rect);
+
+    // 计算鼠标相对于窗口左上角的偏移（物理像素）
+    const int x = pt.x - window_rect.left;
+    const int y = pt.y - window_rect.top;
+    const int w = window_rect.right  - window_rect.left;
+    const int h = window_rect.bottom - window_rect.top;
+
+    // ── resize 边框命中测试（仅非最大化状态）────────────────────────────────
+    // 最大化或不可调整大小时不提供 resize 区域
+    const bool is_maximized = (IsZoomed(hwnd_) != 0);
+    if (!is_maximized) {
+        const auto& rbt = chrome_.resize_border_thickness;
+        // 将逻辑像素边框厚度换算为物理像素
+        const int bx_l = static_cast<int>(rbt.left   * dpi_ / 96.0f);
+        const int bx_r = static_cast<int>(rbt.right  * dpi_ / 96.0f);
+        const int by_t = static_cast<int>(rbt.top    * dpi_ / 96.0f);
+        const int by_b = static_cast<int>(rbt.bottom * dpi_ / 96.0f);
+
+        const bool on_left   = (x >= 0)        && (x < bx_l);
+        const bool on_right  = (x >= w - bx_r) && (x < w);
+        const bool on_top    = (y >= 0)        && (y < by_t);
+        const bool on_bottom = (y >= h - by_b) && (y < h);
+
+        // 四角（对角线 resize）
+        if (on_top    && on_left)  return HTTOPLEFT;
+        if (on_top    && on_right) return HTTOPRIGHT;
+        if (on_bottom && on_left)  return HTBOTTOMLEFT;
+        if (on_bottom && on_right) return HTBOTTOMRIGHT;
+        // 四边（单轴 resize）
+        if (on_top)    return HTTOP;
+        if (on_bottom) return HTBOTTOM;
+        if (on_left)   return HTLEFT;
+        if (on_right)  return HTRIGHT;
+    }
+
+    // ── 标题栏区域命中测试（可拖拽区域）────────────────────────────────────
+    // 从 resize 边框内侧顶部向下 caption_height 范围（逻辑像素换算物理像素）
+    if (chrome_.caption_height > 0.0f) {
+        const int caption_phys = static_cast<int>(chrome_.caption_height * dpi_ / 96.0f);
+        if (y >= 0 && y < caption_phys) {
+            return HTCAPTION;
+        }
+    }
+
+    // 其余区域均为客户区，由应用层自行处理
+    return HTCLIENT;
+}
+
 // ── 内部辅助函数 ──────────────────────────────────────────────────────────────
 
 float Win32Window::query_dpi() const noexcept {
@@ -329,6 +501,16 @@ LRESULT Win32Window::handle_message(
     HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) noexcept {
 
     switch (msg) {
+    // 自定义 Chrome：NC 区域大小计算
+    // 当自定义 Chrome 启用时，将客户区扩展至整个窗口区域（含原系统标题栏）
+    case WM_NCCALCSIZE:
+        return handle_nccalcsize_(wparam, lparam);
+
+    // 自定义 Chrome：NC 区域命中测试
+    // 当自定义 Chrome 启用时，接管标题栏拖拽和边框 resize 区域识别
+    case WM_NCHITTEST:
+        return handle_nchittest_(lparam);
+
     // 擦除背景：填充系统窗口颜色，防止客户区像素未定义（尤其对无边框的 Popup/Splash）。
     // 图形引擎（GFX 层）接管后，应用层可拦截此消息并返回 1 以跳过填充。
     case WM_ERASEBKGND: {
