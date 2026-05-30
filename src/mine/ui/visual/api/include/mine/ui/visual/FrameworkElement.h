@@ -39,6 +39,10 @@
 #include <mine/math/Rect.h>
 #include <mine/math/Size.h>
 #include <mine/ui/property/DependencyProperty.h>
+#include <mine/ui/binding/BindingExpression.h>
+#include <mine/ui/binding/BindingMode.h>
+#include <mine/containers/Vector.h>
+#include <mine/core/StringView.h>
 
 namespace mine::ui {
 
@@ -77,12 +81,43 @@ public:
 
     FrameworkElement(const FrameworkElement&)            = delete;
     FrameworkElement& operator=(const FrameworkElement&) = delete;
-    FrameworkElement(FrameworkElement&&)                 = default;
-    FrameworkElement& operator=(FrameworkElement&&)      = default;
+    // 显式移动构造/赋值：移动后须对每个绑定调用 retarget(*this) 以修复 target_obj 指针
+    FrameworkElement(FrameworkElement&&) noexcept;
+    FrameworkElement& operator=(FrameworkElement&&) noexcept;
 
     // ── 尺寸属性访问 ──────────────────────────────────────────────────────
 
     /// 返回明确指定的宽度，NaN 表示由内容自动决定
+    // ── 绑定 API（WPF 风格）────────────────────────────────────────────────
+
+    /**
+     * @brief WPF 风格：从控件 DataContext 自动解析 ViewModel，按属性名建立绑定。
+     *
+     * 等价于 WPF 的 `element.SetBinding(property, new Binding("PropName"))`。
+     * 绑定生命周期与控件绑定，不需要在外部声明任何 BindingExpression 成员变量。
+     *
+     * 前提条件：
+     *   1. mine.ui.window 已完成静态初始化（DataContextProperty 已注入）
+     *   2. 本元素或其祖先节点已通过 Window::set_data_context() 设置 DataContext
+     *
+     * @param target_prop 目标依赖属性（如 TextBlock::TextProperty）
+     * @param prop_name   ViewModel 属性名（须与 MINE_OBSERVABLE 宏名称完全一致）
+     * @param mode        绑定方向，默认 OneWay
+     */
+    void set_binding(
+        const DependencyProperty& target_prop,
+        core::StringView          prop_name,
+        BindingMode               mode = BindingMode::OneWay) noexcept;
+
+    /**
+     * @brief 清除本元素上已建立的所有绑定（元素析构时自动调用）。
+     *
+     * 手动调用适用于需要整体替换数据源的场景（重新调用 set_data_context + set_binding）。
+     */
+    void clear_all_bindings() noexcept;
+
+    // ── 尺寸属性访问 ──────────────────────────────────────────────────────
+
     [[nodiscard]] float width() const noexcept;
     void set_width(float w);
 
@@ -172,6 +207,15 @@ protected:
      * @param final_rect 内容区域最终矩形（与 bounds_rect() 相同）
      */
     void on_arrange(math::Rect final_rect) override;
+
+private:
+    /**
+     * @brief 本元素持有的所有绑定（内置存储，生命周期与元素绑定）。
+     *
+     * 由 set_binding() 追加；析构或 clear_all_bindings() 时逐一 detach()。
+     * 移动时通过 retarget(*this) 修复各绑定的 target_obj 指针。
+     */
+    containers::Vector<BindingExpression> bindings_;
 };
 
 } // namespace mine::ui

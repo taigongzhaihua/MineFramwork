@@ -12,6 +12,8 @@
 #include <mine/ui/property/DependencyProperty.h>
 #include <mine/core/TypeId.h>
 #include <mine/math/Thickness.h>
+#include <mine/ui/binding/BindingExpression.h>
+#include <mine/ui/binding/BindingMode.h>
 
 #include <algorithm>
 #include <cmath>
@@ -105,6 +107,30 @@ const DependencyProperty& FrameworkElement::VerticalAlignmentProperty =
 
 FrameworkElement::FrameworkElement() = default;
 FrameworkElement::~FrameworkElement() = default;
+
+// 移动构造：移动基类 + bindings_，然后修复所有绑定的 target_obj 指针
+FrameworkElement::FrameworkElement(FrameworkElement&& other) noexcept
+    : UIElement(std::move(other))
+    , bindings_(std::move(other.bindings_))
+{
+    for (auto& be : bindings_) {
+        be.retarget(*this);
+    }
+}
+
+// 移动赋值：先清除自身绑定，再接管 other 的绑定并修复指针
+FrameworkElement& FrameworkElement::operator=(FrameworkElement&& other) noexcept
+{
+    if (this != &other) {
+        clear_all_bindings();
+        UIElement::operator=(std::move(other));
+        bindings_ = std::move(other.bindings_);
+        for (auto& be : bindings_) {
+            be.retarget(*this);
+        }
+    }
+    return *this;
+}
 
 // ============================================================================
 // 属性访问器
@@ -322,6 +348,31 @@ math::Size FrameworkElement::arrange_override(math::Size final_size)
 {
     // 叶子元素默认：直接接受分配尺寸（无子元素需安排）
     return final_size;
+}
+
+// ============================================================================
+// 绑定 API 实现（WPF 风格内置存储）
+// ============================================================================
+
+void FrameworkElement::set_binding(
+    const DependencyProperty& target_prop,
+    core::StringView          prop_name,
+    BindingMode               mode) noexcept
+{
+    // 向内置存储追加一个空 BindingExpression，再激活。
+    // push_back 在此处完成，bind() 内部不会再触发 push_back，故引用安全。
+    bindings_.push_back(BindingExpression{});
+    BindingExpression::bind(bindings_.back(), prop_name, *this, target_prop, mode);
+}
+
+void FrameworkElement::clear_all_bindings() noexcept
+{
+    for (auto& be : bindings_) {
+        if (be.is_attached()) {
+            be.detach();
+        }
+    }
+    bindings_.clear();
 }
 
 } // namespace mine::ui

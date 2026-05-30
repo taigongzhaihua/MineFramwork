@@ -43,6 +43,19 @@
 namespace mine::ui {
 
 // ────────────────────────────────────────────────────────────────────────────
+// 模块级状态：DataContextProperty 注入点
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * @brief 由 mine.ui.window 静态初始化时注入的 DataContextProperty 描述符。
+ *
+ * nullptr 表示未初始化（无 src 的 bind() 重载在此状态下会触发断言）。
+ * 静态变量天然线程安全（写操作发生在 main() 之前的静态初始化阶段，
+ * 读操作在 UI 线程中进行，不存在并发访问）。
+ */
+static const DependencyProperty* s_data_context_prop = nullptr;
+
+// ────────────────────────────────────────────────────────────────────────────
 // Impl：PIMPL 实现结构体
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -382,6 +395,54 @@ void BindingExpression::bind(
     out.deps.push_back(PropertyDependency::from_inpc(src, prop_name));
     out.mode = mode;
     out.attach(target, target_prop);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// register_data_context_property：注入 DataContextProperty 描述符指针
+// ────────────────────────────────────────────────────────────────────────────
+
+void BindingExpression::register_data_context_property(const DependencyProperty* dp) noexcept {
+    s_data_context_prop = dp;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// bind（无 src 重载）：从目标控件的 DataContext 自动解析 INPC 指针
+// ────────────────────────────────────────────────────────────────────────────
+
+void BindingExpression::bind(
+    BindingExpression&        out,
+    core::StringView          prop_name,
+    DependencyObject&         target,
+    const DependencyProperty& target_prop,
+    BindingMode               mode) noexcept
+{
+    // DataContextProperty 描述符须由 mine.ui.window 在静态初始化阶段注入。
+    // 若断言触发，说明 mine.ui.window 未初始化或注入时序有误。
+    MINE_ASSERT_MSG(s_data_context_prop != nullptr,
+        "BindingExpression::bind: DataContextProperty 未注入，"
+        "请确认 mine.ui.window 静态初始化已完成");
+
+    // 从目标控件读取 DataContext 属性值（inherits 机制会自动从 Window 向下传播）
+    core::Variant dc = target.get_value(*s_data_context_prop);
+
+    MINE_ASSERT_MSG(dc.has<INotifyPropertyChanged*>(),
+        "BindingExpression::bind: 目标控件的 DataContext 为空或类型不符，"
+        "请确认已调用 Window::set_data_context()");
+
+    INotifyPropertyChanged& src = *dc.get<INotifyPropertyChanged*>();
+    // 复用带 src 的 bind() 完成实际订阅与激活
+    bind(out, src, prop_name, target, target_prop, mode);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// retarget：修正 Impl::target_obj 指针（供 FrameworkElement 移动时调用）
+// ────────────────────────────────────────────────────────────────────────────
+
+void BindingExpression::retarget(DependencyObject& new_target) noexcept {
+    // 未 attach（p_ 为空）时为空操作
+    if (p_) {
+        p_->target_obj = &new_target;
+    }
 }
 
 } // namespace mine::ui

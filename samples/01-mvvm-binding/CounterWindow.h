@@ -11,20 +11,18 @@
  *   │  vm_               CounterViewModel（ViewModel 层，值成员）              │
  *   │  DataContext       Window::DataContextProperty 持有 &vm_（Variant），    │
  *   │                   inherits=true 自动向整棵视觉子树传播                   │
- *   │  count_bind_       BindingExpression：vm_.count_text → count_label_     │
- *   │  hint_bind_        BindingExpression：vm_.hint_text  → hint_label_       │
+ *   │  count_label_      TextBlock，内置 bindings_ 存储绑定到 count_text       │
+ *   │  hint_label_       TextBlock，内置 bindings_ 存储绑定到 hint_text        │
  *   │                                                                         │
  *   │  用户点击按钮 → s_on_click_* → vm_.xxx_cmd_.execute({})                  │
  *   │                             → ViewModel 更新属性 → 发出通知              │
- *   │                             → BindingExpression 重新求值                │
+ *   │                             → FrameworkElement 内置 binding 重新求值     │
  *   │                             → TextBlock 更新文字                        │
  *   │                             → render() 重绘窗口                         │
  *   └─────────────────────────────────────────────────────────────────────────┘
  *
- * 成员声明顺序的析构安全保证（逆序析构）：
- *   声明顺序：vm_ → UI 元素 → count_bind_/hint_bind_
- *   析构顺序：hint_bind_ → count_bind_ → UI 元素 → vm_
- *   → 绑定先于 ViewModel 析构，unsubscribe 调用时 ViewModel 仍存活
+ * 绑定生命周期由 FrameworkElement 内置 bindings_ 存储管理，
+ * 无需在 Window 层声明任何 BindingExpression 成员变量。
  */
 
 #pragma once
@@ -37,7 +35,6 @@
 #include <mine/ui/controls/TextBlock.h>
 #include <mine/ui/controls/Button.h>
 #include <mine/ui/event/RoutedEventArgs.h>
-#include <mine/ui/binding/Binding.h>
 #include <mine/text/FontFace.h>
 #include <mine/math/Thickness.h>
 #include <mine/math/Color.h>
@@ -82,11 +79,11 @@ public:
 
 private:
     // ────────────────────────────────────────────────────────────────────────────
-    // 成员声明顺序：ViewModel 先声明，绑定后声明。
-    // 析构时逆序：绑定先析构（unsubscribe），ViewModel 后析构（安全）。
+    // 成员声明顺序：ViewModel 先声明，UI 元素后声明。
+    // 析构时逆序：UI 元素先析构（其内置 bindings_ 自动 detach），ViewModel 后析构。
     // ────────────────────────────────────────────────────────────────────────────
 
-    /// ViewModel（先声明，后析构；必须早于绑定对象存活）
+    /// ViewModel（先声明，后析构；元素析构时 ViewModel 仍存活，unsubscribe 安全）
     CounterViewModel vm_;
 
     // ── UI 元素（构成视觉树，由 build_() 组装）──────────────────────────────
@@ -101,13 +98,6 @@ private:
     mine::ui::Button     btn_reset_;        ///< [重置] 按钮 → vm_.reset_cmd_
     mine::ui::Button     btn_quit_;         ///< [退出] 按钮 → 触发关闭信号
 
-    // ── 绑定表达式（后声明，先析构；保证 unsubscribe 时 vm_ 仍存活）──────────
-
-    /// 绑定 vm_.count_text → count_label_.TextProperty（OneWay）
-    mine::ui::BindingExpression count_bind_;
-    /// 绑定 vm_.hint_text → hint_label_.TextProperty（OneWay）
-    mine::ui::BindingExpression hint_bind_;
-
     /// 关闭请求信号（App 层注册）
     std::function<void()> on_close_requested_;
 
@@ -117,15 +107,15 @@ private:
     void build_(mine::text::FontFace* font);
 
     /**
-     * @brief 激活数据绑定（WPF 风格，按属性名绑定，无需手写 getter lambda）。
+     * @brief 激活数据绑定（WPF 风格 element.set_binding()，零显式 ViewModel 引用）。
      *
-     * 使用 BindingExpression::bind(out, src, prop_name, target, target_prop)：
-     *   count_bind_: vm_ "count_text" → count_label_ TextProperty
-     *   hint_bind_:  vm_ "hint_text"  → hint_label_ TextProperty
+     * 等价于 WPF 的：
+     *   count_label_.SetBinding(TextProperty, new Binding("count_text"));
      *
-     * 内部通过 INotifyPropertyChanged::get_property(name) 反射读取属性值；
-     * ObservableObject 经 MINE_OBSERVABLE 宏在构造时自动注册了每个属性的 getter。
-     * attach() 后立即求值一次写入初始值，后续 ViewModel 属性变更时自动触发。
+     * 内部自动从控件 DataContext（由 Window::set_data_context() + inherits 机制传播）
+     * 解析 INotifyPropertyChanged 指针，按属性名建立订阅。
+     * 绑定生命周期由 FrameworkElement::bindings_ 内置存储管理，
+     * 不需要在外部声明任何 BindingExpression 成员变量。
      */
     void bind_();
 

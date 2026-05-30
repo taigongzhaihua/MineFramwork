@@ -5,6 +5,31 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.visual / mine.ui.binding：`element.set_binding()` — 完全等价 WPF SetBinding 的内置绑定 API**：
+  FrameworkElement 现在持有内置绑定存储，View 层无需声明任何 BindingExpression 成员变量：
+  - `FrameworkElement::set_binding(target_prop, prop_name, mode)`（新增）：
+    等价于 WPF 的 `element.SetBinding(prop, new Binding("PropName"))`；
+    从控件自身 DataContext 属性自动解析 `INotifyPropertyChanged*`，
+    按属性名建立订阅，绑定生命周期由 `FrameworkElement::bindings_`（内置 `Vector<BindingExpression>`）管理
+  - `FrameworkElement::clear_all_bindings()`（新增）：批量 detach 并清除所有绑定
+  - `FrameworkElement` 显式 move 构造/赋值（替代 `= default`）：
+    移动后对 `bindings_` 中每个 `BindingExpression` 调用 `retarget(*this)`，
+    确保 `Impl::target_obj` 指向新地址，消除潜在悬空指针
+  - `BindingExpression::bind(out, prop_name, target, target_prop)`（新增无 src 重载）：
+    从 `target.get_value(DataContextProperty)` 读取 `INotifyPropertyChanged*`，
+    再复用带 src 的 `bind()` 完成订阅激活；避免在 `mine.ui.binding` 引入 Window 类型
+  - `BindingExpression::register_data_context_property(dp)`（新增）：
+    DataContextProperty 描述符的注入接口；由 `mine.ui.window` 静态初始化时调用，
+    打破 `mine.ui.binding ← mine.ui.window` 的潜在循环依赖
+  - `BindingExpression::retarget(new_target)`（新增）：
+    修正 `Impl::target_obj` 指针，供 FrameworkElement 移动时调用
+  - `mine.ui.visual/xmake.lua`：新增 `mine.ui.binding` 依赖（无循环：binding 不依赖 visual）
+  - `mine.ui.window/xmake.lua`：新增显式 `mine.ui.binding` 依赖声明
+  - `Window.cpp`：静态初始化阶段注入 DataContextProperty 描述符（匿名命名空间 bool 常量技巧）
+  - `samples/01-mvvm-binding/CounterWindow`：去掉 `count_bind_`/`hint_bind_` 成员，
+    `bind_()` 精简为两行 `element.set_binding()` 调用，零显式 ViewModel 引用
+
+### Added
 - **mine.ui.binding / mine.mvvm：WPF 风格属性名绑定（消除手写 getter lambda）**：
   通过三层协同实现 `BindingExpression::bind()` 工厂，视图层无需编写任何 getter lambda：
   - `INotifyPropertyChanged::get_property(name)`（新增虚方法）：

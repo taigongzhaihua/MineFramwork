@@ -26,10 +26,11 @@
  *   写入内容根，Visual::on_property_changed 递归向下传播到整棵视觉子树。
  *
  * WPF 风格绑定（当前实现）：
- *   bind_() 使用 BindingExpression::bind(out, src, prop_name, target, target_prop)。
- *   内部通过 INotifyPropertyChanged::get_property(name) 按属性名反射读取值；
- *   ObservableObject（经 MINE_OBSERVABLE 宏在构造时自动注册）实现了此接口。
- *   视图层无需编写任何 getter lambda，与 WPF {Binding PropName} 等价。
+ *   bind_() 使用 element.set_binding(target_prop, "prop_name")。
+ *   等价于 WPF 的 element.SetBinding(prop, new Binding("PropName"))。
+ *   DataContext 由 inherits 机制自动传播到子控件，set_binding() 自动从中解析
+ *   INotifyPropertyChanged 指针，按属性名建立订阅，View 层零显式 ViewModel 引用。
+ *   绑定生命周期由 FrameworkElement::bindings_ 内置存储管理，无需外部 BindingExpression 成员。
  */
 
 #include "CounterWindow.h"
@@ -184,20 +185,19 @@ void CounterWindow::build_(mine::text::FontFace* font)
 
 void CounterWindow::bind_()
 {
-    // WPF 风格：按属性名建立绑定，无需手写任何 getter lambda。
-    // 内部实现：BindingExpression::bind() 调用 INotifyPropertyChanged::get_property(name)，
-    // ObservableObject 重写了此方法，MINE_OBSERVABLE 宏在构造时自动注册了每个属性的 getter，
-    // 因此 get_property("count_text") 能正确返回 vm_.count_text() 的当前值。
+    // WPF 风格：完全等价于 WPF 的 element.SetBinding(prop, new Binding("PropName"))。
+    // DataContext 由 Window::set_data_context() 设置，通过 inherits=true 自动传播到子树；
+    // set_binding() 从控件自身的 DataContext 中取出 INotifyPropertyChanged 指针，
+    // 再按属性名建立订阅。View 层无需任何显式 ViewModel 引用，零 getter lambda。
+    //
+    // 绑定生命周期由 FrameworkElement::bindings_ 内置存储管理，
+    // 控件析构时自动 detach()，无需在 Window 层声明 BindingExpression 成员。
 
-    // 绑定 1：vm_.count_text → count_label_.TextProperty
-    ui::BindingExpression::bind(
-        count_bind_, vm_, "count_text",
-        count_label_, ui::TextBlock::TextProperty);
+    // 绑定 1：DataContext["count_text"] → count_label_.TextProperty
+    count_label_.set_binding(ui::TextBlock::TextProperty, "count_text");
 
-    // 绑定 2：vm_.hint_text → hint_label_.TextProperty
-    ui::BindingExpression::bind(
-        hint_bind_, vm_, "hint_text",
-        hint_label_, ui::TextBlock::TextProperty);
+    // 绑定 2：DataContext["hint_text"] → hint_label_.TextProperty
+    hint_label_.set_binding(ui::TextBlock::TextProperty, "hint_text");
 }
 
 // ── 事件处理：静态路由桩 ──────────────────────────────────────────────────────

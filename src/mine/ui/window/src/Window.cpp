@@ -29,6 +29,7 @@
 #include <mine/ui/input/InputRouter.h>
 #include <mine/ui/property/PropertyMetadata.h>
 #include <mine/ui/property/ValuePriority.h>
+#include <mine/ui/binding/BindingExpression.h>
 #include <mine/core/Memory.h>
 #include <mine/core/Assert.h>
 #include <mine/containers/InlineString.h>
@@ -56,6 +57,11 @@ const DependencyProperty& Window::DataContextProperty =
             .inherits        = true,  // Visual 层将自动向子树传播
             .changed         = &Window::s_on_data_context_changed
         });
+
+// 将 DataContextProperty 描述符注入绑定系统，使得 FrameworkElement::set_binding()
+// 在不产生循环依赖的前提下，能自动解析控件的 DataContext 。
+namespace { const bool s_binding_dc_init = (BindingExpression::register_data_context_property(
+    &Window::DataContextProperty), true); }
 
 // 内边距属性：控制内容根相对于窗口客户区的内边距（逻辑像素）
 // 变更时选过 s_on_padding_changed 回调重新驱动布局与渲染

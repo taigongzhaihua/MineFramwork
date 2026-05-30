@@ -18,6 +18,7 @@ mine_module("mine.ui.window", {
         "mine.gfx.rhi",
         "mine.paint",
         "mine.ui.property",    -- DependencyObject / DependencyProperty（Window 继承 DO）
+        "mine.ui.binding",     -- register_data_context_property() 注入：使子控件 set_binding() 可用
         "mine.ui.visual",
         "mine.ui.layout",
         "mine.ui.input",       -- InputRouter：内置输入路由（set_content 自动连接根节点）

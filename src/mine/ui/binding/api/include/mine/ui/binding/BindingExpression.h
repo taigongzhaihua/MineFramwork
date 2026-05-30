@@ -218,6 +218,61 @@ public:
         const DependencyProperty& target_prop,
         BindingMode               mode = BindingMode::OneWay) noexcept;
 
+    /**
+     * @brief WPF 风格：从目标控件的 DataContext 自动解析源，按属性名建立绑定。
+     *
+     * 等价于 WPF 的 `{Binding PropName}` 语法，视图层完全不需要显式引用 ViewModel：
+     * @code
+     *   // 从 label 的 DataContext（由 Window::DataContextProperty inherits 传播而来）
+     *   // 自动取出 INotifyPropertyChanged 指针，再按属性名建立绑定
+     *   BindingExpression::bind(expr, "count", label, TextBlock::TextProperty);
+     * @endcode
+     *
+     * 前提条件：
+     *   1. `register_data_context_property()` 已被调用（由 mine.ui.window 静态初始化时完成）
+     *   2. target 的 DataContextProperty 已持有 `INotifyPropertyChanged*` 值
+     *      （Window::set_data_context() + inherits 传播 会自动完成这一步）
+     *
+     * @param out         待激活的 BindingExpression（须未 attach）
+     * @param prop_name   属性名（须与 MINE_OBSERVABLE 宏的 Name 参数完全一致）
+     * @param target      目标 DependencyObject（其 DataContext 将作为绑定源）
+     * @param target_prop 目标属性描述符
+     * @param mode        绑定方向，默认 OneWay
+     */
+    static void bind(
+        BindingExpression&        out,
+        core::StringView          prop_name,
+        DependencyObject&         target,
+        const DependencyProperty& target_prop,
+        BindingMode               mode = BindingMode::OneWay) noexcept;
+
+    /**
+     * @brief 注入 DataContextProperty 描述符（由 mine.ui.window 静态初始化时调用）。
+     *
+     * 将 Window::DataContextProperty 的描述符指针传入 mine.ui.binding 层，
+     * 使无 src 的 bind() 重载能在不产生循环依赖的前提下，
+     * 从目标控件的 DataContext 属性中读取 INotifyPropertyChanged 指针。
+     *
+     * 调用时机：Window.cpp 的静态属性注册块，在 DataContextProperty 初始化之后立即调用。
+     * 无需手动调用，框架自动完成注入。
+     *
+     * @param dp  DataContextProperty 的地址（静态生命周期，存储为裸指针安全）
+     */
+    static void register_data_context_property(const DependencyProperty* dp) noexcept;
+
+    /**
+     * @brief 将绑定的目标对象重定向到新地址（供 FrameworkElement 移动时内部调用）。
+     *
+     * 当包含绑定的 FrameworkElement 被移动构造/赋值后，新对象地址不同于旧地址。
+     * FrameworkElement 的显式移动构造/赋值操作会对每个已 attach 的 BindingExpression
+     * 调用此方法，确保 Impl::target_obj 指向新地址，避免悬空指针。
+     *
+     * 未 attach 状态下调用为空操作。
+     *
+     * @param new_target 新的目标 DependencyObject 地址
+     */
+    void retarget(DependencyObject& new_target) noexcept;
+
 private:
     struct Impl;
     core::Pimpl<Impl> p_;
