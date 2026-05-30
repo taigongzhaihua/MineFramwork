@@ -5,6 +5,29 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.window / mine.platform.abi / mine.platform.win32：`WindowStateProperty` DP 属性——窗口状态 WPF 风格控制**：
+  新增 `Window::WindowStateProperty`（`int`/`WindowState` 枚举，默认 Normal），
+  设置属性即可驱动平台层执行最小化/最大化/还原，无需直接调用任何 Win32 API：
+  - `mine.platform.abi`：新增 `WindowState.h`（`enum class WindowState : int { Normal, Minimized, Maximized }`），
+    `PlatformAbi.h` 伞形头文件新增导出，`IWindow` 增加 `set_state(WindowState)` 和
+    `state() const` 虚方法（默认空实现）
+  - `mine.platform.win32`：`Win32Window::set_state()` 使用 `ShowWindow(SW_MINIMIZE/SW_MAXIMIZE/SW_RESTORE)`；
+    `Win32Window::state()` 使用 `IsIconic/IsZoomed` 判断当前状态
+  - `mine.ui.window`：`Window::WindowStateProperty` DP 注册（int 存储枚举，遵循
+    `CornerPreferenceProperty` 模式）；`set_window_state()` / `window_state()` 访问器；
+    `s_on_state_changed` 变更回调自动调用 `native_window_->set_state()`
+  - `samples/03-custom-chrome`：最小化/最大化按钮改用 `set_window_state()` + `window_state()`，
+    移除对 `ShowWindow` / `IsZoomed` 及 `<windows.h>` 的直接依赖
+
+- **mine.ui.window / mine.platform.abi / mine.platform.win32：`Window::drag()` — WPF DragMove() 等价接口**：
+  新增 `Window::drag()` 公开方法及平台层 `IWindow::begin_drag()` 虚接口，
+  实现鼠标左键在自定义标题栏区域按下时触发系统窗口拖拽：
+  - `IWindow::begin_drag()`：默认空实现，Win32 后端重写为
+    `ReleaseCapture() + PostMessageW(WM_NCLBUTTONDOWN, HTCAPTION)`
+  - `Window::drag()`：检查初始化状态后委托 `native_window_->begin_drag()`；
+    `03-custom-chrome` 示例中 `s_on_drag_mouse_down` 改用此接口，
+    移除对 HWND 的直接访问，实现完全平台无关的拖拽调用
+
 - **samples/03-custom-chrome：新增 WindowChrome 自定义无边框标题栏演示示例**：
   演示 `IsCustomChrome / CaptionHeight / ResizeBorderThickness / CornerPreference` 四个 DP 属性的协同工作：
   - 应用层自绘 48px 标题栏（图标 + 标题文字 + 最小化/最大化/关闭按钮）

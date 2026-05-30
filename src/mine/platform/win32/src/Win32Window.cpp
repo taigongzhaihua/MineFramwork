@@ -287,6 +287,41 @@ void Win32Window::begin_drag() {
     ::PostMessageW(hwnd_, WM_NCLBUTTONDOWN, HTCAPTION, 0);
 }
 
+void Win32Window::set_state(platform::WindowState state) {
+    if (!hwnd_) {
+        return;
+    }
+    switch (state) {
+        case platform::WindowState::Minimized:
+            // 最小化到任务栏（图标化）
+            ::ShowWindow(hwnd_, SW_MINIMIZE);
+            break;
+        case platform::WindowState::Maximized:
+            // 最大化，占满工作区
+            ::ShowWindow(hwnd_, SW_MAXIMIZE);
+            break;
+        case platform::WindowState::Normal:
+            // 还原为正常大小（从最小化或最大化恢复）
+            ::ShowWindow(hwnd_, SW_RESTORE);
+            break;
+    }
+}
+
+platform::WindowState Win32Window::state() const {
+    if (!hwnd_) {
+        return platform::WindowState::Normal;
+    }
+    // IsIconic：窗口是否已最小化（图标化）
+    if (::IsIconic(hwnd_)) {
+        return platform::WindowState::Minimized;
+    }
+    // IsZoomed：窗口是否已最大化
+    if (::IsZoomed(hwnd_)) {
+        return platform::WindowState::Maximized;
+    }
+    return platform::WindowState::Normal;
+}
+
 void Win32Window::apply_chrome_() noexcept {
     if (!hwnd_) {
         return;

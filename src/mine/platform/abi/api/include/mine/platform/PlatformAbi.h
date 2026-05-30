@@ -5,6 +5,7 @@
  * 包含此头文件即可访问 mine.platform.abi 的全部公共接口：
  *   - NativeHandle              — 平台原生窗口句柄
  *   - WindowKind                — 窗口类型枚举
+ *   - WindowState               — 窗口显示状态枚举
  *   - WindowEvent               — 窗口事件数据
  *   - IWindowEventSink          — 事件接收器接口
  *   - IWindowEventSource        — 事件分发器接口
@@ -23,6 +24,7 @@
 #include <mine/platform/ModuleTag.h>
 #include <mine/platform/NativeHandle.h>
 #include <mine/platform/WindowKind.h>
+#include <mine/platform/WindowState.h>
 #include <mine/platform/WindowEvent.h>
 #include <mine/platform/IWindowEventSink.h>
 #include <mine/platform/IWindowEventSource.h>

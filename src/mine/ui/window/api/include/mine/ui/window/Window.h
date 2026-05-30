@@ -44,7 +44,7 @@
 #include <functional>
 
 // 前向声明，避免将大型头文件拉入公共接口
-namespace mine::platform   { class IWindow; enum class WindowKind : int; enum class WindowCornerPreference : int; }
+namespace mine::platform   { class IWindow; enum class WindowKind : int; enum class WindowCornerPreference : int; enum class WindowState : int; }
 namespace mine::gfx        { class IDevice; class IQueue; }
 namespace mine::paint       { class IRenderer; }
 namespace mine::ui          { class UIElement; }
@@ -154,6 +154,18 @@ public:
      * 仅在 DWM 组合开启时生效（Windows 8 以上默认开启）。
      */
     static const DependencyProperty& GlassFrameThicknessProperty;
+
+    // ── 窗口状态 DP ───────────────────────────────────────────────────────────
+
+    /**
+     * @brief 窗口显示状态（WindowState 枚举，以 int 存储，默认 Normal）。
+     *
+     * 通过 set_window_state() 写入此属性即可控制窗口最大化、最小化或还原，
+     * 无需直接调用平台 API，与 WPF 的 Window.WindowState 语义一致。
+     *
+     * 可通过数据绑定驱动（例如 MVVM 视图模型控制窗口状态）。
+     */
+    static const DependencyProperty& WindowStateProperty;
 
     /**
      * @brief 无参构造（pending 状态）。
@@ -310,6 +322,29 @@ public:
      */
     void drag();
 
+    // ── 窗口状态 ─────────────────────────────────────────────────────────────
+
+    /**
+     * @brief 设置窗口显示状态（以 Local 优先级写入 WindowStateProperty）。
+     *
+     * 等价于在 WPF 中设置 Window.WindowState 属性，可通过数据绑定驱动：
+     *   - Normal    → 还原为正常大小
+     *   - Minimized → 最小化到任务栏
+     *   - Maximized → 最大化，占满工作区
+     *
+     * 窗口未初始化时为空操作（show() 之前无原生窗口）。
+     *
+     * @param state 目标窗口状态
+     */
+    void set_window_state(platform::WindowState state);
+
+    /**
+     * @brief 返回窗口当前显示状态（WindowStateProperty 的生效值）。
+     *
+     * @return 当前 WindowState 枚举值
+     */
+    [[nodiscard]] platform::WindowState window_state() const noexcept;
+
     // ── 内容根 ───────────────────────────────────────────────────────────────
 
     /**
@@ -457,6 +492,17 @@ private:
                                     const DependencyProperty& prop,
                                     const core::Variant&      old_v,
                                     const core::Variant&      new_v) noexcept;
+
+    /**
+     * @brief WindowStateProperty 变更回调。
+     *
+     * 当 WindowStateProperty 发生变更时调用，将新状态提交到平台层
+     * （IWindow::set_state()），驱动系统窗口最小化/最大化/还原。
+     */
+    static void s_on_state_changed(DependencyObject*         sender,
+                                   const DependencyProperty& prop,
+                                   const core::Variant&      old_v,
+                                   const core::Variant&      new_v) noexcept;
 
     struct Impl;
     core::Pimpl<Impl> p_;

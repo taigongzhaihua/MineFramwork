@@ -92,6 +92,25 @@ public:
      */
     void begin_drag() override;
 
+    /**
+     * @brief 设置窗口显示状态（IWindow 接口实现）。
+     *
+     * Win32 实现：
+     *   - Minimized → ShowWindow(hwnd_, SW_MINIMIZE)
+     *   - Maximized → ShowWindow(hwnd_, SW_MAXIMIZE)
+     *   - Normal    → ShowWindow(hwnd_, SW_RESTORE)
+     *
+     * 仅在 HWND 有效时执行。
+     */
+    void set_state(platform::WindowState state) override;
+
+    /**
+     * @brief 查询窗口当前显示状态（IWindow 接口实现）。
+     *
+     * Win32 实现：IsIconic → Minimized，IsZoomed → Maximized，否则 Normal。
+     */
+    [[nodiscard]] platform::WindowState state() const override;
+
     // ── 内部接口（供 Win32ApplicationHost 使用）──────────────────────────────
 
     /// 返回 Win32 HWND

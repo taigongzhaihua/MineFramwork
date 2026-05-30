@@ -20,6 +20,7 @@
 #include <mine/platform/WindowKind.h>
 #include <mine/platform/WindowChromeDesc.h>
 #include <mine/platform/WindowCornerPreference.h>
+#include <mine/platform/WindowState.h>
 #include <mine/gfx/IDevice.h>
 #include <mine/gfx/IQueue.h>
 #include <mine/gfx/ISwapchain.h>
@@ -132,6 +133,18 @@ const DependencyProperty& Window::GlassFrameThicknessProperty =
             .affects_measure = false,
             .affects_render  = false,
             .changed         = &Window::s_on_chrome_changed
+        });
+
+// WindowStateProperty：窗口显示状态（以 int 存储 WindowState 枚举，默认 Normal）
+// 变更时通过 s_on_state_changed 回调提交到平台层（IWindow::set_state）
+const DependencyProperty& Window::WindowStateProperty =
+    register_property<Window, int>(
+        "WindowState",
+        static_cast<int>(platform::WindowState::Normal),  // 默认正常状态
+        PropertyMetadata{
+            .affects_measure = false,
+            .affects_render  = false,
+            .changed         = &Window::s_on_state_changed
         });
 
 // ============================================================================
@@ -784,6 +797,44 @@ void Window::s_on_chrome_changed(DependencyObject*         sender,
 
     // 提交到平台层（IWindow::set_chrome 默认空操作，Win32 后端完整实现）
     self->p_->native_window_->set_chrome(chrome);
+}
+
+void Window::set_window_state(platform::WindowState state)
+{
+    // 以 Local 优先级写入 WindowStateProperty
+    // 变更回调 s_on_state_changed 将自动调用平台层 set_state()
+    set_value(WindowStateProperty,
+              core::Variant{static_cast<int>(state)},
+              ValuePriority::Local);
+}
+
+platform::WindowState Window::window_state() const noexcept
+{
+    const auto& v = get_value(WindowStateProperty);
+    return v.has_value()
+        ? static_cast<platform::WindowState>(v.get<int>())
+        : platform::WindowState::Normal;
+}
+
+/**
+ * @brief WindowStateProperty 变更回调。
+ *
+ * 当 WindowStateProperty 的生效值改变时，将新状态提交到平台层（IWindow::set_state()）。
+ * 若窗口尚未初始化（show() 未调用）或已关闭，则为空操作。
+ */
+void Window::s_on_state_changed(DependencyObject*         sender,
+                                 const DependencyProperty& /*prop*/,
+                                 const core::Variant&      /*old_v*/,
+                                 const core::Variant&      new_v) noexcept
+{
+    auto* self = static_cast<Window*>(sender);
+    // 仅窗口已初始化且未关闭时向平台层提交
+    if (!self->p_->is_initialized_ || self->p_->is_closed_) {
+        return;
+    }
+    // 从 DP 新值读取目标状态（int 转枚举）
+    const auto target = static_cast<platform::WindowState>(new_v.get<int>());
+    self->p_->native_window_->set_state(target);
 }
 
 } // namespace mine::ui

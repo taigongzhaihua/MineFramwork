@@ -11,6 +11,7 @@
 #include <mine/platform/NativeHandle.h>
 #include <mine/platform/IWindowEventSource.h>
 #include <mine/platform/WindowChromeDesc.h>
+#include <mine/platform/WindowState.h>
 
 namespace mine::platform {
 
@@ -102,6 +103,24 @@ public:
      * 默认实现为空操作（no-op），各平台后端按需重写。
      */
     virtual void begin_drag() {}
-};
+    // ── 窗口状态（可选功能）───────────────────────────────────────────
+
+    /**
+     * @brief 设置窗口显示状态（Normal / Minimized / Maximized）。
+     *
+     * 默认实现为空操作（no-op），各平台后端按需重写。
+     *
+     * @param state 目标状态
+     */
+    virtual void set_state(WindowState state) {}
+
+    /**
+     * @brief 查询窗口当前显示状态。
+     *
+     * 默认实现始终返回 Normal，各平台后端按需重写。
+     *
+     * @return 当前 WindowState 枚举值
+     */
+    [[nodiscard]] virtual WindowState state() const { return WindowState::Normal; }};
 
 } // namespace mine::platform

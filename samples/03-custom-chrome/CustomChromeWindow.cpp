@@ -27,10 +27,8 @@
 
 #include "CustomChromeWindow.h"
 
-#include <windows.h>
-
-#include <mine/platform/IWindow.h>
 #include <mine/platform/WindowCornerPreference.h>
+#include <mine/platform/WindowState.h>
 #include <mine/ui/input/InputEvents.h>
 #include <mine/ui/input/MouseEventArgs.h>
 #include <mine/ui/input/MouseButton.h>
@@ -259,17 +257,19 @@ void CustomChromeWindow::s_on_minimize_click(
     void* /*sender*/, ui::RoutedEventArgs& /*args*/, void* ud)
 {
     auto* self = static_cast<CustomChromeWindow*>(ud);
-    auto hwnd  = static_cast<HWND>(self->native_window().native_handle().ptr);
-    ::ShowWindow(hwnd, SW_MINIMIZE);
+    // 通过 WindowStateProperty DP 最小化，无需直接操作 HWND
+    self->set_window_state(mine::platform::WindowState::Minimized);
 }
 
 void CustomChromeWindow::s_on_maximize_click(
     void* /*sender*/, ui::RoutedEventArgs& /*args*/, void* ud)
 {
     auto* self = static_cast<CustomChromeWindow*>(ud);
-    auto hwnd  = static_cast<HWND>(self->native_window().native_handle().ptr);
-    // IsZoomed 检查当前是否处于最大化状态，据此切换
-    ::ShowWindow(hwnd, ::IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE);
+    // 当前为最大化则还原，否则最大化——通过 DP 切换，无需直接操作 HWND
+    const auto cur = self->window_state();
+    self->set_window_state(cur == mine::platform::WindowState::Maximized
+        ? mine::platform::WindowState::Normal
+        : mine::platform::WindowState::Maximized);
 }
 
 void CustomChromeWindow::s_on_close_click(
