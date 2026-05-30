@@ -18,3 +18,4 @@
 *.VC.db
 *.opendb
 Logs/
+artifacts/

@@ -7,23 +7,24 @@
  *   2. bind_()：数据绑定激活（BindingExpression 配置与 attach）
  *
  * 关键路径（点击 [+1]）：
- *   s_on_click_inc → vm_.increment_cmd_.execute({})
- *     → CounterViewModel::do_increment_()
- *       → set_count(count+1)              [MINE_OBSERVABLE 自动发出 "count" 通知]
- *       → update_display_()
- *         → set_count_text(new_str)        [发出 "count_text" 通知]
- *           → BindingExpression 回调
- *             → count_bind_.re_evaluate()
+ *   Button::raise_click()
+ *     → ICommand::execute(CommandParameterProperty)
+ *       → CounterViewModel::do_increment_()
+ *         → set_count(count+1)              [MINE_OBSERVABLE 自动发出 "count" 通知]
+ *         → update_display_()
+ *           → set_count_text(new_str)       [发出 "count_text" 通知]
+ *             → BindingExpression 回调
  *               → count_label_.set_value(TextProperty, new_variant, TemplateBind)
  *                 → TextBlock::on_text_changed() → 更新内部文字字段
  *                 → invalidate_render() → 向上传播脏标志
- *         → set_hint_text(new_hint)        [发出 "hint_text" 通知 → 同上路径]
+ *           → set_hint_text(new_hint)       [发出 "hint_text" 通知 → 同上路径]
  *   输入事件处理完毕 → Application::tick_and_render → win.render() [自动重绘]
  *
  * DataContext 接入：
  *   build_() 末尾调用 set_data_context(Variant{ &vm_ })，将 ViewModel 指针注入
- *   Window::DataContextProperty（inherits=true），变更回调自动以 Inherited 优先级
- *   写入内容根，Visual::on_property_changed 递归向下传播到整棵视觉子树。
+ *   Window::DataContextProperty（inherits=true）。Window::set_data_context() 先把值写到
+ *   窗口自身，再显式推到内容根的 Inherited 槽，随后由 Visual::on_property_changed()
+ *   递归向下传播到整棵视觉子树。
  *
  * WPF 风格绑定（当前实现）：
  *   bind_() 使用 element.set_binding(target_prop, "prop_name")。
@@ -173,8 +174,8 @@ void CounterWindow::build_(mine::text::FontFace* font)
     set_content(&body_panel_);
 
     // 将 ViewModel 指针注入到窗口的 DataContextProperty（inherits=true）。
-    // Window 的 s_on_data_context_changed 回调会立即以 Inherited 优先级将此值
-    // 写入内容根，Visual::on_property_changed 递归将其传播到整棵视觉子树，
+    // Window::set_data_context() 会立即将此值推到内容根的 Inherited 槽，
+    // Visual::on_property_changed 递归将其传播到整棵视觉子树，
     // 每个子节点的 DataContextProperty 均自动持有该 ViewModel 指针。
     set_data_context(core::Variant{ static_cast<ui::INotifyPropertyChanged*>(&vm_) });
 }
