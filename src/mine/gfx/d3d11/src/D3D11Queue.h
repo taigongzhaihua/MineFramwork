@@ -58,6 +58,8 @@ public:
 private:
     /// 借用的立即上下文引用（生命周期由 D3D11Device 管理）
     ID3D11DeviceContext* immediate_ctx_{nullptr};
+    /// 空闲等待事件查询：插入命令流后，用 GetData 轮询 GPU 是否执行到该点
+    ComPtr<ID3D11Query>  idle_query_;
     QueueType            type_{QueueType::Graphics};
 };
 

@@ -75,6 +75,19 @@ public:
         return d3d11_cmd_list_.Get();
     }
 
+    /**
+     * @brief 释放 end() 生成的原生命令列表对象。
+     *
+     * D3D11Queue::submit() 在 ExecuteCommandList() 返回后立即调用，
+     * 使旧命令列表不再继续持有本帧引用的 RTV / SRV / Buffer 等资源。
+     * 对 swapchain 后缓冲尤其关键：若等到下一帧 begin() 才释放，
+     * 窗口 resize 发生在两帧之间时，ResizeBuffers() 仍可能因为旧命令列表持有
+     * 后缓冲引用而失败。
+     */
+    void release_submitted_command_list() noexcept {
+        d3d11_cmd_list_.Reset();
+    }
+
     /// 判断是否处于录制中（begin() 后 end() 前）
     [[nodiscard]] bool is_recording() const noexcept { return recording_; }
 

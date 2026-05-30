@@ -10,6 +10,28 @@ namespace mine::gfx::d3d11 {
 D3D11Queue::D3D11Queue(ID3D11DeviceContext* immediate_ctx, QueueType type)
     : immediate_ctx_(immediate_ctx)
     , type_(type) {
+
+    if (!immediate_ctx_) {
+        return;
+    }
+
+    // 创建一个可复用的事件查询对象，供 wait_idle() 在需要时插入 GPU 命令流。
+    // 当 GetData 返回 S_OK 时，说明 GPU 已经执行到 End(query) 之前的所有命令。
+    ComPtr<ID3D11Device> device;
+    immediate_ctx_->GetDevice(&device);
+    if (!device) {
+        OutputDebugStringA("[mine.gfx.d3d11] D3D11Queue: GetDevice 失败，wait_idle 将退化为 Flush\n");
+        return;
+    }
+
+    D3D11_QUERY_DESC query_desc{};
+    query_desc.Query     = D3D11_QUERY_EVENT;
+    query_desc.MiscFlags = 0;
+
+    const HRESULT hr = device->CreateQuery(&query_desc, &idle_query_);
+    if (FAILED(hr)) {
+        OutputDebugStringA("[mine.gfx.d3d11] D3D11Queue: CreateQuery 失败，wait_idle 将退化为 Flush\n");
+    }
 }
 
 void D3D11Queue::submit(ICommandList* cmd) {
@@ -29,6 +51,11 @@ void D3D11Queue::submit(ICommandList* cmd) {
     // 将延迟上下文生成的命令列表提交到立即上下文执行
     // RestoreContextState=FALSE：不恢复立即上下文状态（性能更优，由调用方显式管理状态）
     immediate_ctx_->ExecuteCommandList(raw_cmd, FALSE);
+
+    // ExecuteCommandList 返回后即可释放命令列表 COM 对象本身；
+    // 若继续保留到下一帧 begin()，它仍可能持有旧后缓冲引用，
+    // 使 swapchain 在窗口 resize 时的 ResizeBuffers() 返回 INVALID_CALL。
+    d3d11_cmd->release_submitted_command_list();
 }
 
 void D3D11Queue::wait_idle() {
@@ -36,12 +63,34 @@ void D3D11Queue::wait_idle() {
         return;
     }
 
-    // D3D11 没有显式的 GPU 等待机制；使用 D3D11_QUERY_EVENT 查询来确认 GPU 完成
-    // 注意：Flush() 只保证命令被驱动接收，不保证 GPU 执行完毕
+    // 没有可用查询对象时退化为 Flush；虽然不能保证 GPU 完成，
+    // 但至少保持与旧实现一致，避免因为创建查询失败而完全失效。
+    if (!idle_query_) {
+        immediate_ctx_->Flush();
+        return;
+    }
+
+    // 将事件查询插入命令流末尾，并主动 Flush，确保驱动尽快开始执行。
+    immediate_ctx_->End(idle_query_.Get());
     immediate_ctx_->Flush();
 
-    // 对于 M0 阶段，Flush() 足以保证交换链 resize 的安全性
-    // 生产环境中应使用 ID3D11Query(D3D11_QUERY_EVENT) 进行更精确的等待
+    // 轮询直到 GPU 执行到该事件点。
+    while (true) {
+        const HRESULT hr = immediate_ctx_->GetData(
+            idle_query_.Get(), nullptr, 0, D3D11_ASYNC_GETDATA_DONOTFLUSH);
+
+        if (hr == S_OK) {
+            return;
+        }
+
+        if (hr != S_FALSE) {
+            OutputDebugStringA("[mine.gfx.d3d11] D3D11Queue::wait_idle: GetData 失败，提前返回\n");
+            return;
+        }
+
+        // 让出时间片，避免忙等占满 CPU。
+        ::Sleep(0);
+    }
 }
 
 } // namespace mine::gfx::d3d11
