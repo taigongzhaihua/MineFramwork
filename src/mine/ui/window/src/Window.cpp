@@ -57,6 +57,18 @@ const DependencyProperty& Window::DataContextProperty =
             .changed         = &Window::s_on_data_context_changed
         });
 
+// 内边距属性：控制内容根相对于窗口客户区的内边距（逻辑像素）
+// 变更时选过 s_on_padding_changed 回调重新驱动布局与渲染
+const DependencyProperty& Window::PaddingProperty =
+    register_property<Window, math::Thickness>(
+        "Padding",
+        math::Thickness{},         // 默认值：四边均为 0（无内边距）
+        PropertyMetadata{
+            .affects_measure = false,
+            .affects_render  = false,
+            .changed         = &Window::s_on_padding_changed
+        });
+
 // ============================================================================
 // Impl 内部实现（同时实现 IWindowEventSink）
 // ============================================================================
@@ -84,6 +96,9 @@ struct Window::Impl : public platform::IWindowEventSink {
     bool is_initialized_{false};
 
     // ── 非拥有指针（初始化后由外部管理生命周期）────────────────────────────────
+
+    /// 拥有此 Impl 的 Window 对象（非拥有，始终有效）
+    Window* owner_{nullptr};
 
     /// 平台原生窗口（生命周期：路径 A 由 owned_native_ 管理，路径 B 由 Application 管理）
     platform::IWindow* native_window_{nullptr};
@@ -300,12 +315,14 @@ struct Window::Impl : public platform::IWindowEventSink {
     {
         if (!content_) return;
 
-        content_->measure(available_logical);
-        content_->arrange(math::Rect{
-            0.0f, 0.0f,
-            available_logical.width,
-            available_logical.height
-        });
+        // 从 Window DP 系统读取 Padding，将客户区收缩为内容区
+        const math::Thickness pad = owner_->padding();
+        const math::Rect content_rect =
+            math::Rect{0.0f, 0.0f, available_logical.width, available_logical.height}
+            .deflated(pad);
+
+        content_->measure(content_rect.size());
+        content_->arrange(content_rect);
     }
 
     // ── 渲染 ─────────────────────────────────────────────────────────────
@@ -353,7 +370,9 @@ struct Window::Impl : public platform::IWindowEventSink {
 /// 无参构造（pending 状态，路径 A）
 Window::Window()
     : p_{ core::make_pimpl<Impl>() }
-{}
+{
+    p_->owner_ = this;
+}
 
 /// 带参构造（立即初始化，路径 B）
 Window::Window(platform::IWindow& native_window,
@@ -361,7 +380,9 @@ Window::Window(platform::IWindow& native_window,
                gfx::IQueue&       queue,
                paint::IRenderer&  renderer)
     : p_{ core::make_pimpl<Impl>(native_window, device, queue, renderer) }
-{}
+{
+    p_->owner_ = this;
+}
 
 Window::~Window() = default;
 
@@ -566,6 +587,32 @@ void Window::s_on_data_context_changed(DependencyObject*         sender,
     // Visual::on_property_changed 尾部的 inherits 传播逻辑将进一步向下推送到整棵子树
     if (self->p_->content_ != nullptr) {
         self->p_->content_->set_value(prop, new_v, ValuePriority::Inherited);
+    }
+}
+
+// ── 内边距 ─────────────────────────────────────────────────────────────────────
+
+void Window::set_padding(const math::Thickness& padding)
+{
+    set_value(PaddingProperty, core::Variant{ padding });
+}
+
+math::Thickness Window::padding() const noexcept
+{
+    return get_value(PaddingProperty).get<math::Thickness>();
+}
+
+void Window::s_on_padding_changed(DependencyObject*         sender,
+                                   const DependencyProperty& /*prop*/,
+                                   const core::Variant&      /*old_v*/,
+                                   const core::Variant&      /*new_v*/) noexcept
+{
+    auto* self = static_cast<Window*>(sender);
+    // Padding 变更后立即重新布局与渲染（与窗口尺寸变化行为一致）
+    if (self->p_->is_initialized_ && !self->p_->is_closed_) {
+        const math::Size logical_size = self->p_->native_window_->size();
+        self->p_->run_layout(logical_size);
+        self->p_->do_render(logical_size);
     }
 }
 

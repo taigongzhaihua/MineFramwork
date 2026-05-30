@@ -89,6 +89,21 @@ public:
     static const DependencyProperty& DataContextProperty;
 
     /**
+     * @brief 窗口内边距属性（四边各自独立，逻辑像素）。
+     *
+     * 控制内容根相对于窗口客户区的内边距。布局时内容根的 measure / arrange
+     * 均在 client_rect.deflated(Padding) 的区域内进行：
+     *
+     *   client_rect (0,0,W,H)
+     *   └─ padding.left/top/right/bottom 向内收缩
+     *       └─ content_rect → 传递给 content_->measure() + arrange()
+     *
+     * 默认值为 Thickness{}（四边均为 0，无内边距）。
+     * 变更时自动触发重新布局与渲染（与窗口尺寸变化行为一致）。
+     */
+    static const DependencyProperty& PaddingProperty;
+
+    /**
      * @brief 无参构造（pending 状态）。
      *
      * 窗口以 pending 状态创建，尚未关联原生窗口和图形资源。
@@ -140,6 +155,23 @@ public:
      * @brief 返回当前数据上下文（DataContextProperty 的生效值）。
      */
     [[nodiscard]] const core::Variant& data_context() const noexcept;
+
+    // ── 内边距接口 ────────────────────────────────────────────────────────────
+
+    /**
+     * @brief 设置窗口内边距（以 Local 优先级写入 PaddingProperty）。
+     *
+     * 窗口已初始化时立即触发重新布局与渲染；
+     * pending 状态下写入 DP 存储，首次 show() 后布局时自动生效。
+     *
+     * @param padding 四边内边距（left/top/right/bottom，逻辑像素，通常 >= 0）
+     */
+    void set_padding(const math::Thickness& padding);
+
+    /**
+     * @brief 返回当前内边距（PaddingProperty 的生效值）。
+     */
+    [[nodiscard]] math::Thickness padding() const noexcept;
 
     // ── 内容根 ───────────────────────────────────────────────────────────────
 
@@ -276,6 +308,17 @@ private:
                                           const DependencyProperty& prop,
                                           const core::Variant&      old_v,
                                           const core::Variant&      new_v) noexcept;
+
+    /**
+     * @brief PaddingProperty 静态变更回调。
+     *
+     * 在 set_value(PaddingProperty, ...) 触发生效值变更时自动调用。
+     * 若窗口已初始化且未关闭，立即驱动重新布局与渲染。
+     */
+    static void s_on_padding_changed(DependencyObject*         sender,
+                                     const DependencyProperty& prop,
+                                     const core::Variant&      old_v,
+                                     const core::Variant&      new_v) noexcept;
 
     struct Impl;
     core::Pimpl<Impl> p_;
