@@ -117,13 +117,15 @@ private:
     void build_(mine::text::FontFace* font);
 
     /**
-     * @brief 激活数据绑定：构造 BindingExpression 并 attach 到目标控件。
+     * @brief 激活数据绑定（WPF 风格，按属性名绑定，无需手写 getter lambda）。
      *
-     * 两条绑定：
-     *   count_bind_: vm_.count_text (INPC "count_text") → count_label_ TextProperty
-     *   hint_bind_:  vm_.hint_text  (INPC "hint_text")  → hint_label_ TextProperty
+     * 使用 BindingExpression::bind(out, src, prop_name, target, target_prop)：
+     *   count_bind_: vm_ "count_text" → count_label_ TextProperty
+     *   hint_bind_:  vm_ "hint_text"  → hint_label_ TextProperty
      *
-     * attach() 后绑定立即求值一次并更新目标，后续 ViewModel 属性变更时自动触发。
+     * 内部通过 INotifyPropertyChanged::get_property(name) 反射读取属性值；
+     * ObservableObject 经 MINE_OBSERVABLE 宏在构造时自动注册了每个属性的 getter。
+     * attach() 后立即求值一次写入初始值，后续 ViewModel 属性变更时自动触发。
      */
     void bind_();
 

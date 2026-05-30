@@ -4,22 +4,24 @@
  *
  * 演示 MVVM 模式的核心要素：
  *   - 继承 ViewModelBase（实现 INotifyPropertyChanged）
- *   - MINE_OBSERVABLE 宏声明可观察属性（自动 getter/setter + 变更通知）
+ *   - MINE_OBSERVABLE 宏声明可观察属性（自动 getter/setter + 变更通知
+ *     + 属性 getter 自动注册到反射表，供 BindingExpression::bind() 按名读取）
  *   - RelayCommand 封装用户操作意图（execute + can_execute + 状态通知）
  *
  * ViewModel 对 View 完全无感知，不引用任何 UI 类型。
- * View 层通过 BindingExpression 订阅 ViewModel 的属性变更，实现数据驱动更新。
+ * View 层通过 BindingExpression::bind() 按属性名建立绑定，实现数据驱动更新。
  *
- * 绑定流程：
- *   vm_.set_count_text(new_text)                     [ViewModel 侧]
+ * 绑定流程（以 count_text 为例）：
+ *   vm_.set_count_text(new_text)                        [ViewModel 侧]
  *     → ObservableObject::raise("count_text")
  *       → INotifyPropertyChanged 订阅者回调
- *         → BindingExpression::re_evaluate()          [绑定层]
- *           → getter() → core::Variant{count_text}
- *             → count_label_.set_value(TextProperty,  [View 侧]
- *                           value, TemplateBind)
- *               → TextBlock::on_text_changed()
- *                 → invalidate_render() → render()
+ *         → BindingExpression::re_evaluate()             [绑定层]
+ *           → src.get_property("count_text")             ← 属性名反射
+ *             → core::Variant{count_text}
+ *               → count_label_.set_value(TextProperty,   [View 侧]
+ *                             value, TemplateBind)
+ *                 → TextBlock::on_text_changed()
+ *                   → invalidate_render() → render()
  */
 
 #pragma once
@@ -50,9 +52,11 @@ public:
     MINE_OBSERVABLE(int, count, 0)
 
     /// 格式化显示文字（绑定到 count_label TextBlock::TextProperty）
+    /// 宏自动注册 getter：get_property("count_text") → Variant{count_text()}
     MINE_OBSERVABLE(mine::containers::InlineString, count_text, "当前计数：0")
 
     /// 操作提示文字（绑定到 hint_label TextBlock::TextProperty）
+    /// 宏自动注册 getter：get_property("hint_text") → Variant{hint_text()}
     MINE_OBSERVABLE(mine::containers::InlineString, hint_text, "点击下方按钮改变计数")
 
     // ── 命令（move-only，须在构造函数初始化列表中完成初始化）──────────────────
