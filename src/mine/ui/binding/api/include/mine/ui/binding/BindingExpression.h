@@ -35,6 +35,7 @@
 
 #include <mine/core/Function.h>
 #include <mine/core/Pimpl.h>
+#include <mine/core/StringView.h>
 #include <mine/core/Variant.h>
 #include <mine/containers/Vector.h>
 #include <mine/ui/binding/Api.h>
@@ -45,8 +46,10 @@ namespace mine::ui {
 
 class DependencyObject;
 class DependencyProperty;
+struct Binding;
 struct IConverter;
 struct INotifyPropertyChanged;
+struct Binding;
 
 /**
  * @brief 运行时绑定表达式。
@@ -102,7 +105,15 @@ public:
     IConverter* converter = nullptr;
 
     /**
-     * @brief 回退值（可选）。
+     * @brief 传递给 converter.convert() 的参数字符串（可选）。
+     *
+     * 须为字符串字面量或长期存活的字符串（attach() 后内部只存储 StringView）。
+     * 如未设置，则传空字符串给 converter。
+     */
+    core::StringView conv_param;
+
+    /**
+     * @brief 回退値（可选）。
      *
      * 当 getter 返回空 Variant（或 converter 返回空 Variant）时，
      * 使用此值写入目标。
@@ -245,6 +256,51 @@ public:
         DependencyObject&         target,
         const DependencyProperty& target_prop,
         BindingMode               mode = BindingMode::OneWay) noexcept;
+
+    /**
+     * @brief WPF 风格：完整 Binding 描述符版，支持 converter/conv_param/fallback。
+     *
+     * 等价于 WPF 的 `element.SetBinding(prop, new Binding("Name") { Converter=..., Mode=... })`。
+     *
+     * @code
+     *   BindingExpression::bind(expr, vm, ui::Binding{
+     *       .prop_name  = "byte_count",
+     *       .converter  = &bytes_to_human_readable,
+     *       .conv_param = "MB",
+     *       .fallback   = core::Variant{ "N/A" },
+     *   }, label, TextBlock::TextProperty);
+     * @endcode
+     *
+     * @param out         待激活的 BindingExpression（须未 attach）
+     * @param src         INotifyPropertyChanged 源对象
+     * @param binding     Binding 描述符（prop_name/mode/converter/conv_param/fallback）
+     * @param target      目标 DependencyObject
+     * @param target_prop 目标属性描述符
+     */
+    static void bind(
+        BindingExpression&        out,
+        INotifyPropertyChanged&   src,
+        const Binding&            binding,
+        DependencyObject&         target,
+        const DependencyProperty& target_prop) noexcept;
+
+    /**
+     * @brief WPF 风格：从 DataContext 自动解析源 + 完整 Binding 描述符版。
+     *
+     * 等价于 `bind(out, prop_name, target, target_prop)` 简化版，
+     * 但支持 converter/conv_param/fallback 完整配置。
+     * 通常通过 FrameworkElement::set_binding(prop, Binding{...}) 调用。
+     *
+     * @param out         待激活的 BindingExpression（须未 attach）
+     * @param binding     Binding 描述符（prop_name/mode/converter/conv_param/fallback）
+     * @param target      目标 DependencyObject（其 DataContext 将作为绑定源）
+     * @param target_prop 目标属性描述符
+     */
+    static void bind(
+        BindingExpression&        out,
+        const Binding&            binding,
+        DependencyObject&         target,
+        const DependencyProperty& target_prop) noexcept;
 
     /**
      * @brief 注入 DataContextProperty 描述符（由 mine.ui.window 静态初始化时调用）。

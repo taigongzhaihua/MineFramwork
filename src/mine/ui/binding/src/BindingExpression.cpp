@@ -30,6 +30,7 @@
 #include <memory>  // std::construct_at / std::destroy_at（间接依赖 Variant.h）
 
 #include <mine/ui/binding/BindingExpression.h>
+#include <mine/ui/binding/BindingConfig.h>
 
 #include <mine/core/Assert.h>
 #include <mine/core/Pimpl.h>
@@ -71,8 +72,9 @@ struct BindingExpression::Impl {
 
     BindingExpression::Getter getter;    ///< 源值求值闭包
     BindingExpression::Setter setter;    ///< 回写闭包（TwoWay，M2 激活）
-    BindingMode               mode     = BindingMode::OneWay;
-    IConverter*               converter = nullptr;
+    BindingMode               mode       = BindingMode::OneWay;
+    IConverter*               converter  = nullptr;
+    core::StringView          conv_param;          ///< 传递给 converter 的参数
     core::Variant             fallback;
 
     // ── 防循环标志（TwoWay 预留，M1.1 始终 false）──────────────────────────
@@ -131,7 +133,7 @@ struct BindingExpression::Impl {
 
         // 若有转换器，进行类型/格式转换
         if (converter && value.has_value()) {
-            value = converter->convert(value, target_prop->value_type(), {});
+            value = converter->convert(value, target_prop->value_type(), conv_param);
         }
 
         // 若结果为空，使用回退值
@@ -195,12 +197,14 @@ BindingExpression::BindingExpression(BindingExpression&& o) noexcept
     , deps{std::move(o.deps)}
     , mode{o.mode}
     , converter{o.converter}
+    , conv_param{o.conv_param}
     , fallback{std::move(o.fallback)}
     , p_{std::move(o.p_)}
 {
     // 清理源对象的配置字段（Impl 已通过 Pimpl 移动，不需要额外处理订阅记录）
-    o.mode      = BindingMode::OneWay;
-    o.converter = nullptr;
+    o.mode       = BindingMode::OneWay;
+    o.converter  = nullptr;
+    o.conv_param = {};
 }
 
 BindingExpression& BindingExpression::operator=(BindingExpression&& o) noexcept {
@@ -213,11 +217,13 @@ BindingExpression& BindingExpression::operator=(BindingExpression&& o) noexcept 
         deps      = std::move(o.deps);
         mode      = o.mode;
         converter = o.converter;
+        conv_param = o.conv_param;
         fallback  = std::move(o.fallback);
         p_        = std::move(o.p_);
 
-        o.mode      = BindingMode::OneWay;
-        o.converter = nullptr;
+        o.mode       = BindingMode::OneWay;
+        o.converter  = nullptr;
+        o.conv_param = {};
     }
     return *this;
 }
@@ -244,7 +250,12 @@ void BindingExpression::attach(
     impl.setter      = std::move(setter);
     impl.mode        = mode;
     impl.converter   = converter;
+    impl.conv_param  = conv_param;
     impl.fallback    = std::move(fallback);
+
+    // 清空已转移的配置字段
+    conv_param  = {};
+    converter   = nullptr;
 
     // ── 步骤 2：预分配订阅记录（保证元素地址稳定，之后不再增长）───────────
 
@@ -432,6 +443,52 @@ void BindingExpression::bind(
     INotifyPropertyChanged& src = *dc.get<INotifyPropertyChanged*>();
     // 复用带 src 的 bind() 完成实际订阅与激活
     bind(out, src, prop_name, target, target_prop, mode);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// bind（有 src + Binding 描述符）：WPF 风格带 converter/conv_param/fallback
+// ────────────────────────────────────────────────────────────────────────────
+
+void BindingExpression::bind(
+    BindingExpression&        out,
+    INotifyPropertyChanged&   src,
+    const Binding&            binding,
+    DependencyObject&         target,
+    const DependencyProperty& target_prop) noexcept
+{
+    out.getter = [&src, prop_name = binding.prop_name]() noexcept -> core::Variant {
+        return src.get_property(prop_name);
+    };
+    out.deps.push_back(PropertyDependency::from_inpc(src, binding.prop_name));
+    out.mode       = binding.mode;
+    out.converter  = binding.converter;
+    out.conv_param = binding.conv_param;
+    out.fallback   = binding.fallback;
+    out.attach(target, target_prop);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// bind（无 src + Binding 描述符）：从 DataContext 自动解析 + 完整描述符
+// ────────────────────────────────────────────────────────────────────────────
+
+void BindingExpression::bind(
+    BindingExpression&        out,
+    const Binding&            binding,
+    DependencyObject&         target,
+    const DependencyProperty& target_prop) noexcept
+{
+    MINE_ASSERT_MSG(s_data_context_prop != nullptr,
+        "BindingExpression::bind: DataContextProperty 未注入，"
+        "请确认 mine.ui.window 静态初始化已完成");
+
+    core::Variant dc = target.get_value(*s_data_context_prop);
+
+    MINE_ASSERT_MSG(dc.has<INotifyPropertyChanged*>(),
+        "BindingExpression::bind: 目标控件的 DataContext 为空或类型不符，"
+        "请确认已调用 Window::set_data_context()");
+
+    INotifyPropertyChanged& src = *dc.get<INotifyPropertyChanged*>();
+    bind(out, src, binding, target, target_prop);
 }
 
 // ────────────────────────────────────────────────────────────────────────────

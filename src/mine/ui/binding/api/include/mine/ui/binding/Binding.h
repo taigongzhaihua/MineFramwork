@@ -13,6 +13,7 @@
 #pragma once
 
 #include <mine/ui/binding/Api.h>
+#include <mine/ui/binding/BindingConfig.h>
 #include <mine/ui/binding/BindingExpression.h>
 #include <mine/ui/binding/BindingMode.h>
 #include <mine/ui/binding/IConverter.h>

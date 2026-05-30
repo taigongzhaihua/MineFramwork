@@ -39,6 +39,7 @@
 #include <mine/math/Rect.h>
 #include <mine/math/Size.h>
 #include <mine/ui/property/DependencyProperty.h>
+#include <mine/ui/binding/BindingConfig.h>
 #include <mine/ui/binding/BindingExpression.h>
 #include <mine/ui/binding/BindingMode.h>
 #include <mine/containers/Vector.h>
@@ -108,6 +109,27 @@ public:
         const DependencyProperty& target_prop,
         core::StringView          prop_name,
         BindingMode               mode = BindingMode::OneWay) noexcept;
+
+    /**
+     * @brief WPF 风格：按 Binding 描述符建立绑定（支持 converter/conv_param/fallback）。
+     *
+     * 等价于 WPF 的 `element.SetBinding(prop, new Binding("Name") { Converter=... })`。
+     * C++20 指定初始化语法：
+     * @code
+     *   label_.set_binding(TextBlock::TextProperty, ui::Binding{
+     *       .prop_name  = "byte_count",
+     *       .converter  = &bytes_to_human_readable,
+     *       .conv_param = "MB",
+     *       .fallback   = core::Variant{ "N/A" },
+     *   });
+     * @endcode
+     *
+     * @param target_prop 目标依赖属性
+     * @param binding     Binding 描述符（prop_name/mode/converter/conv_param/fallback）
+     */
+    void set_binding(
+        const DependencyProperty& target_prop,
+        const Binding&            binding) noexcept;
 
     /**
      * @brief 清除本元素上已建立的所有绑定（元素析构时自动调用）。

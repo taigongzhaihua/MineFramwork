@@ -5,6 +5,24 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.binding / mine.ui.visual：`Binding` 描述符 + `set_binding(prop, Binding{...})` — 完整 WPF SetBinding 等价**：
+  通过 `struct Binding` 描述符，`set_binding()` 现可承载 converter/conv_param/fallback 完整配置：
+  - `BindingConfig.h` 新建：`struct Binding { prop_name, mode, converter, conv_param, fallback }`，
+    等价于 WPF 的 `new Binding("PropName") { Converter=..., Mode=... }`；
+    支持 C++20 指定初始化语法，未设置字段使用合理默认值
+  - `Binding.h` 伞形文件：新增 `#include <mine/ui/binding/BindingConfig.h>`
+  - `BindingExpression`：新增 `conv_param`（`core::StringView`）公开字段；
+    `Impl` 存储 `conv_param`；`re_evaluate()` 将 `conv_param` 传递给 `IConverter::convert()`；
+    move 构造/赋值同步处理 `conv_param`
+  - `BindingExpression::bind(out, src, Binding, target, target_prop)`（新增重载）：
+    有 src 版——从 `Binding` 描述符读取所有配置并激活绑定
+  - `BindingExpression::bind(out, Binding, target, target_prop)`（新增重载）：
+    无 src 版——从 `target.DataContext` 自动解析 `INotifyPropertyChanged*`，再应用描述符
+  - `FrameworkElement::set_binding(target_prop, Binding)`（新增重载）：
+    等价于 WPF 的 `element.SetBinding(prop, new Binding("x") { Converter=&cv, ConvParam="MB" })`；
+    绑定生命周期仍由内置 `bindings_` 管理
+
+### Added
 - **mine.ui.visual / mine.ui.binding：`element.set_binding()` — 完全等价 WPF SetBinding 的内置绑定 API**：
   FrameworkElement 现在持有内置绑定存储，View 层无需声明任何 BindingExpression 成员变量：
   - `FrameworkElement::set_binding(target_prop, prop_name, mode)`（新增）：

@@ -365,6 +365,16 @@ void FrameworkElement::set_binding(
     BindingExpression::bind(bindings_.back(), prop_name, *this, target_prop, mode);
 }
 
+void FrameworkElement::set_binding(
+    const DependencyProperty& target_prop,
+    const Binding&            binding) noexcept
+{
+    // 向内置存储追加一个空 BindingExpression，再激活。
+    // bind() 内部读取 binding 描述符，不再追加，故引用安全。
+    bindings_.push_back(BindingExpression{});
+    BindingExpression::bind(bindings_.back(), binding, *this, target_prop);
+}
+
 void FrameworkElement::clear_all_bindings() noexcept
 {
     for (auto& be : bindings_) {
