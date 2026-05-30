@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <mine/core/StringView.h>
+#include <mine/core/Variant.h>
 #include <mine/ui/binding/Api.h>
 
 namespace mine::ui {
@@ -61,6 +62,23 @@ public:
      * @param token subscribe_property_changed 返回的令牌；无效令牌时为空操作
      */
     virtual void unsubscribe_property_changed(uint32_t token) noexcept = 0;
+
+    /**
+     * @brief 按属性名读取当前值（属性反射接口）。
+     *
+     * 默认实现返回空 Variant。继承自 ObservableObject 的 ViewModel 子类
+     * 通过 MINE_OBSERVABLE 宏自动将每个属性的 getter 注册到内部查找表，
+     * 从而重写此方法而无需手动实现。
+     *
+     * BindingExpression::bind() 在建立绑定时调用此接口，消除了视图层
+     * 手写 getter lambda 的需求（等价于 WPF 的属性名反射绑定机制）。
+     *
+     * @param name 属性名，须与 MINE_OBSERVABLE 宏的 Name 参数完全一致
+     * @return 属性当前值的 Variant 封装；属性未注册时返回空 Variant
+     */
+    [[nodiscard]] virtual core::Variant get_property([[maybe_unused]] core::StringView name) const noexcept {
+        return core::Variant{};
+    }
 };
 
 } // namespace mine::ui

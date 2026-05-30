@@ -28,6 +28,8 @@
 
 #include <utility>
 
+#include <mine/core/Variant.h>
+
 /**
  * @def MINE_OBSERVABLE(Type, Name, ...)
  * @brief 在 ObservableObject 子类内一行声明可观察属性。
@@ -38,17 +40,30 @@
  *
  * 生成成员：
  *   - 私有字段：`mine_prop_<Name>_`（类型为 Type）
+ *   - 私有字段：`mine_reg_<Name>_`（bool 哑元，构造时自动注册 getter）
  *   - 公开 getter：`const Type& <Name>() const noexcept`
  *   - 公开 setter：`void set_<Name>(Type value) noexcept`
  *     setter 通过 ObservableObject::set() 实现，值不变时不触发通知
+ *
+ * 注册机制：
+ *   `mine_reg_<Name>_` 的成员初始化器在对象构造时调用
+ *   ObservableObject::register_property_getter(name, getter)，
+ *   将属性名映射到返回当前值的 lambda，使 get_property(name) 可按名反射读取属性值。
+ *   视图层通过 BindingExpression::bind() 消费此能力，无需手写任何 getter lambda。
  */
-#define MINE_OBSERVABLE(Type, Name, ...)                                          \
-private:                                                                          \
-    Type mine_prop_##Name##_{ __VA_ARGS__ };                                      \
-public:                                                                           \
-    [[nodiscard]] const Type& Name() const noexcept {                             \
-        return mine_prop_##Name##_;                                               \
-    }                                                                             \
-    void set_##Name(Type value) noexcept {                                        \
-        this->template set<Type>(mine_prop_##Name##_, ::std::move(value), #Name); \
+#define MINE_OBSERVABLE(Type, Name, ...)                                               \
+private:                                                                               \
+    Type mine_prop_##Name##_{ __VA_ARGS__ };                                           \
+    /* 构造时自动将属性 getter 注册到 ObservableObject 内部反射表 */                   \
+    bool mine_reg_##Name##_{ (this->register_property_getter(                          \
+        #Name,                                                                         \
+        [this]() noexcept -> mine::core::Variant {                                     \
+            return mine::core::Variant{ mine_prop_##Name##_ };                         \
+        }), true) };                                                                   \
+public:                                                                                \
+    [[nodiscard]] const Type& Name() const noexcept {                                  \
+        return mine_prop_##Name##_;                                                    \
+    }                                                                                  \
+    void set_##Name(Type value) noexcept {                                             \
+        this->template set<Type>(mine_prop_##Name##_, ::std::move(value), #Name);      \
     }

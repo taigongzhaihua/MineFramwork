@@ -24,8 +24,12 @@
  *   build_() 末尾调用 set_data_context(Variant{ &vm_ })，将 ViewModel 指针注入
  *   Window::DataContextProperty（inherits=true），变更回调自动以 Inherited 优先级
  *   写入内容根，Visual::on_property_changed 递归向下传播到整棵视觉子树。
- *   后续绑定 API 扩展完善后，子控件可直接从 DataContext 按属性名建立绑定，
- *   无需视图层手写 getter lambda。
+ *
+ * WPF 风格绑定（当前实现）：
+ *   bind_() 使用 BindingExpression::bind(out, src, prop_name, target, target_prop)。
+ *   内部通过 INotifyPropertyChanged::get_property(name) 按属性名反射读取值；
+ *   ObservableObject（经 MINE_OBSERVABLE 宏在构造时自动注册）实现了此接口。
+ *   视图层无需编写任何 getter lambda，与 WPF {Binding PropName} 等价。
  */
 
 #include "CounterWindow.h"
@@ -173,8 +177,6 @@ void CounterWindow::build_(mine::text::FontFace* font)
     // Window 的 s_on_data_context_changed 回调会立即以 Inherited 优先级将此值
     // 写入内容根，Visual::on_property_changed 递归将其传播到整棵视觉子树，
     // 每个子节点的 DataContextProperty 均自动持有该 ViewModel 指针。
-    // 当前绑定 API 仍需手写 getter lambda；后续 BindingExpression::bind()
-    // 扩展完善后，子控件可直接按属性名从 DataContext 建立绑定，无需此处额外操作。
     set_data_context(core::Variant{ static_cast<ui::INotifyPropertyChanged*>(&vm_) });
 }
 
@@ -182,24 +184,19 @@ void CounterWindow::build_(mine::text::FontFace* font)
 
 void CounterWindow::bind_()
 {
-    // INPC → DependencyProperty OneWay 绑定，一次调用完成配置与激活。
-    // 签名：bind_inpc(out, src, prop_name, getter, target, target_prop)
-    //
-    // vm_ 指针已通过 Window::DataContextProperty（inherits=true）传播到整棵
-    // 视觉子树；此处 getter lambda 直接捕获 vm_ 以保持类型安全（无需运行时向下转型）。
-    // 后续 BindingExpression::bind() 扩展完善后，将可直接从目标控件的 DataContext
-    // 按属性名（"count_text"）建立绑定，彻底消除 getter lambda。
+    // WPF 风格：按属性名建立绑定，无需手写任何 getter lambda。
+    // 内部实现：BindingExpression::bind() 调用 INotifyPropertyChanged::get_property(name)，
+    // ObservableObject 重写了此方法，MINE_OBSERVABLE 宏在构造时自动注册了每个属性的 getter，
+    // 因此 get_property("count_text") 能正确返回 vm_.count_text() 的当前值。
 
     // 绑定 1：vm_.count_text → count_label_.TextProperty
-    ui::BindingExpression::bind_inpc(
+    ui::BindingExpression::bind(
         count_bind_, vm_, "count_text",
-        [this]() noexcept -> core::Variant { return core::Variant{ vm_.count_text() }; },
         count_label_, ui::TextBlock::TextProperty);
 
     // 绑定 2：vm_.hint_text → hint_label_.TextProperty
-    ui::BindingExpression::bind_inpc(
+    ui::BindingExpression::bind(
         hint_bind_, vm_, "hint_text",
-        [this]() noexcept -> core::Variant { return core::Variant{ vm_.hint_text() }; },
         hint_label_, ui::TextBlock::TextProperty);
 }
 

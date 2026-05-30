@@ -35,8 +35,10 @@
 #include <type_traits>
 #include <utility>
 
+#include <mine/core/Function.h>
 #include <mine/core/Pimpl.h>
 #include <mine/core/StringView.h>
+#include <mine/core/Variant.h>
 #include <mine/mvvm/Api.h>
 #include <mine/ui/binding/INotifyPropertyChanged.h>
 
@@ -80,6 +82,18 @@ public:
      */
     void unsubscribe_property_changed(uint32_t token) noexcept override;
 
+    /**
+     * @brief 按属性名读取当前值（属性反射接口）。
+     *
+     * 重写 INotifyPropertyChanged::get_property()。
+     * MINE_OBSERVABLE 宏在对象构造时自动通过 register_property_getter()
+     * 将每个属性的 getter 注册到内部查找表，无需手动实现。
+     *
+     * @param name 属性名（须与 MINE_OBSERVABLE 宏的 Name 参数完全一致）
+     * @return 属性当前值；属性未注册时返回空 Variant
+     */
+    [[nodiscard]] core::Variant get_property(core::StringView name) const noexcept override;
+
 protected:
     /**
      * @brief 属性 setter 辅助方法：值变更时自动触发通知。
@@ -114,6 +128,19 @@ protected:
      * @param name 属性名（空字符串表示所有属性均已变更）
      */
     void raise(mine::core::StringView name) noexcept;
+
+    /**
+     * @brief 注册属性 getter 到内部反射表。
+     *
+     * 由 MINE_OBSERVABLE 宏在成员初始化器中自动调用，无需手动使用。
+     * 注册后，get_property(name) 将调用对应 getter 返回属性当前值。
+     *
+     * @param name   属性名（须与 MINE_OBSERVABLE 宏的 Name 参数完全一致）
+     * @param getter 返回属性当前值的无参函数对象
+     */
+    void register_property_getter(
+        mine::core::StringView                        name,
+        mine::core::Function<mine::core::Variant()>   getter) noexcept;
 
 private:
     struct Impl;

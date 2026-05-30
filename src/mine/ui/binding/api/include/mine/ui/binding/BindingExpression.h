@@ -190,6 +190,34 @@ public:
         const DependencyProperty& target_prop,
         BindingMode               mode = BindingMode::OneWay) noexcept;
 
+    /**
+     * @brief WPF 风格：按属性名一步建立 INPC → DependencyProperty 的绑定。
+     *
+     * 等价于 bind_inpc() 但无需手写 getter lambda。内部通过
+     * INotifyPropertyChanged::get_property(prop_name) 自动读取源值。
+     * ObservableObject 子类（通过 MINE_OBSERVABLE 宏声明属性）自动实现此接口。
+     *
+     * 用法示例：
+     * @code
+     *   // 无需任何 lambda，框架自动从属性名反射读取值
+     *   BindingExpression::bind(expr, vm, "count", label, TextBlock::TextProperty);
+     * @endcode
+     *
+     * @param out         待激活的 BindingExpression（须未 attach）
+     * @param src         INotifyPropertyChanged 源对象（生命周期须覆盖 out）
+     * @param prop_name   属性名（须与 MINE_OBSERVABLE 宏的 Name 参数完全一致）
+     * @param target      目标 DependencyObject（生命周期须覆盖 out）
+     * @param target_prop 目标属性描述符
+     * @param mode        绑定方向，默认 OneWay
+     */
+    static void bind(
+        BindingExpression&        out,
+        INotifyPropertyChanged&   src,
+        core::StringView          prop_name,
+        DependencyObject&         target,
+        const DependencyProperty& target_prop,
+        BindingMode               mode = BindingMode::OneWay) noexcept;
+
 private:
     struct Impl;
     core::Pimpl<Impl> p_;

@@ -358,4 +358,30 @@ void BindingExpression::bind_inpc(
     out.attach(target, target_prop);
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// bind：WPF 风格属性名绑定工厂（无需手写 getter lambda）
+// ────────────────────────────────────────────────────────────────────────────
+
+void BindingExpression::bind(
+    BindingExpression&        out,
+    INotifyPropertyChanged&   src,
+    core::StringView          prop_name,
+    DependencyObject&         target,
+    const DependencyProperty& target_prop,
+    BindingMode               mode) noexcept
+{
+    // getter 通过接口层的 get_property() 按属性名反射读取值。
+    // ObservableObject（经 MINE_OBSERVABLE 自动注册）实现此接口；
+    // 视图层完全无需手写任何 lambda，等价于 WPF 的 {Binding PropName} 语法。
+    //
+    // 注意：prop_name 以值捕获（StringView 是轻量的 pointer+size 结构）。
+    //       源属性名须为字符串字面量或长期存活的字符串，同 bind_inpc 约定。
+    out.getter = [&src, prop_name]() noexcept -> core::Variant {
+        return src.get_property(prop_name);
+    };
+    out.deps.push_back(PropertyDependency::from_inpc(src, prop_name));
+    out.mode = mode;
+    out.attach(target, target_prop);
+}
+
 } // namespace mine::ui

@@ -5,6 +5,25 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.binding / mine.mvvm：WPF 风格属性名绑定（消除手写 getter lambda）**：
+  通过三层协同实现 `BindingExpression::bind()` 工厂，视图层无需编写任何 getter lambda：
+  - `INotifyPropertyChanged::get_property(name)`（新增虚方法）：
+    接口层新增按属性名读取值的默认虚方法（返回空 Variant），
+    供 `BindingExpression::bind()` 在不依赖 `mine.mvvm` 的前提下按名反射读取属性值，
+    从根本上避免 `mine.ui.binding ← mine.mvvm` 循环依赖
+  - `ObservableObject::get_property(name)` / `register_property_getter(name, getter)`（新增）：
+    重写接口层虚方法；新增 protected `register_property_getter()` 接口供子类注册属性 getter；
+    `Impl` 内部维护 `Vector<PropertyEntry>` 线性查找表（属性数量通常 < 20，线性查找优于哈希）
+  - `MINE_OBSERVABLE` 宏扩展：新增私有成员 `bool mine_reg_<Name>_`，
+    其成员初始化器在对象构造时自动调用 `register_property_getter(#Name, [this]{ return Variant{prop}; })`，
+    将每个属性的 getter 注册到查找表，无需手动注册；
+    lambda 仅捕获 `this`（8 字节），符合 `core::Function` SBO 上限
+  - `BindingExpression::bind(out, src, prop_name, target, target_prop)`（新增工厂）：
+    内部自动构造 `getter = [&src]{ return src.get_property(prop_name); }`，
+    等价于 WPF 的 `{Binding PropName}` 语法；`bind_inpc()` 旧工厂保持不变
+  - `CounterWindow::bind_()` 更新：使用新 `bind()` API，彻底消除手写 getter lambda
+
+### Added
 - **mine.ui.window：Window 接入依赖属性（DP）系统**：
   `Window` 现在继承 `DependencyObject`，可持有任意依赖属性值：
   - 新增 `Window::DataContextProperty`（`inherits = true`）：作为窗口级 ViewModel 上下文属性，
