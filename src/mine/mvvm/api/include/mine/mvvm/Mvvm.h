@@ -23,3 +23,6 @@
 // 重导出命令接口（供 MVVM 模式使用，实现在 mine.ui.event）
 #include <mine/ui/event/ICommand.h>
 #include <mine/ui/event/RelayCommand.h>
+
+// MINE_COMMAND 宏：一行声明可绑定命令属性（自动注册 getter，支持 Command 绑定）
+#include <mine/mvvm/Command.h>

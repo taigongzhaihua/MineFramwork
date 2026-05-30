@@ -93,9 +93,9 @@ private:
     mine::ui::TextBlock  count_label_;      ///< 主计数显示（绑定 count_text）
     mine::ui::TextBlock  hint_label_;       ///< 提示说明（绑定 hint_text）
     mine::ui::StackPanel btn_row_;          ///< 按钮行（水平排列）
-    mine::ui::Button     btn_inc_;          ///< [+1] 按钮 → vm_.increment_cmd_
-    mine::ui::Button     btn_dec_;          ///< [-1] 按钮 → vm_.decrement_cmd_
-    mine::ui::Button     btn_reset_;        ///< [重置] 按钮 → vm_.reset_cmd_
+    mine::ui::Button     btn_inc_;          ///< [+1] 按钮 → Command 绑定 increment_cmd
+    mine::ui::Button     btn_dec_;          ///< [-1] 按钮 → Command 绑定 decrement_cmd
+    mine::ui::Button     btn_reset_;        ///< [重置] 按钮 → Command 绑定 reset_cmd
     mine::ui::Button     btn_quit_;         ///< [退出] 按钮 → 触发关闭信号
 
     /// 关闭请求信号（App 层注册）
@@ -109,30 +109,24 @@ private:
     /**
      * @brief 激活数据绑定（WPF 风格 element.set_binding()，零显式 ViewModel 引用）。
      *
-     * 等价于 WPF 的：
+     * 文字绑定等价于 WPF：
      *   count_label_.SetBinding(TextProperty, new Binding("count_text"));
      *
+     * Command 绑定等价于 WPF：
+     *   btn_inc_.SetBinding(Button.CommandProperty, new Binding("increment_cmd"));
+     *
      * 内部自动从控件 DataContext（由 Window::set_data_context() + inherits 机制传播）
-     * 解析 INotifyPropertyChanged 指针，按属性名建立订阅。
-     * 绑定生命周期由 FrameworkElement::bindings_ 内置存储管理，
-     * 不需要在外部声明任何 BindingExpression 成员变量。
+     * 解析 INotifyPropertyChanged 指针，按属性名取出 ICommand*，写入 CommandProperty；
+     * Button 收到 CommandProperty 变更后自动订阅 can_execute_changed 并刷新 is_enabled_；
+     * 用户点击时 Button 内部自动调用 ICommand::execute()，无需任何路由桩代码。
      */
     void bind_();
 
-    // ── 静态事件路由桩（add_handler 注册，调用 ViewModel 命令）────────────────
+    // ── 静态事件路由桩（仅保留关闭按钮，业务命令已改为 Command 绑定）────────────
 
-    /** [+1] 按钮点击：执行 vm_.increment_cmd_，调用 render() 重绘。 */
-    static void s_on_click_inc(void* sender, mine::ui::RoutedEventArgs& args,
-                                void* user_data);
-    /** [-1] 按钮点击：执行 vm_.decrement_cmd_，调用 render() 重绘。 */
-    static void s_on_click_dec(void* sender, mine::ui::RoutedEventArgs& args,
-                                void* user_data);
-    /** [重置] 按钮点击：执行 vm_.reset_cmd_，调用 render() 重绘。 */
-    static void s_on_click_reset(void* sender, mine::ui::RoutedEventArgs& args,
-                                  void* user_data);
     /** [退出] 按钮点击：触发 on_close_requested_ 信号。 */
     static void s_on_click_quit(void* sender, mine::ui::RoutedEventArgs& args,
-                                 void* user_data);
+                                void* user_data);
 };
 
 } // namespace app

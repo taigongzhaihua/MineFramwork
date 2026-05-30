@@ -31,6 +31,9 @@ namespace mine::paint { class Canvas; }
 namespace mine::ui::input { class MouseEventArgs; }
 namespace mine::ui::animation { class Storyboard; }
 
+// ICommand 前向声明（完整定义在 Button.cpp 中通过 ICommand.h 引入）
+namespace mine::ui { class ICommand; }
+
 namespace mine::ui {
 
 /**
@@ -101,6 +104,26 @@ public:
      */
     static const DependencyProperty& PressedBackgroundProperty;
 
+    /**
+     * @brief 命令属性（Variant 存储 ICommand*）。
+     *
+     * 等价于 WPF 的 Button.CommandProperty。
+     * 通过 set_binding(CommandProperty, "cmd_name") 按名绑定 ViewModel 命令；
+     * 设置后 Button 自动：
+     *   1. 订阅 ICommand::can_execute_changed → 实时刷新 is_enabled_ 状态
+     *   2. 在 Click 时调用 ICommand::execute(CommandParameterProperty 的当前值)
+     * 不拥有命令指针，调用方须保证命令生命周期覆盖 Button。
+     */
+    static const DependencyProperty& CommandProperty;
+
+    /**
+     * @brief 命令参数属性（Variant，传递给 ICommand::execute / can_execute）。
+     *
+     * 默认为空 Variant（等价于无参数命令）。
+     * 可通过 set_binding(CommandParameterProperty, "prop_name") 动态绑定。
+     */
+    static const DependencyProperty& CommandParameterProperty;
+
     // ── 生命周期 ───────────────────────────────────────────────────────────
 
     Button();
@@ -118,6 +141,11 @@ public:
 
     [[nodiscard]] bool is_enabled() const noexcept;
     void set_enabled(bool enabled) noexcept;
+
+    /**
+     * @brief 读取 CommandProperty 中当前绑定的命令指针（未绑定时返回 nullptr）。
+     */
+    [[nodiscard]] ICommand* command() const noexcept;
 
     [[nodiscard]] math::Thickness padding() const noexcept;
     void set_padding(math::Thickness padding);
@@ -187,6 +215,25 @@ private:
                                       const core::Variant&      old_v,
                                       const core::Variant&      new_v) noexcept;
 
+    /**
+     * @brief CommandProperty 变更回调。
+     *
+     * 取消旧命令的 can_execute_changed 订阅，订阅新命令，
+     * 并立即按 can_execute() 结果刷新 is_enabled_。
+     */
+    static void on_command_changed(DependencyObject*         sender,
+                                   const DependencyProperty& prop,
+                                   const core::Variant&      old_v,
+                                   const core::Variant&      new_v) noexcept;
+
+    /**
+     * @brief ICommand::can_execute_changed 回调（函数指针类型，传入 subscribe_can_execute_changed）。
+     *
+     * 每当 ViewModel 调用 notify_can_execute_changed() 时触发，
+     * 重新查询 can_execute() 并调用 set_enabled() 同步按钮禁用状态。
+     */
+    static void on_can_execute_changed(ICommand* sender, void* user_data) noexcept;
+
     // ── 动画 tick 回调（注册到 AnimationClock）────────────────────────────
 
     /**
@@ -218,6 +265,7 @@ private:
     bool                     is_enabled_   = true;
     bool                     is_hovered_   = false;   ///< 鼠标正悬停在按钮上
     bool                     is_pressed_   = false;
+    uint32_t                 cmd_token_    = 0;        ///< can_execute_changed 订阅 token（0 表示未订阅）
     /// 内边距缓存（由 on_padding_changed 从 PaddingProperty 同步）
     math::Thickness          padding_      = math::Thickness::symmetric(24.0f, 10.0f);
     /// Normal 态目标背景画刷（用户通过 set_background() 设定的语义値）

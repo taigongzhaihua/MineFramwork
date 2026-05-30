@@ -9,6 +9,7 @@
 #include <mine/paint/Canvas.h>
 #include <mine/paint/Brush.h>
 #include <mine/ui/event/EventManager.h>
+#include <mine/ui/event/ICommand.h>
 #include <mine/ui/input/InputEvents.h>
 #include <mine/ui/input/MouseEventArgs.h>
 #include <mine/ui/property/DependencyProperty.h>
@@ -92,6 +93,24 @@ const DependencyProperty& Button::PressedBackgroundProperty =
             .affects_render = true,
         });
 
+// Button::CommandProperty — 命令（Variant 存储 ICommand*，默认为空）
+// 属性变更时通过 on_command_changed 自动管理 can_execute_changed 订阅并刷新 is_enabled_。
+const DependencyProperty& Button::CommandProperty =
+    register_property<Button>(
+        "Command",
+        core::Variant{},
+        PropertyMetadata{
+            .changed = &Button::on_command_changed,
+        });
+
+// Button::CommandParameterProperty — 命令参数（Variant，默认为空）
+// 传递给 ICommand::execute() 和 ICommand::can_execute()。
+const DependencyProperty& Button::CommandParameterProperty =
+    register_property<Button>(
+        "CommandParameter",
+        core::Variant{},
+        PropertyMetadata{});
+
 // ============================================================================
 // 默认 ControlTemplate 构建函数
 // ============================================================================
@@ -168,6 +187,47 @@ void Button::on_foreground_changed(DependencyObject*         sender,
     }
 }
 
+void Button::on_command_changed(DependencyObject*         sender,
+                                const DependencyProperty& /*prop*/,
+                                const core::Variant&      old_v,
+                                const core::Variant&      new_v) noexcept
+{
+    auto* self = static_cast<Button*>(sender);
+
+    // 取消旧命令的 can_execute_changed 订阅
+    if (self->cmd_token_ != 0 && old_v.has<ICommand*>()) {
+        ICommand* old_cmd = old_v.get<ICommand*>();
+        if (old_cmd != nullptr) {
+            old_cmd->unsubscribe_can_execute_changed(self->cmd_token_);
+        }
+        self->cmd_token_ = 0;
+    }
+
+    // 订阅新命令并立即刷新启用状态
+    if (new_v.has<ICommand*>()) {
+        ICommand* new_cmd = new_v.get<ICommand*>();
+        if (new_cmd != nullptr) {
+            // 订阅 can_execute_changed，持有 token 供后续取消
+            self->cmd_token_ = new_cmd->subscribe_can_execute_changed(
+                &Button::on_can_execute_changed, self);
+            // 立即按 can_execute() 结果刷新按钮启用状态
+            const core::Variant& param = self->get_value(Button::CommandParameterProperty);
+            self->set_enabled(new_cmd->can_execute(param));
+            return;
+        }
+    }
+    // 命令置空时恢复启用状态
+    self->set_enabled(true);
+}
+
+void Button::on_can_execute_changed(ICommand* sender, void* user_data) noexcept
+{
+    auto* self = static_cast<Button*>(user_data);
+    const core::Variant& param = self->get_value(Button::CommandParameterProperty);
+    // 重新查询 can_execute() 并同步按钮启用状态
+    self->set_enabled(sender->can_execute(param));
+}
+
 // ============================================================================
 // 路由事件注册
 // ============================================================================
@@ -191,7 +251,18 @@ Button::Button()
 
 Button::~Button()
 {
-    // 析构时注销 AnimationClock 注册项，防止后续 tick_all 回调访问已释放内存
+    // 析构时取消命令 can_execute_changed 订阅，防止 ICommand 回调访问已释放的 Button
+    if (cmd_token_ != 0) {
+        const core::Variant& cmd_var = get_value(CommandProperty);
+        if (cmd_var.has<ICommand*>()) {
+            ICommand* cmd = cmd_var.get<ICommand*>();
+            if (cmd != nullptr) {
+                cmd->unsubscribe_can_execute_changed(cmd_token_);
+            }
+        }
+        cmd_token_ = 0;
+    }
+    // 注销 AnimationClock 注册项，防止后续 tick_all 回调访问已释放内存
     animation::AnimationClock::instance().unregister_animation(this);
 }
 
@@ -210,6 +281,12 @@ void Button::set_text(core::StringView text)
 bool Button::is_enabled() const noexcept
 {
     return is_enabled_;
+}
+
+ICommand* Button::command() const noexcept
+{
+    const core::Variant& v = get_value(CommandProperty);
+    return v.has<ICommand*>() ? v.get<ICommand*>() : nullptr;
 }
 
 void Button::set_enabled(bool enabled) noexcept
@@ -551,10 +628,23 @@ void Button::on_mouse_up(input::MouseEventArgs& args)
 
 void Button::raise_click()
 {
+    // 先触发 Click 路由事件（Bubble 策略，用户可在处理器中标记 handled 阻止后续传播）
     RoutedEventArgs args{ ClickEvent() };
     args.set_original_source(this);
     args.set_source(this);
     EventManager::raise(*this, args);
+
+    // 若已绑定命令，且命令当前可执行，则调用 execute（等价于 WPF 的 CommandHelpers.ExecuteCommandSource）
+    const core::Variant& cmd_var = get_value(CommandProperty);
+    if (cmd_var.has<ICommand*>()) {
+        ICommand* cmd = cmd_var.get<ICommand*>();
+        if (cmd != nullptr) {
+            const core::Variant& param = get_value(CommandParameterProperty);
+            if (cmd->can_execute(param)) {
+                cmd->execute(param);
+            }
+        }
+    }
 }
 
 // ============================================================================

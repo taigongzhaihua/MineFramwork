@@ -126,7 +126,7 @@ void CounterWindow::build_(mine::text::FontFace* font)
     btn_inc_.set_border_color(paint::Brush::solid_rgb(0x0D47A1));
     btn_inc_.set_margin(math::Thickness{ 0.0f, 0.0f, 12.0f, 0.0f });
     if (font) { btn_inc_.set_font_face(font); }
-    btn_inc_.add_handler(ui::Button::ClickEvent(), &CounterWindow::s_on_click_inc, this);
+    // 命令绑定在 bind_() 中完成，此处不再手动注册 ClickEvent 处理器
     btn_row_.add_child(&btn_inc_);
 
     // [-1] 灰色按钮
@@ -140,7 +140,6 @@ void CounterWindow::build_(mine::text::FontFace* font)
     btn_dec_.set_border_color(paint::Brush::solid_rgb(0x263238));
     btn_dec_.set_margin(math::Thickness{ 0.0f, 0.0f, 12.0f, 0.0f });
     if (font) { btn_dec_.set_font_face(font); }
-    btn_dec_.add_handler(ui::Button::ClickEvent(), &CounterWindow::s_on_click_dec, this);
     btn_row_.add_child(&btn_dec_);
 
     // [重置] 橙色按钮
@@ -154,7 +153,6 @@ void CounterWindow::build_(mine::text::FontFace* font)
     btn_reset_.set_border_color(paint::Brush::solid_rgb(0xBF360C));
     btn_reset_.set_margin(math::Thickness{ 0.0f, 0.0f, 12.0f, 0.0f });
     if (font) { btn_reset_.set_font_face(font); }
-    btn_reset_.add_handler(ui::Button::ClickEvent(), &CounterWindow::s_on_click_reset, this);
     btn_row_.add_child(&btn_reset_);
 
     // [退出] 红色按钮
@@ -185,48 +183,36 @@ void CounterWindow::build_(mine::text::FontFace* font)
 
 void CounterWindow::bind_()
 {
-    // WPF 风格：完全等价于 WPF 的 element.SetBinding(prop, new Binding("PropName"))。
-    // DataContext 由 Window::set_data_context() 设置，通过 inherits=true 自动传播到子树；
-    // set_binding() 从控件自身的 DataContext 中取出 INotifyPropertyChanged 指针，
-    // 再按属性名建立订阅。View 层无需任何显式 ViewModel 引用，零 getter lambda。
-    //
-    // 绑定生命周期由 FrameworkElement::bindings_ 内置存储管理，
-    // 控件析构时自动 detach()，无需在 Window 层声明 BindingExpression 成员。
+    // ── 文字属性绑定 ──────────────────────────────────────────────────────────
+    // WPF 风格：等价于 element.SetBinding(TextProperty, new Binding("prop_name"))。
+    // DataContext 由 Window::set_data_context() 设置，通过 inherits=true 自动传播；
+    // set_binding() 从控件 DataContext 中取出 INotifyPropertyChanged 指针，按属性名订阅。
 
     // 绑定 1：DataContext["count_text"] → count_label_.TextProperty
     count_label_.set_binding(ui::TextBlock::TextProperty, "count_text");
 
     // 绑定 2：DataContext["hint_text"] → hint_label_.TextProperty
     hint_label_.set_binding(ui::TextBlock::TextProperty, "hint_text");
+
+    // ── Command 绑定 ─────────────────────────────────────────────────────────
+    // WPF 风格：等价于 btn.SetBinding(Button.CommandProperty, new Binding("increment_cmd"))。
+    // get_property("increment_cmd") 返回 Variant{ICommand*}，写入 CommandProperty 后
+    // Button 内部自动订阅 can_execute_changed 并刷新 is_enabled_；
+    // 用户点击时 Button::raise_click() 内部调用 ICommand::execute()，View 层零业务逻辑。
+
+    // 绑定 3：DataContext["increment_cmd"] → btn_inc_.CommandProperty
+    btn_inc_.set_binding(ui::Button::CommandProperty, "increment_cmd");
+
+    // 绑定 4：DataContext["decrement_cmd"] → btn_dec_.CommandProperty
+    btn_dec_.set_binding(ui::Button::CommandProperty, "decrement_cmd");
+
+    // 绑定 5：DataContext["reset_cmd"] → btn_reset_.CommandProperty
+    btn_reset_.set_binding(ui::Button::CommandProperty, "reset_cmd");
 }
 
 // ── 事件处理：静态路由桩 ──────────────────────────────────────────────────────
-
-void CounterWindow::s_on_click_inc(void* /*sender*/,
-                                    ui::RoutedEventArgs& /*args*/,
-                                    void* user_data)
-{
-    auto* self = static_cast<CounterWindow*>(user_data);
-    // 执行命令（ViewModel 内部更新属性 → 绑定链自动同步到 UI）
-    // Application::tick_and_render 在输入事件处理完毕后自动重绘，无需手动调用 render()
-    self->vm_.increment_cmd_.execute({});
-}
-
-void CounterWindow::s_on_click_dec(void* /*sender*/,
-                                    ui::RoutedEventArgs& /*args*/,
-                                    void* user_data)
-{
-    auto* self = static_cast<CounterWindow*>(user_data);
-    self->vm_.decrement_cmd_.execute({});
-}
-
-void CounterWindow::s_on_click_reset(void* /*sender*/,
-                                      ui::RoutedEventArgs& /*args*/,
-                                      void* user_data)
-{
-    auto* self = static_cast<CounterWindow*>(user_data);
-    self->vm_.reset_cmd_.execute({});
-}
+// 注意：业务命令（[+1] / [-1] / [重置]）已改为 Command 绑定，无需路由桩。
+// 仅保留 [退出] 按钮——其逻辑为跨层信号（通知 App 层退出），不属于 ViewModel 业务。
 
 void CounterWindow::s_on_click_quit(void* /*sender*/,
                                      ui::RoutedEventArgs& /*args*/,

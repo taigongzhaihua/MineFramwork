@@ -5,7 +5,37 @@
 ## [Unreleased]
 
 ### Added
-- **mine.ui.binding / mine.ui.visual：`Binding` 描述符 + `set_binding(prop, Binding{...})` — 完整 WPF SetBinding 等价**：
+- **mine.mvvm：`MINE_COMMAND` 宏 + mine.ui.controls：Button Command 绑定（WPF 风格命令系统）**：
+  通过三层协同，View 层实现零业务路由桩的完整命令绑定：
+
+  **`MINE_COMMAND(Name)` 宏**（新建 `Command.h`，`Mvvm.h` 自动导入）：
+  - 一行声明 `RelayCommand Name##_` 公开字段 + 自动注册命令 getter，
+    等价于 `MINE_OBSERVABLE` 对普通属性的作用；
+  - 构造时自动向 `ObservableObject` 反射表注册 `get_property(#Name)` → `Variant{ICommand*}` 的映射，
+    使 `set_binding(Button::CommandProperty, "cmd_name")` 可按名解析命令，无需手写任何注册代码
+
+  **`Button::CommandProperty` / `CommandParameterProperty`**（新增 DependencyProperty）：
+  - `CommandProperty`（Variant 存储 `ICommand*`）：写入时 `on_command_changed` 回调自动
+    取消旧订阅、订阅新命令 `can_execute_changed`、并立即刷新 `is_enabled_`
+  - `CommandParameterProperty`（Variant，默认为空）：传递给 `execute/can_execute`，
+    支持进一步绑定
+  - `Button::~Button()` 析构时自动取消 `can_execute_changed` 订阅，防止悬空回调
+  - `Button::raise_click()` 触发 Click 路由事件后自动调用 `ICommand::execute(param)`，
+    无需用户代码介入
+
+  **Command 绑定一行接入（等价 WPF）**：
+  ```cpp
+  btn_inc_.set_binding(ui::Button::CommandProperty, "increment_cmd");
+  ```
+  等价于 WPF 的 `btn.SetBinding(Button.CommandProperty, new Binding("IncrementCmd"))`
+
+  **`sample.01-mvvm-binding` 更新**：
+  - `CounterViewModel`：三个命令从手动声明 + 手动注册改为 `MINE_COMMAND` 宏一行完成
+  - `CounterWindow`：删除所有业务命令路由桩（`s_on_click_inc/dec/reset`），
+    改为 `bind_()` 中三行 `set_binding(CommandProperty, "cmd_name")`；
+    仅保留 `s_on_click_quit`（跨层信号，不属于 ViewModel 业务）
+
+
   通过 `struct Binding` 描述符，`set_binding()` 现可承载 converter/conv_param/fallback 完整配置：
   - `BindingConfig.h` 新建：`struct Binding { prop_name, mode, converter, conv_param, fallback }`，
     等价于 WPF 的 `new Binding("PropName") { Converter=..., Mode=... }`；

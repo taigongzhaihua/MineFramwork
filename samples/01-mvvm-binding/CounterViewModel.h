@@ -59,11 +59,23 @@ public:
     /// 宏自动注册 getter：get_property("hint_text") → Variant{hint_text()}
     MINE_OBSERVABLE(mine::containers::InlineString, hint_text, "点击下方按钮改变计数")
 
-    // ── 命令（move-only，须在构造函数初始化列表中完成初始化）──────────────────
+    // ── 命令（MINE_COMMAND 宏自动注册 getter，支持 set_binding(Button::CommandProperty, "cmd_name")）
 
-    mine::ui::RelayCommand increment_cmd_;  ///< 计数加一（上限 10）
-    mine::ui::RelayCommand decrement_cmd_;  ///< 计数减一（下限 0）
-    mine::ui::RelayCommand reset_cmd_;      ///< 重置为零
+    /**
+     * @brief 计数加一命令（上限 10）。
+     *
+     * MINE_COMMAND 展开后：
+     *   - 公开字段 `increment_cmd_`（RelayCommand）
+     *   - 构造时自动注册 get_property("increment_cmd") → Variant{ICommand*}
+     * 视图层通过 btn_inc_.set_binding(Button::CommandProperty, "increment_cmd") 绑定。
+     */
+    MINE_COMMAND(increment_cmd)
+
+    /// 计数减一命令（下限 0）
+    MINE_COMMAND(decrement_cmd)
+
+    /// 重置为零命令
+    MINE_COMMAND(reset_cmd)
 
     /**
      * @brief 构造 CounterViewModel，初始化命令并设置初始显示状态。
@@ -88,6 +100,7 @@ public:
           }
     {
         // 根据初始 count=0 设置初始显示文字
+        // 注意：命令 getter 已由 MINE_COMMAND 宏在构造时自动注册，无需手动调用
         update_display_();
     }
 
