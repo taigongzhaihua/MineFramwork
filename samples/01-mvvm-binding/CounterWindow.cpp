@@ -19,6 +19,13 @@
  *                 → invalidate_render() → 向上传播脏标志
  *         → set_hint_text(new_hint)        [发出 "hint_text" 通知 → 同上路径]
  *   输入事件处理完毕 → Application::tick_and_render → win.render() [自动重绘]
+ *
+ * DataContext 接入：
+ *   build_() 末尾调用 set_data_context(Variant{ &vm_ })，将 ViewModel 指针注入
+ *   Window::DataContextProperty（inherits=true），变更回调自动以 Inherited 优先级
+ *   写入内容根，Visual::on_property_changed 递归向下传播到整棵视觉子树。
+ *   后续绑定 API 扩展完善后，子控件可直接从 DataContext 按属性名建立绑定，
+ *   无需视图层手写 getter lambda。
  */
 
 #include "CounterWindow.h"
@@ -158,9 +165,17 @@ void CounterWindow::build_(mine::text::FontFace* font)
     btn_quit_.add_handler(ui::Button::ClickEvent(), &CounterWindow::s_on_click_quit, this);
     btn_row_.add_child(&btn_quit_);
 
-    // ── 挂载根面板到窗口内容区 ───────────────────────────────────────────────
+    // ── 挂载根面板到窗口内容区，并注入数据上下文 ─────────────────────────────
 
     set_content(&body_panel_);
+
+    // 将 ViewModel 指针注入到窗口的 DataContextProperty（inherits=true）。
+    // Window 的 s_on_data_context_changed 回调会立即以 Inherited 优先级将此值
+    // 写入内容根，Visual::on_property_changed 递归将其传播到整棵视觉子树，
+    // 每个子节点的 DataContextProperty 均自动持有该 ViewModel 指针。
+    // 当前绑定 API 仍需手写 getter lambda；后续 BindingExpression::bind()
+    // 扩展完善后，子控件可直接按属性名从 DataContext 建立绑定，无需此处额外操作。
+    set_data_context(core::Variant{ static_cast<ui::INotifyPropertyChanged*>(&vm_) });
 }
 
 // ── 数据绑定激活 ──────────────────────────────────────────────────────────────
@@ -169,6 +184,11 @@ void CounterWindow::bind_()
 {
     // INPC → DependencyProperty OneWay 绑定，一次调用完成配置与激活。
     // 签名：bind_inpc(out, src, prop_name, getter, target, target_prop)
+    //
+    // vm_ 指针已通过 Window::DataContextProperty（inherits=true）传播到整棵
+    // 视觉子树；此处 getter lambda 直接捕获 vm_ 以保持类型安全（无需运行时向下转型）。
+    // 后续 BindingExpression::bind() 扩展完善后，将可直接从目标控件的 DataContext
+    // 按属性名（"count_text"）建立绑定，彻底消除 getter lambda。
 
     // 绑定 1：vm_.count_text → count_label_.TextProperty
     ui::BindingExpression::bind_inpc(

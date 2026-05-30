@@ -9,8 +9,10 @@
  *   │  CounterWindow（View 层）                                               │
  *   │                                                                         │
  *   │  vm_               CounterViewModel（ViewModel 层，值成员）              │
+ *   │  DataContext       Window::DataContextProperty 持有 &vm_（Variant），    │
+ *   │                   inherits=true 自动向整棵视觉子树传播                   │
  *   │  count_bind_       BindingExpression：vm_.count_text → count_label_     │
- *   │  hint_bind_        BindingExpression：vm_.hint_text → hint_label_       │
+ *   │  hint_bind_        BindingExpression：vm_.hint_text  → hint_label_       │
  *   │                                                                         │
  *   │  用户点击按钮 → s_on_click_* → vm_.xxx_cmd_.execute({})                  │
  *   │                             → ViewModel 更新属性 → 发出通知              │
