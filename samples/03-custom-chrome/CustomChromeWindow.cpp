@@ -13,11 +13,11 @@
  *    若 CaptionHeight > 0，系统会将该区域的鼠标按下转为窗口拖拽，
  *    导致标题栏中的按钮无法收到 WM_LBUTTONDOWN，无法点击。
  *
- * 3. 手动拖拽（drag_region_ MouseDownEvent）：
- *    在拖拽区 TextBlock 上注册 MouseDownEvent；
- *    鼠标左键按下时调用 ReleaseCapture() 释放框架鼠标捕获，
- *    再通过 PostMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0)
- *    通知系统"用户在 NC 标题栏区域按下了鼠标"，系统接管后续拖拽。
+ * 3. 拖拽（drag_region_ MouseDownEvent → Window::drag()）：
+ *    在拖拽区 TextBlock 上注册 MouseDownEvent；鼠标左键按下时调用
+ *    Window::drag()（等价于 WPF 的 DragMove()），框架层封装了
+ *    ReleaseCapture + WM_NCLBUTTONDOWN(HTCAPTION) 的系统调用细节。
+ *    系统接管后支持 Windows 11 Snap Layout（拖至屏幕顶部分屏菜单）。
  *
  * 4. ResizeBorderThickness = 6px
  *    平台层在 WM_NCHITTEST 处理中，对窗口边框 6px 范围内返回
@@ -246,13 +246,10 @@ void CustomChromeWindow::s_on_drag_mouse_down(
         return;
     }
 
+    // 调用 Window::drag()：内部释放鼠标捕获并通知系统接管拖拽，
+    // 等价于 WPF 的 DragMove()，支持 Windows 11 Snap Layout
     auto* self = static_cast<CustomChromeWindow*>(ud);
-    auto hwnd  = static_cast<HWND>(self->native_window().native_handle().ptr);
-
-    // 释放框架内部鼠标捕获后，由系统接管拖拽操作。
-    // 等价于 WPF 中的 DragMove()，不会触发额外的 WM_MOUSEMOVE 消息。
-    ::ReleaseCapture();
-    ::PostMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+    self->drag();
 
     // 标记事件已处理，阻止进一步冒泡
     args.set_handled(true);

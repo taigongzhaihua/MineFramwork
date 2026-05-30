@@ -80,6 +80,18 @@ public:
      */
     void set_chrome(const WindowChromeDesc& chrome) override;
 
+    /**
+     * @brief 发起系统窗口拖拽（IWindow 接口实现）。
+     *
+     * Win32 实现：
+     *   1. ReleaseCapture()：释放框架内部鼠标捕获
+     *   2. PostMessageW(WM_NCLBUTTONDOWN, HTCAPTION, 0)：模拟用户在
+     *      标题栏区域按下鼠标左键，由系统接管后续拖拽（含 Windows 11 Snap 布局）
+     *
+     * 仅在 HWND 有效时执行（已销毁的窗口调用为空操作）。
+     */
+    void begin_drag() override;
+
     // ── 内部接口（供 Win32ApplicationHost 使用）──────────────────────────────
 
     /// 返回 Win32 HWND

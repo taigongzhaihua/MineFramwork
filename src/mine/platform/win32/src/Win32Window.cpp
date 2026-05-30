@@ -276,6 +276,17 @@ void Win32Window::set_chrome(const WindowChromeDesc& chrome) {
     apply_chrome_();
 }
 
+void Win32Window::begin_drag() {
+    if (!hwnd_) {
+        return;
+    }
+    // 释放框架内部鼠标捕获，让系统接管后续鼠标消息（拖拽移动窗口）
+    ::ReleaseCapture();
+    // 模拟用户在 NC 标题栏区域（HTCAPTION）按下鼠标左键：
+    // 系统收到后接管拖拽逻辑，支持 Windows 11 Snap Layout（上方拖拽到屏幕顶部）
+    ::PostMessageW(hwnd_, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+}
+
 void Win32Window::apply_chrome_() noexcept {
     if (!hwnd_) {
         return;

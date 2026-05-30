@@ -89,6 +89,19 @@ public:
      * @param chrome 自定义 Chrome 描述符
      */
     virtual void set_chrome(const WindowChromeDesc& chrome) {}
+
+    /**
+     * @brief 以编程方式发起窗口拖拽，类似 WPF 的 Window.DragMove()。
+     *
+     * 释放框架内部鼠标捕获后，通知系统"用户在标题栏（HTCAPTION）区域按下鼠标"，
+     * 系统接管后续拖拽逻辑（移动窗口 + 磁吸/Snap 布局）。
+     *
+     * 典型用法：在自定义标题栏区域的 MouseDownEvent 处理函数中调用。
+     * 调用后当前帧内不应再处理鼠标事件（建议同时调用 args.set_handled(true)）。
+     *
+     * 默认实现为空操作（no-op），各平台后端按需重写。
+     */
+    virtual void begin_drag() {}
 };
 
 } // namespace mine::platform

@@ -747,6 +747,14 @@ math::Thickness Window::glass_frame_thickness() const noexcept
     return v.has_value() ? v.get<math::Thickness>() : math::Thickness{};
 }
 
+void Window::drag()
+{
+    if (!p_->is_initialized_ || p_->is_closed_) {
+        return;
+    }
+    p_->native_window_->begin_drag();
+}
+
 /**
  * @brief 所有 Chrome DP 属性的统一变更回调。
  *

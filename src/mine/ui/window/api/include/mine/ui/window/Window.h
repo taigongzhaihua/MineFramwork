@@ -289,6 +289,27 @@ public:
      */
     [[nodiscard]] math::Thickness glass_frame_thickness() const noexcept;
 
+    /**
+     * @brief 以编程方式发起窗口拖拽，类似 WPF 的 Window.DragMove()。
+     *
+     * 在自定义标题栏（IsCustomChrome = true）场景下，于可拖拽区域的
+     * MouseDownEvent 处理函数中调用此方法，即可触发系统接管窗口移动：
+     *
+     * @code
+     *   // 在 MouseDownEvent 处理函数中：
+     *   if (margs.button() == MouseButton::Left) {
+     *       self->drag();
+     *       args.set_handled(true);
+     *   }
+     * @endcode
+     *
+     * 内部实现（Win32）：ReleaseCapture() + PostMessageW(WM_NCLBUTTONDOWN, HTCAPTION)。
+     * 系统接管拖拽后支持 Windows 11 Snap Layout（拖至屏幕顶部可触发分屏菜单）。
+     *
+     * @pre 窗口必须已初始化（show() 已调用），否则为空操作并记录断言。
+     */
+    void drag();
+
     // ── 内容根 ───────────────────────────────────────────────────────────────
 
     /**
