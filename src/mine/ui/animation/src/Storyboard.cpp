@@ -136,6 +136,25 @@ void Storyboard::animate_dp_to(ui::DependencyObject&        target,
     animations_.push_back(std::move(anim));
 }
 
+void Storyboard::animate_dp_from_to(ui::DependencyObject&        target,
+                                    const ui::DependencyProperty& prop,
+                                    core::Variant                 from,
+                                    core::Variant                 to,
+                                    Duration                      duration,
+                                    EasingFn                      easing) noexcept
+{
+    PropertyAnimation anim;
+    anim.target           = &target;
+    anim.prop             = &prop;
+    anim.from             = std::move(from);
+    anim.from_is_resolved = true;
+    anim.to               = std::move(to);
+    anim.to_is_resolved   = true;
+    anim.duration         = duration;
+    anim.easing           = easing;
+    animations_.push_back(std::move(anim));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Storyboard：生命周期阶段
 // ─────────────────────────────────────────────────────────────────────────────
@@ -145,8 +164,9 @@ void Storyboard::capture_from_values() noexcept
     // 在新状态的 StyleTrigger 写入之前调用
     // 采样目标属性的当前生效值作为动画起始值
     for (PropertyAnimation& anim : animations_) {
-        if (anim.target && anim.prop) {
+        if (!anim.from_is_resolved && anim.target && anim.prop) {
             anim.from = anim.target->get_value(*anim.prop);
+            anim.from_is_resolved = true;
         }
     }
 }
@@ -165,6 +185,12 @@ void Storyboard::resolve_and_begin() noexcept
     for (PropertyAnimation& anim : animations_) {
         if (!anim.target || !anim.prop) {
             continue;
+        }
+
+        // 对未显式指定 from、且调用方漏掉 capture_from_values() 的场景做兜底采样。
+        if (!anim.from_is_resolved) {
+            anim.from = anim.target->get_value(*anim.prop);
+            anim.from_is_resolved = true;
         }
 
         // 解析未确定的终止值

@@ -43,8 +43,12 @@ struct PropertyAnimation {
     /// 目标属性（非拥有指针；DependencyProperty 为全局静态对象，生命周期永远有效）
     const ui::DependencyProperty* prop{nullptr};
 
-    /// 动画起始值（在 capture_from_values() 中从目标元素当前生效值采样）
+    /// 动画起始值（默认在 capture_from_values() 中采样；也可由调用方显式指定）
     core::Variant from;
+
+    /// false = from 尚未确定，将在 capture_from_values()/resolve_and_begin() 中采样
+    /// true  = from 已由调用方显式指定
+    bool from_is_resolved{false};
 
     /// 动画终止值（显式指定时为 animate_dp_to 的参数；否则在 resolve_and_begin() 中采样）
     core::Variant to;

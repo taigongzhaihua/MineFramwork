@@ -85,12 +85,34 @@ public:
                        Duration duration,
                        EasingFn easing = Linear) noexcept;
 
+    /**
+     * @brief 注册依赖属性动画（from/to 均由调用方显式指定）。
+     *
+     * 适用于调用方已经知道当前可见值、且不希望通过改写目标属性本身来喂给
+     * capture_from_values() 的场景。Button 状态背景切换使用该路径，
+     * 避免为了提供 from 值而污染 BackgroundProperty 的 Local 槽。
+     *
+     * @param target   被驱动的目标元素
+     * @param prop     目标依赖属性
+     * @param from     动画起始值
+     * @param to       动画终止值
+     * @param duration 动画持续时长
+     * @param easing   缓动函数（默认线性）
+     */
+    void animate_dp_from_to(ui::DependencyObject& target,
+                            const ui::DependencyProperty& prop,
+                            core::Variant from,
+                            core::Variant to,
+                            Duration duration,
+                            EasingFn easing = Linear) noexcept;
+
     // ── 生命周期阶段（由 VisualStateManager 调用）────────────────────────────
 
     /**
      * @brief 采样所有动画的起始值（from）。
      *
-     * 必须在新状态的 StyleTrigger 写入之前调用，以捕捉切换前的属性生效值。
+    * 必须在新状态的 StyleTrigger 写入之前调用，以捕捉切换前的属性生效值。
+    * 对显式指定了 from 的动画，此步骤会自动跳过，不会覆盖调用方给定的起始值。
      */
     void capture_from_values() noexcept;
 
