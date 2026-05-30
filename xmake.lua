@@ -55,6 +55,7 @@ for _, script in ipairs({
     "samples/00-blank-window/xmake.lua",
     "samples/01-mvvm-binding/xmake.lua",
     "samples/02-controls-demo/xmake.lua",
+    "samples/03-custom-chrome/xmake.lua",
     "tools/mmlc/xmake.lua",
     "tools/mmlfmt/xmake.lua",
     "tools/mmlls/xmake.lua"

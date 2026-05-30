@@ -5,6 +5,16 @@
 ## [Unreleased]
 
 ### Added
+- **samples/03-custom-chrome：新增 WindowChrome 自定义无边框标题栏演示示例**：
+  演示 `IsCustomChrome / CaptionHeight / ResizeBorderThickness / CornerPreference` 四个 DP 属性的协同工作：
+  - 应用层自绘 48px 标题栏（图标 + 标题文字 + 最小化/最大化/关闭按钮）
+  - `CaptionHeight = 0`：避免系统 `HTCAPTION` 阻挡标题栏按钮点击
+  - 拖拽实现：在 `drag_region_`（TextBlock）的 `MouseDownEvent` 中通过
+    `ReleaseCapture + PostMessageW(WM_NCLBUTTONDOWN, HTCAPTION)` 触发系统拖拽
+  - `ResizeBorderThickness = 6px`：系统自动处理四边/四角 resize 命中测试
+  - `CornerPreference = Round`：Windows 11 圆角窗口
+  - 深色配色（`#1F1F1F` 标题栏 + `#191919` 内容区），关闭按钮悬停变 Windows 红（`#C42B1C`）
+
 - **mine.ui.visual：Visual 圆角矩形裁剪（clip_rounded_rect）+ UIElement 命中测试感知圆角**：
   - `Visual` 扩展裁剪能力：新增 `set_clip_rounded_rect / has_clip_rounded_rect / clip_rounded_rect / clear_clip_rounded_rect`，
     内部以 `ClipKind` 枚举（None / Rect / RoundedRect）管理，与矩形裁剪互斥；
