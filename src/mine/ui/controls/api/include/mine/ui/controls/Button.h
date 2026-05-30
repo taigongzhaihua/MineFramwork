@@ -188,6 +188,14 @@ public:
 
 protected:
     void on_measure(math::Size available_size) override;
+    /**
+     * @brief 排列阶段：设置圆角矩形裁剪形状使命中测试与视觉边界保持一致。
+     *
+     * 在基类完成排列后，根据 bounds_rect 高度计算胶囊圆角半径
+     * （radius = height / 2），调用 set_clip_rounded_rect() 同步
+     * 渲染裁剪与命中测试边界。
+     */
+    void on_arrange(math::Rect final_rect) override;
     void on_render(paint::Canvas& canvas) override;
     UIElement* hit_test(math::Point p) override;
     [[nodiscard]] ControlVisualState compute_visual_state() const override;

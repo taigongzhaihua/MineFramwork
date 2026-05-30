@@ -19,6 +19,7 @@
 #include <mine/containers/Vector.h>
 #include <mine/math/Transform2D.h>
 #include <mine/math/Rect.h>
+#include <mine/math/RoundedRect.h>
 #include <mine/ui/property/PropertyMetadata.h>
 #include <mine/ui/property/DependencyProperty.h>
 #include <mine/ui/event/RoutedEvent.h>
@@ -38,6 +39,13 @@ struct HandlerEntry {
 };
 
 struct Visual::Impl {
+    /// 裁剪类型枚举（矩形裁剪与圆角矩形裁剪互斥）
+    enum class ClipKind : uint8_t {
+        None,        ///< 无裁剪
+        Rect,        ///< 矩形裁剪（clip_rect_）
+        RoundedRect, ///< 圆角矩形裁剪（clip_rounded_rect_）
+    };
+
     /// 父节点（非拥有，原始指针）
     Visual* parent_ = nullptr;
 
@@ -47,11 +55,14 @@ struct Visual::Impl {
     /// 局部仿射变换（默认单位矩阵）
     math::Transform2D transform_{ math::Transform2D::identity() };
 
-    /// 是否有矩形裁剪区域
-    bool has_clip_ = false;
+    /// 当前裁剪类型
+    ClipKind clip_kind_ = ClipKind::None;
 
-    /// 矩形裁剪区域（仅 has_clip_ == true 时有效）
+    /// 矩形裁剪区域（仅 clip_kind_ == Rect 时有效）
     math::Rect clip_rect_{};
+
+    /// 圆角矩形裁剪区域（仅 clip_kind_ == RoundedRect 时有效）
+    math::RoundedRect clip_rounded_rect_{};
 
     /// 渲染脏标志：新建时为 true，render_to_canvas 后清为 false
     bool is_render_dirty_ = true;
@@ -218,7 +229,7 @@ void Visual::set_render_transform(const math::Transform2D& t)
 
 bool Visual::has_clip_rect() const noexcept
 {
-    return p_->has_clip_;
+    return p_->clip_kind_ == Impl::ClipKind::Rect;
 }
 
 math::Rect Visual::clip_rect() const noexcept
@@ -228,15 +239,44 @@ math::Rect Visual::clip_rect() const noexcept
 
 void Visual::set_clip_rect(math::Rect rect)
 {
-    p_->has_clip_  = true;
+    p_->clip_kind_ = Impl::ClipKind::Rect;
     p_->clip_rect_ = rect;
     invalidate_render();
 }
 
 void Visual::clear_clip_rect()
 {
-    if (p_->has_clip_) {
-        p_->has_clip_ = false;
+    if (p_->clip_kind_ == Impl::ClipKind::Rect) {
+        p_->clip_kind_ = Impl::ClipKind::None;
+        invalidate_render();
+    }
+}
+
+// ============================================================================
+// 圆角矩形裁剪
+// ============================================================================
+
+bool Visual::has_clip_rounded_rect() const noexcept
+{
+    return p_->clip_kind_ == Impl::ClipKind::RoundedRect;
+}
+
+math::RoundedRect Visual::clip_rounded_rect() const noexcept
+{
+    return p_->clip_rounded_rect_;
+}
+
+void Visual::set_clip_rounded_rect(math::RoundedRect rrect)
+{
+    p_->clip_kind_          = Impl::ClipKind::RoundedRect;
+    p_->clip_rounded_rect_  = rrect;
+    invalidate_render();
+}
+
+void Visual::clear_clip_rounded_rect()
+{
+    if (p_->clip_kind_ == Impl::ClipKind::RoundedRect) {
+        p_->clip_kind_ = Impl::ClipKind::None;
         invalidate_render();
     }
 }
@@ -307,8 +347,10 @@ void Visual::render_to_canvas(paint::Canvas& canvas)
     // 应用局部变换（单位矩阵时 Canvas 内部仍处理，性能可接受）
     canvas.transform(p_->transform_);
 
-    // 应用矩形裁剪
-    if (p_->has_clip_) {
+    // 应用裁剪（圆角矩形裁剪与矩形裁剪互斥）
+    if (p_->clip_kind_ == Impl::ClipKind::RoundedRect) {
+        canvas.clip_rounded_rect(p_->clip_rounded_rect_);
+    } else if (p_->clip_kind_ == Impl::ClipKind::Rect) {
         canvas.clip_rect(p_->clip_rect_);
     }
 

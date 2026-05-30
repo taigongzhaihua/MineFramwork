@@ -5,6 +5,18 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.visual：Visual 圆角矩形裁剪（clip_rounded_rect）+ UIElement 命中测试感知圆角**：
+  - `Visual` 扩展裁剪能力：新增 `set_clip_rounded_rect / has_clip_rounded_rect / clip_rounded_rect / clear_clip_rounded_rect`，
+    内部以 `ClipKind` 枚举（None / Rect / RoundedRect）管理，与矩形裁剪互斥；
+    `render_to_canvas()` 根据类型选择 `canvas.clip_rounded_rect` 或 `canvas.clip_rect`
+  - `UIElement::hit_test()` 优先检查圆角矩形裁剪：点在圆角外时整棵子树不参与命中，
+    解决"圆角控件外角可命中"问题
+  - `UIElement::hit_test_local()` 默认实现升级：有圆角裁剪时以 `clip_rounded_rect().contains(p)`
+    代替 `bounds_rect().contains(p)` 作为命中判断，无需控件覆写
+- **mine.ui.controls：Button 命中/裁剪边界与视觉胶囊形状一致**：
+  - `Button::on_arrange()` 在布局完成后自动调用 `set_clip_rounded_rect(RoundedRect{bounds_rect, height/2})`，
+    将渲染裁剪（子元素不溢出圆角）与命中测试（外角不响应鼠标）统一为胶囊形状
+  - `Button::hit_test()` 优先使用 `clip_rounded_rect()` 判断，外角点击不再触发 Hover/Press 状态
 - **mine.ui.window / mine.platform.abi / mine.platform.win32：自定义标题栏 WindowChrome DP 属性接口及 Win32 实现**：
   在 `Window` 类新增 5 个 DependencyProperty，实现 WPF WindowChrome 风格的自定义无边框窗口 API，
   全部平台相关代码隔离在 `mine.platform.win32`：

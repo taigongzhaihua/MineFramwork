@@ -30,6 +30,7 @@
 #include <mine/core/Pimpl.h>
 #include <mine/math/Transform2D.h>
 #include <mine/math/Rect.h>
+#include <mine/math/RoundedRect.h>
 #include <mine/ui/property/DependencyObject.h>
 #include <mine/ui/event/IRoutedEventTarget.h>
 #include <mine/ui/event/RoutedEvent.h>
@@ -153,13 +154,46 @@ public:
      * @brief 设置矩形裁剪区域并触发渲染失效。
      *
      * 与 Canvas::save/restore 结合使用：仅对本节点及子树有效。
+     * 与圆角矩形裁剪互斥：调用此方法会替换已有的圆角矩形裁剪。
      */
     void set_clip_rect(math::Rect rect);
 
     /**
      * @brief 清除矩形裁剪区域并触发渲染失效。
+     *
+     * 仅当当前裁剪类型为矩形时生效；不影响圆角矩形裁剪。
      */
     void clear_clip_rect();
+
+    // ── 圆角矩形裁剪 ─────────────────────────────────────────────────────
+
+    /**
+     * @brief 设置圆角矩形裁剪区域并触发渲染失效。
+     *
+     * 与矩形裁剪互斥：调用此方法会替换已有的矩形裁剪。
+     * 圆角矩形裁剪同时影响本节点自身渲染及所有子节点的渲染，
+     * 并自动作为 UIElement 命中测试的默认边界形状（外角不响应命中）。
+     *
+     * @param rrect 圆角矩形区域（局部坐标系，相对于父节点坐标原点）
+     */
+    void set_clip_rounded_rect(math::RoundedRect rrect);
+
+    /**
+     * @brief 返回当前是否有圆角矩形裁剪区域。
+     */
+    [[nodiscard]] bool has_clip_rounded_rect() const noexcept;
+
+    /**
+     * @brief 返回当前圆角矩形裁剪区域（仅 has_clip_rounded_rect() == true 时有效）。
+     */
+    [[nodiscard]] math::RoundedRect clip_rounded_rect() const noexcept;
+
+    /**
+     * @brief 清除圆角矩形裁剪区域并触发渲染失效。
+     *
+     * 仅当当前裁剪类型为圆角矩形时生效；不影响矩形裁剪。
+     */
+    void clear_clip_rounded_rect();
 
     // ── 快捷属性访问器（依赖属性）────────────────────────────────────────
 

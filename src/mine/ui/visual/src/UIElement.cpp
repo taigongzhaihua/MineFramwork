@@ -12,6 +12,7 @@
 #include <mine/ui/visual/UIElement.h>
 #include <mine/core/Assert.h>
 #include <mine/containers/InlineString.h>
+#include <mine/math/RoundedRect.h>
 
 namespace mine::ui {
 
@@ -112,7 +113,12 @@ UIElement* UIElement::hit_test(math::Point p)
     }
 
     // 若有裁剪区域且点在裁剪外，直接返回 nullptr
-    if (has_clip_rect()) {
+    // 圆角矩形裁剪优先：外角区域命中视为未命中（整棵子树也不可见）
+    if (has_clip_rounded_rect()) {
+        if (!clip_rounded_rect().contains(local_p)) {
+            return nullptr;
+        }
+    } else if (has_clip_rect()) {
         const math::Point clip_test{ local_p.x, local_p.y };
         if (!clip_rect().contains(clip_test)) {
             return nullptr;
@@ -159,7 +165,12 @@ void UIElement::on_arrange(math::Rect /*final_rect*/)
 
 bool UIElement::hit_test_local(math::Point p) const
 {
-    // 默认：测试点是否在 bounds_rect() 内
+    // 优先使用圆角矩形裁剪形状：裁剪形状即控件自身的视觉边界
+    // 外角区域（在包围盒内但在圆角外）不属于控件的命中区域
+    if (has_clip_rounded_rect()) {
+        return clip_rounded_rect().contains(p);
+    }
+    // 回退到轴对齐包围盒
     return p_->bounds_rect_.contains(p);
 }
 

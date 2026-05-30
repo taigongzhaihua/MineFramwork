@@ -8,6 +8,7 @@
 
 #include <mine/paint/Canvas.h>
 #include <mine/paint/Brush.h>
+#include <mine/math/RoundedRect.h>
 #include <mine/ui/event/EventManager.h>
 #include <mine/ui/event/ICommand.h>
 #include <mine/ui/input/InputEvents.h>
@@ -446,6 +447,24 @@ void Button::on_measure(math::Size available_size)
     });
 }
 
+void Button::on_arrange(math::Rect final_rect)
+{
+    // 先让基类完成排列（设置 bounds_rect_，并递归排列模板子元素）
+    Control::on_arrange(final_rect);
+
+    // 根据视觉形状（胶囊圆角，radius = height / 2）设置圆角矩形裁剪。
+    // 此裁剪同时服务于两个目的：
+    //   1. 渲染裁剪：模板子元素（ContentPresenter 等）不溢出圆角之外
+    //   2. 命中测试：UIElement::hit_test 的外角早出 + hit_test_local 的边界判断
+    const math::Rect rect = bounds_rect();
+    if (!rect.empty()) {
+        const float radius = rect.height * 0.5f;
+        set_clip_rounded_rect(math::RoundedRect{ rect, radius });
+    } else {
+        clear_clip_rounded_rect();
+    }
+}
+
 void Button::on_render(paint::Canvas& canvas)
 {
     const math::Rect rect = bounds_rect();
@@ -530,7 +549,12 @@ UIElement* Button::hit_test(math::Point p)
     if (inv) {
         local_p = inv.value().apply(p);
     }
-    // 裁剪区域检查
+    // 裁剪区域检查（优先使用圆角矩形裁剪，on_arrange 中由胶囊形状写入）
+    // 圆角外角区域（包围盒内但圆角外）不触发 Hover/Press 等视觉状态
+    if (has_clip_rounded_rect()) {
+        return clip_rounded_rect().contains(local_p) ? this : nullptr;
+    }
+    // 降级：尚未排列或未设置圆角裁剪时，回退矩形裁剪 + 包围盒判断
     if (has_clip_rect() && !clip_rect().contains(local_p)) {
         return nullptr;
     }
@@ -689,15 +713,19 @@ bool Button::anim_tick_callback(void* user_data, float dt) noexcept
     return any_active;
 }
 
-void Button::on_visual_state_changed(ControlVisualState /*old_state*/,
+void Button::on_visual_state_changed(ControlVisualState old_state,
                                      ControlVisualState new_state)
 {
+    const paint::Brush disabled_brush =
+        paint::Brush::solid(math::Color{0.11f, 0.11f, 0.12f, 0.12f});
+
     // ── 1. 采样当前渲染画刷作为新动画的起始画刷 ────────────────────────────
     // get_value 在 Storyboard 活跃时返回 Animation 优先级的插值画刷，
     // 确保中断旧过渡时从当前可见画刷开始，而非从目标画刷跳变。
     paint::Brush from_brush = background_;  // 默认 fallback
-    if (!is_enabled_) {
-        from_brush = paint::Brush::solid(math::Color{0.11f, 0.11f, 0.12f, 0.12f});
+    if (old_state == ControlVisualState::Disabled) {
+        // Disabled 状态的可见背景并不来自 BackgroundProperty，而是 on_render 的固定禁用色。
+        from_brush = disabled_brush;
     } else {
         const core::Variant& cur = get_value(BackgroundProperty);
         if (cur.has<paint::Brush>()) {
@@ -731,7 +759,7 @@ void Button::on_visual_state_changed(ControlVisualState /*old_state*/,
         break;
     }
     case ControlVisualState::Disabled:
-        to_brush = paint::Brush::solid(math::Color{0.11f, 0.11f, 0.12f, 0.12f});
+        to_brush = disabled_brush;
         break;
     default: {
         // Normal 状态：优先读取 BackgroundProperty 的 StyleSetter(20) 值，
@@ -743,22 +771,21 @@ void Button::on_visual_state_changed(ControlVisualState /*old_state*/,
     }
     }
 
-    // ── 4. 将采样画刷写入 Local 槽，使 capture_from_values 读到正确起始画刷 ─
-    // （stop() 已清除 Animation 槽，若不写 Local 则 capture 会读到 Default 画刷）
-    set_value(BackgroundProperty, core::Variant{from_brush}, ValuePriority::Local);
-
-    // ── 5. 构建新 Storyboard 并启动 ─────────────────────────────────────
+    // ── 4. 构建新 Storyboard 并启动 ─────────────────────────────────────
+    // 使用显式 from/to，避免为了给 capture_from_values 喂起始值而污染
+    // BackgroundProperty 的 Local 槽。否则从 Pressed/Hovered/Disabled 回到 Normal 时，
+    // Normal 目标色会错误读取到前一状态留下的 Local 值。
     bg_storyboard_ = core::make_owned<animation::Storyboard>();
-    bg_storyboard_->animate_dp_to(
+    bg_storyboard_->animate_dp_from_to(
         *this,
         BackgroundProperty,
+        core::Variant{from_brush},
         core::Variant{to_brush},
         animation::Duration::milliseconds(100.0f),  // MD3 状态切换过渡时长
         animation::QuadEaseOut);                     // ease-out quad：末尾减速感更自然
-    bg_storyboard_->capture_from_values();  // 读取 Local 槽中的 from_color
     bg_storyboard_->resolve_and_begin();    // 写入 Animation=from，启动插值
 
-    // ── 6. 向 AnimationClock 注册 tick 回调（幂等，不会产生重复项）────────
+    // ── 5. 向 AnimationClock 注册 tick 回调（幂等，不会产生重复项）────────
     // AnimationClock 统一驱动 Ripple + Storyboard 两种动画，
     // 取代了原来分散在 App 层的 tick_bg_animation() 调用
     animation::AnimationClock::instance().register_animation(this, &Button::anim_tick_callback);
