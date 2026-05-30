@@ -690,6 +690,37 @@ TEST_CASE("animation_Storyboard_tick_完成时返回true且属性等于to")
     sb.stop(); // 清理
 }
 
+TEST_CASE("animation_Storyboard_显式from_to不依赖capture也可正确启动")
+{
+    SbTestObject obj;
+    obj.set_value(sb_float_prop(),
+                  mine::core::Variant{99.0f},
+                  mine::ui::ValuePriority::Local);
+
+    Storyboard sb;
+    sb.animate_dp_from_to(obj, sb_float_prop(),
+                          mine::core::Variant{2.0f},
+                          mine::core::Variant{8.0f},
+                          Duration::milliseconds(100.0f),
+                          Linear);
+
+    // 不调用 capture_from_values()；显式 from 应直接生效。
+    sb.resolve_and_begin();
+
+    const mine::core::Variant& begin_val = obj.get_value(sb_float_prop());
+    REQUIRE(begin_val.has<float>());
+    CHECK(begin_val.get<float>() == doctest::Approx(2.0f));
+
+    const bool done = sb.tick(0.1f);
+    CHECK(done);
+
+    const mine::core::Variant& end_val = obj.get_value(sb_float_prop());
+    REQUIRE(end_val.has<float>());
+    CHECK(end_val.get<float>() == doctest::Approx(8.0f));
+
+    sb.stop();
+}
+
 TEST_CASE("animation_Storyboard_stop_清除Animation优先级")
 {
     SbTestObject obj;

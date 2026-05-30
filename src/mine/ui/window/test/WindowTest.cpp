@@ -295,6 +295,31 @@ protected:
     }
 };
 
+/**
+ * @brief 带单个子节点的测试元素，用于验证继承属性沿视觉树向下传播。
+ */
+class TreeElement : public UIElement {
+public:
+    CountingElement child_;
+
+    TreeElement()
+    {
+        add_child(&child_);
+    }
+
+protected:
+    void on_measure(math::Size available) override
+    {
+        child_.measure(available);
+        set_desired_size(child_.desired_size());
+    }
+
+    void on_arrange(math::Rect final_rect) override
+    {
+        child_.arrange(final_rect);
+    }
+};
+
 // ============================================================================
 // 测试工具：构建 Window 所需的 Mock 对象集合
 // ============================================================================
@@ -402,6 +427,22 @@ TEST_SUITE("mine.ui.window — Window") {
 
         // 渲染器应新增至少一次渲染调用
         CHECK(f.renderer.render_count_ > render_before);
+    }
+
+    TEST_CASE("set_data_context 在已有内容根时传播到整棵视觉子树") {
+        WindowFixture f;
+        auto win = f.make_window();
+
+        TreeElement root;
+        int value = 42;
+        win->set_content(&root);
+        win->set_data_context(core::Variant{ static_cast<void*>(&value) });
+
+        REQUIRE(root.get_value(Window::DataContextProperty).has<void*>());
+        CHECK(root.get_value(Window::DataContextProperty).get<void*>() == static_cast<void*>(&value));
+
+        REQUIRE(root.child_.get_value(Window::DataContextProperty).has<void*>());
+        CHECK(root.child_.get_value(Window::DataContextProperty).get<void*>() == static_cast<void*>(&value));
     }
 
     // ── 平台委托方法 ─────────────────────────────────────────────────────────

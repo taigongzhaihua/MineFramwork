@@ -7,6 +7,7 @@
 #include <doctest/doctest.h>
 
 #include <mine/ui/controls/ControlsAll.h>
+#include <mine/ui/animation/AnimationClock.h>
 #include <mine/ui/input/MouseEventArgs.h>
 #include <mine/ui/input/InputEvents.h>
 #include <mine/ui/event/EventManager.h>
@@ -30,6 +31,21 @@ void on_click_counter(void* /*sender*/, RoutedEventArgs& /*args*/, void* user_da
 {
     auto* counter = static_cast<int*>(user_data);
     ++(*counter);
+}
+
+void advance_button_animations(float dt = 0.35f)
+{
+    (void)mine::ui::animation::AnimationClock::instance().tick_all(dt);
+}
+
+void check_solid_brush(const Button& button, mine::paint::Brush expected)
+{
+    const mine::core::Variant& value = button.get_value(Button::BackgroundProperty);
+    REQUIRE(value.has<mine::paint::Brush>());
+    const auto& brush = value.get<mine::paint::Brush>();
+    REQUIRE(brush.kind() == mine::paint::BrushKind::SolidColor);
+    REQUIRE(expected.kind() == mine::paint::BrushKind::SolidColor);
+    CHECK(brush.color() == expected.color());
 }
 
 } // namespace
@@ -104,6 +120,61 @@ TEST_CASE("controls_Button_禁用后不触发Click")
     EventManager::raise(button, up);
 
     CHECK(click_count == 0);
+}
+
+TEST_CASE("controls_Button_Normal到Disabled再回Normal时恢复Normal外观")
+{
+    Button button;
+    const auto normal = mine::paint::Brush::solid_rgb(0x1565C0);
+    button.set_background(normal);
+
+    button.set_enabled(false);
+    advance_button_animations();
+
+    button.set_enabled(true);
+    advance_button_animations();
+
+    check_solid_brush(button, normal);
+}
+
+TEST_CASE("controls_Button_Pressed到Hovered再回Normal时恢复Normal外观")
+{
+    Button button;
+    const auto normal  = mine::paint::Brush::solid_rgb(0x1565C0);
+    const auto hovered = mine::paint::Brush::solid_rgb(0x1976D2);
+    const auto pressed = mine::paint::Brush::solid_rgb(0x0D47A1);
+    button.set_background(normal);
+    button.set_background_hovered(hovered);
+    button.set_background_pressed(pressed);
+    button.set_bounds_rect({0.0f, 0.0f, 100.0f, 40.0f});
+
+    RoutedEventArgs enter{ input::MouseEnterEvent() };
+    EventManager::raise(button, enter);
+    advance_button_animations();
+    check_solid_brush(button, hovered);
+
+    input::MouseEventArgs down{
+        input::MouseDownEvent(),
+        input::MouseButton::Left,
+        {10.0f, 10.0f},
+        input::ModifierKeys::None};
+    EventManager::raise(button, down);
+    advance_button_animations();
+    check_solid_brush(button, pressed);
+
+    input::MouseEventArgs up{
+        input::MouseUpEvent(),
+        input::MouseButton::Left,
+        {10.0f, 10.0f},
+        input::ModifierKeys::None};
+    EventManager::raise(button, up);
+    advance_button_animations();
+    check_solid_brush(button, hovered);
+
+    RoutedEventArgs leave{ input::MouseLeaveEvent() };
+    EventManager::raise(button, leave);
+    advance_button_animations();
+    check_solid_brush(button, normal);
 }
 
 TEST_CASE("controls_Border_测量包含子元素与边框")
