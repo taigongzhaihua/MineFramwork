@@ -219,13 +219,18 @@ static void s_build_default_button_template(DependencyObject& target)
         });
 
     // ★ 连接样式层：go_to_state 自动调用 style->apply_state(P4)
-    vsm.set_style(&default_button_style());
+    // 若用户在模板构建前通过 set_vsm_style() 指定了自定义样式，则使用该样式；
+    // 否则回退到内置的 default_button_style()（MD3 Primary 紫色配色）
+    style::Style& active_style = button.vsm_style()
+        ? *button.vsm_style()
+        : default_button_style();
+    vsm.set_style(&active_style);
 
     button.set_visual_state_manager(std::move(vsm));
 
-    // ── 阶段 D：应用 P5 基线値 + 安装模板根 ──────────────────────────────
-    // 写入 StyleSetter(P5)：Normal 基线背景色、前景色、边框色
-    default_button_style().apply(button);
+    // ── 阶段 D：应用 P5 基线値 + 安装模板根 ────────────────────────────
+    // 写入 StyleSetter(P5)：Normal 基线背景色、前景色、边框色（来自 active_style）
+    active_style.apply(button);
 
     // on_apply_template() 由 Control::measure_override 在此函数返回后自动调用
     button.set_template_root(std::move(presenter));
@@ -449,6 +454,20 @@ void Button::set_border_color(paint::Brush brush)
     set_value(BorderColorProperty, core::Variant{brush}, ValuePriority::Local);
 }
 
+void Button::set_vsm_style(style::Style* style) noexcept
+{
+    vsm_style_ = style;
+    // 如果模板已经构建（VSM 已创建），直接更新已有 VSM 的样式引用
+    if (vsm()) {
+        vsm()->set_style(style ? style : &default_button_style());
+    }
+}
+
+style::Style* Button::vsm_style() const noexcept
+{
+    return vsm_style_;
+}
+
 void Button::set_font_face(void* font_face) noexcept
 {
     font_face_ = font_face;
@@ -473,6 +492,9 @@ void Button::set_font_size(float size_px) noexcept
 
 void Button::on_apply_template() noexcept
 {
+    // 标记模板来自注册表的 build_fn_（on_arrange 据此决定是否应用胶囊裁剪）
+    template_from_registry_ = true;
+
     // 缓存模板子元素指针（名称与 build_fn 中 set_template_name 一致）
     content_part_ = static_cast<ContentPresenter*>(find_template_child("content"));
 
@@ -519,15 +541,18 @@ void Button::on_arrange(math::Rect final_rect)
     // 先让基类完成排列（设置 bounds_rect_，并递归排列模板子元素）
     Control::on_arrange(final_rect);
 
-    // 根据视觉形状（胶囊圆角，radius = height / 2）设置圆角矩形裁剪。
-    // 此裁剪同时服务于两个目的：
-    //   1. 渲染裁剪：模板子元素（ContentPresenter 等）不溢出圆角之外
-    //   2. 命中测试：UIElement::hit_test 的外角早出 + hit_test_local 的边界判断
     const math::Rect rect = bounds_rect();
-    if (!rect.empty()) {
+    if (!rect.empty() && template_from_registry_) {
+        // 默认 ContentPresenter 模板：胶囊形裁剪（渲染裁剪 + 命中测试）。
+        // 此裁剪同时服务于两个目的：
+        //   1. 渲染裁剪：模板子元素（ContentPresenter 等）不溢出圆角之外
+        //   2. 命中测试：UIElement::hit_test 的外角早出 + hit_test_local 的边界判断
         const float radius = rect.height * 0.5f;
         set_clip_rounded_rect(math::RoundedRect{ rect, radius });
     } else {
+        // 用户自定义模板根（set_template_root 直接设置）：
+        //   不应用胶囊裁剪，由模板自身定义视觉形状和命中范围
+        //   （默认出局：bounds_rect 内的矩形区域均可命中）
         clear_clip_rounded_rect();
     }
 }

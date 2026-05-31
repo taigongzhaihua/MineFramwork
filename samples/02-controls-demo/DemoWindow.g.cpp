@@ -195,12 +195,14 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     if (font) { style_info_.set_font_face(font); }
     body_panel_.add_child(&style_info_);
 
-    // Style 驱动的绿色按钮（demo_style_.apply() 写入 StyleSetter 层，不走 Local 层）
+    // Style 驱动的绿色按钮（set_vsm_style 在首次 measure 时自动完成两步工作：
+    //   1. demo_style_.apply() 写入 P5 基线绿色；
+    //   2. VSM 连接到 demo_style_，悬停/按下时 apply_state() 触发 P4 绿色状态色）
     // 点击也触发计数（演示 Style 不影响功能）
     btn_styled_.set_text("Style 驱动按钮（绿色）");
     btn_styled_.set_margin(math::Thickness{ 16.0f, 10.0f, 16.0f, 0.0f });
     if (font) { btn_styled_.set_font_face(font); }
-    demo_style_.apply(btn_styled_);
+    btn_styled_.set_vsm_style(&demo_style_);   // 勿再单独调用 demo_style_.apply()
     btn_styled_.add_handler(ui::Button::ClickEvent(), &DemoWindowBase::s_on_click_count, this);
     body_panel_.add_child(&btn_styled_);
 

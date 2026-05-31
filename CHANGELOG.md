@@ -5,6 +5,35 @@
 ## [Unreleased]
 
 ### Fixed
+- **mine.ui.controls：修复 Button 自定义模板胶囊裁剪问题（Issue 1）**：
+  `Button::on_arrange` 之前无条件对所有按钮设置胶囊形 `clip_rounded_rect`（radius = height / 2），
+  导致用户通过 `set_template_root(OwnedPtr)` 直接设置的自定义矩形模板（如带边框的 `Border`）
+  被裁成胶囊形，四角矩形外观被破坏。
+  修复方案：新增 `template_from_registry_` 私有标志——仅当模板由注册表的 `build_fn_` 构建
+  （即 `on_apply_template()` 被调用时）才设置此标志，`on_arrange` 只在 `template_from_registry_ == true`
+  时应用胶囊裁剪；用户直接设置 `set_template_root()` 的按钮清除裁剪，命中测试回退为矩形 bounds_rect。
+
+- **mine.ui.controls：修复 Button VSM 状态机样式固化为 default_button_style 问题（Issue 2）**：
+  `s_build_default_button_template` 原始实现硬编码 `vsm.set_style(&default_button_style())`
+  并调用 `default_button_style().apply(button)`，导致：
+  ① 用户通过外部 `Style::apply()` 写入的 P5 基线色在模板构建时被 `default_button_style().apply()` 覆盖；
+  ② VSM `go_to_state` 时调用 `default_button_style().apply_state()`，外部 `Style` 的 P4 状态色从未生效。
+  修复：新增 `Button::set_vsm_style(Style*)` API，在首次 measure 构建模板时读取 `button.vsm_style()`
+  以确定 `active_style`（用户自定义样式或回退到 default），VSM 和 `apply()` 均使用 `active_style`。
+
+- **samples/02-controls-demo：更新绿色按钮使用 `set_vsm_style` 替代 `demo_style_.apply()`**：
+  原先 `demo_style_.apply(btn_styled_)` 写入的 P5 绿色会被模板构建时的
+  `default_button_style().apply()` 覆盖，悬停/按下颜色也走 `default_button_style` 的 P4 紫色。
+  改用 `btn_styled_.set_vsm_style(&demo_style_)` 后，模板构建时 `active_style = demo_style_`，
+  P5 基线（绿色）和 P4 状态色（悬停 #43A047，按下 #1B5E20）均来自 `demo_style_`，绿色主题完整生效。
+
+### Added
+- **mine.ui.controls：`Button::set_vsm_style(Style*)` — VSM 外部样式注入 API**：
+  允许在模板构建前（`_build()` 阶段）为按钮绑定外部 `Style` 对象，
+  `s_build_default_button_template` 在首次 measure 时自动将该样式用于 VSM 连接和 P5 apply。
+  若在模板构建后调用，立即更新已有 VSM 的 `style_` 引用（热切换）。
+  传入 `nullptr` 时回退到内置 `default_button_style()`（MD3 Primary 紫色配色）。
+
 - **samples/01-mvvm-binding：删除已废弃的 `set_background_hovered / set_background_pressed` API 调用**：
   Button 三层分离重构后，`HoveredBackgroundProperty` / `PressedBackgroundProperty` 已删除，
   对应访问器 `set_background_hovered() / set_background_pressed()` 随之移除。

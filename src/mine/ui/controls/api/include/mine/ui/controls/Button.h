@@ -30,6 +30,7 @@
 
 namespace mine::paint { class Canvas; }
 namespace mine::ui::input { class MouseEventArgs; }
+namespace mine::ui::style { class Style; }
 
 // 前向声明（完整定义仅在 Button.cpp 中引入）
 namespace mine::ui { class ICommand; class ContentPresenter; }
@@ -146,6 +147,17 @@ public:
     /// 写入 BackgroundProperty Local 槽（同时停止进行中的 Storyboard）
     void set_background(paint::Brush brush);
 
+    /**
+     * @brief 设置 VSM 使用的样式（覆盖内置的 default_button_style()）。
+     *
+     * 在模板构建前（首次 measure 之前）调用：build_fn_ 将用此样式
+     * 完成 P5 基线值写入（apply）和 VSM P4 状态值配置（apply_state）。
+     * 在模板构建后调用：直接更新已有 VSM 的样式引用（立即生效）。
+     * 传入 nullptr 将回退到 default_button_style()。
+     */
+    void set_vsm_style(style::Style* style) noexcept;
+    [[nodiscard]] style::Style* vsm_style() const noexcept;
+
     /// 读取 BorderColorProperty
     [[nodiscard]] paint::Brush border_color() const noexcept;
     /// 写入 BorderColorProperty Local 槽
@@ -165,11 +177,12 @@ public:
 protected:
     void on_measure(math::Size available_size) override;
     /**
-     * @brief 排列阶段：设置圆角矩形裁剪形状使命中测试与视觉边界保持一致。
+     * @brief 排列阶段：按需设置胶囊形裁剪以保持命中测试与视觉边界一致。
      *
-     * 在基类完成排列后，根据 bounds_rect 高度计算胶囊圆角半径
-     * （radius = height / 2），调用 set_clip_rounded_rect() 同步
-     * 渲染裁剪与命中测试边界。
+     * 仅当模板由注册表 build_fn_（即 on_apply_template() 被调用）构建时，
+     * 才根据 bounds_rect 高度（radius = height / 2）设置胶囊圆角裁剪；
+     * 若用户通过 set_template_root() 直接设置自定义模板根，则清除裁剪，
+     * 由自定义模板自身定义视觉形状与命中范围（默认为矩形 bounds_rect）。
      */
     void on_arrange(math::Rect final_rect) override;
     void on_render(paint::Canvas& canvas) override;
@@ -277,7 +290,9 @@ private:
         bool  active     = false; ///< 是否正在播放
     };
     RippleState ripple_;  ///< 当前涟漪状态
-    ContentPresenter*        content_part_ = nullptr;  ///< 模板子元素指针（on_apply_template 中填充）
+    ContentPresenter*        content_part_           = nullptr;  ///< 模板子元素指针（on_apply_template 中填充）
+    style::Style*            vsm_style_              = nullptr;  ///< 用户指定的 VSM 样式（nullptr 则用 default_button_style）
+    bool                     template_from_registry_ = false;    ///< 模板由 build_fn_ 构建（on_arrange 据此决定是否应用胶囊裁剪）
 };
 
 } // namespace mine::ui
