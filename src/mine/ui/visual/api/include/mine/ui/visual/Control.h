@@ -234,6 +234,25 @@ protected:
     math::Size arrange_override(math::Size final_size) override;
 
     /**
+     * @brief 模板构建完成后的钉子函数。
+     *
+     * 当 `measure_override()` 首次成功执行 `build_fn_(*this)` 并将模板根加入
+     * 视觉子树后，自动调用此虚函数。
+     *
+     * **子类应在此函数中完成以下工作（且仅在此处执行）：**
+     *   1. `find_template_child("name")` —— 根据模板名获取命名元素的指针并缓存到成员变量。
+     *   2. 对取得的元素做额外初天化配置（如设置动画初始参数、订阅元素事件）。
+     *
+     * **不应在此处执行的工作：**
+     *   - 直接操作 Storyboard（应在模板的 VSM 过渡配置中完成）
+     *   - 调用 `update_visual_state()`（此时布局尚未完成）
+     *   - 写入 DependencyProperty Local 层的值（应由样式层或用户代码控制）
+     *
+     * 默认实现为空操作（无模板的底层叶子控件无需覆写）。
+     */
+    virtual void on_apply_template() noexcept {}
+
+    /**
      * @brief 由子类计算当前视觉状态（枚举）。
      *
      * 默认返回 Normal；Button 等控件可覆盖以反映 Hovered/Pressed 等状态。

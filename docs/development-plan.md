@@ -138,7 +138,8 @@ git tag：`v0.3.0-f2`
 |---|------|------|
 | 28 | `samples/01-pure-cpp`：纯 C++ 实现的 MVVM Todo 应用（无 MML 依赖） | `samples/01-pure-cpp` |
 | 28.1 | ✅ `samples/02-controls-demo`：窗口+控件交互演示（Button 点击计数、TextBlock 渲染、InputRouter 路由）。**当前状态**：DemoApp 同时包含视图逻辑与应用逻辑（过渡形态，UserControl/MML codegen 实现前的权宜结构）。待 F2.3 `UserControl` + T 轨道 MML codegen 完成后，重构为 `DemoWindow`（mmlc 生成包装类）+ 薄 `DemoApp` 壳。 | `samples/02-controls-demo` |
-| 28.2 | `samples/03-usercontrol-mvvm`：以 `UserControl` 子视图 + `ViewModelBase` 演示标准 MVVM 分层（视图/视图模型/模型完全分离） | `samples/03-usercontrol-mvvm` |
+| 28.2 | ✅ `samples/03-custom-chrome`：自定义无边框标题栏示例（`Window::drag()`、`WindowStateProperty` DP）。 | `samples/03-custom-chrome` |
+| 28.3 | `samples/04-usercontrol-mvvm`：以 `UserControl` 子视图 + `ViewModelBase` 演示标准 MVVM 分层（视图/视图模型/模型完全分离） | `samples/04-usercontrol-mvvm` |
 
 git tag：`v0.4.0-f3`
 

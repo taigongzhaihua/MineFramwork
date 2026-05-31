@@ -303,6 +303,8 @@ math::Size Control::measure_override(math::Size available)
         if (tmpl && tmpl->build_fn_) {
             // build_fn_ 内部会调用 set_template_root 将根元素加入视觉子树
             tmpl->build_fn_(*this);
+            // 模板构建完成后通知控件：此时可安全调用 find_template_child()
+            on_apply_template();
         }
     }
     // 若模板根已构建，测量模板根并返回其期望尺寸
