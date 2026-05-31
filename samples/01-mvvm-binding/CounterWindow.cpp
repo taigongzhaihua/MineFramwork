@@ -121,9 +121,8 @@ void CounterWindow::build_(mine::text::FontFace* font)
     btn_inc_.set_font_size(15.0f);
     btn_inc_.set_padding(math::Thickness{ 20.0f, 12.0f, 20.0f, 12.0f });
     btn_inc_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
+    // set_background 写入 Local(P2)，优先级高于 StyleTrigger(P4)，状态色被遮蔽（符合预期：自定义主题色）
     btn_inc_.set_background(paint::Brush::solid_rgb(0x1565C0));
-    btn_inc_.set_background_hovered(paint::Brush::solid_rgb(0x1976D2));
-    btn_inc_.set_background_pressed(paint::Brush::solid_rgb(0x0D47A1));
     btn_inc_.set_border_color(paint::Brush::solid_rgb(0x0D47A1));
     btn_inc_.set_margin(math::Thickness{ 0.0f, 0.0f, 12.0f, 0.0f });
     if (font) { btn_inc_.set_font_face(font); }
@@ -136,8 +135,6 @@ void CounterWindow::build_(mine::text::FontFace* font)
     btn_dec_.set_padding(math::Thickness{ 20.0f, 12.0f, 20.0f, 12.0f });
     btn_dec_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
     btn_dec_.set_background(paint::Brush::solid_rgb(0x455A64));
-    btn_dec_.set_background_hovered(paint::Brush::solid_rgb(0x546E7A));
-    btn_dec_.set_background_pressed(paint::Brush::solid_rgb(0x263238));
     btn_dec_.set_border_color(paint::Brush::solid_rgb(0x263238));
     btn_dec_.set_margin(math::Thickness{ 0.0f, 0.0f, 12.0f, 0.0f });
     if (font) { btn_dec_.set_font_face(font); }
@@ -149,8 +146,6 @@ void CounterWindow::build_(mine::text::FontFace* font)
     btn_reset_.set_padding(math::Thickness{ 20.0f, 12.0f, 20.0f, 12.0f });
     btn_reset_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
     btn_reset_.set_background(paint::Brush::solid_rgb(0xE65100));
-    btn_reset_.set_background_hovered(paint::Brush::solid_rgb(0xF57C00));
-    btn_reset_.set_background_pressed(paint::Brush::solid_rgb(0xBF360C));
     btn_reset_.set_border_color(paint::Brush::solid_rgb(0xBF360C));
     btn_reset_.set_margin(math::Thickness{ 0.0f, 0.0f, 12.0f, 0.0f });
     if (font) { btn_reset_.set_font_face(font); }
@@ -162,8 +157,6 @@ void CounterWindow::build_(mine::text::FontFace* font)
     btn_quit_.set_padding(math::Thickness{ 20.0f, 12.0f, 20.0f, 12.0f });
     btn_quit_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
     btn_quit_.set_background(paint::Brush::solid_rgb(0xC62828));
-    btn_quit_.set_background_hovered(paint::Brush::solid_rgb(0xD32F2F));
-    btn_quit_.set_background_pressed(paint::Brush::solid_rgb(0x7F0000));
     btn_quit_.set_border_color(paint::Brush::solid_rgb(0x7F0000));
     if (font) { btn_quit_.set_font_face(font); }
     btn_quit_.add_handler(ui::Button::ClickEvent(), &CounterWindow::s_on_click_quit, this);

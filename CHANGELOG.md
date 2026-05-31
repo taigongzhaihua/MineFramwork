@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### Fixed
+- **samples/01-mvvm-binding：删除已废弃的 `set_background_hovered / set_background_pressed` API 调用**：
+  Button 三层分离重构后，`HoveredBackgroundProperty` / `PressedBackgroundProperty` 已删除，
+  对应访问器 `set_background_hovered() / set_background_pressed()` 随之移除。
+  `CounterWindow.cpp` 中四个按钮（`+1`、`-1`、重置、退出）各删除 2 处旧 API 调用（共 8 处），
+  现由 P4 StyleTrigger（VSM 状态色）和 P5 StyleSetter（基线色）负责悬停/按下外观；
+  `set_background()` 写 Local(P2)，优先级高于 P4，故按钮保持用户指定颜色不受状态影响（符合预期）。
+
+- **samples/02-controls-demo：修复自定义模板按钮 MD3 紫色背景从 Border 背后漏出**：
+  直接调用 `set_template_root(OwnedPtr)` 跳过了 `build_fn_` 路径，导致
+  `default_button_style().apply()` 未执行，`BackgroundProperty` 保留 Default(P0)=`#6750A4`（MD3 Primary 紫）。
+  Button 的 `on_render` 始终绘制背景圆角矩形，Purple 背景会从 Border 边缘/后方透出影响视觉。
+  修复：在 `btn_tmpl_.set_template_root()` 之前添加
+  `btn_tmpl_.set_background(paint::Brush::solid(math::Color::Transparent))`，
+  写 Local(P2) 透明画刷覆盖 Default(P0)，使 Button 自身背景透明，Border 模板完整呈现。
+
 ### Added
 - **mine.ui.window / mine.platform.abi / mine.platform.win32：`WindowStateProperty` DP 属性——窗口状态 WPF 风格控制**：
   新增 `Window::WindowStateProperty`（`int`/`WindowState` 枚举，默认 Normal），

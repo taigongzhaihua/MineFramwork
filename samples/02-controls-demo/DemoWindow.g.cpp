@@ -235,6 +235,10 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tmpl_label_.set_padding(math::Thickness{ 16.0f, 8.0f, 16.0f, 8.0f });
     if (font) { tmpl_label_.set_font_face(font); }
 
+    // 直接调用 set_template_root 跳过了 build_fn_，default_button_style().apply() 不会执行，
+    // BackgroundProperty 保留 Default(P0)=#6750A4（MD3 Primary 紫）。
+    // 写入 Local(P2) 透明画刷，防止 MD3 紫色从 Border 后方漏出影响视觉。
+    btn_tmpl_.set_background(paint::Brush::solid(math::Color::Transparent));
     {
         // Border 作为模板根，通过 OwnedPtr 转移所有权给 btn_tmpl_
         auto border_root = core::make_owned<ui::Border>();
