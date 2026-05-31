@@ -9,10 +9,11 @@
  *   - ContentProperty / PaddingProperty / BackgroundProperty 等多个 DependencyProperty
  *   - 背景色、悬停色、按下色、前景色、边框色均通过 DependencyProperty 驱动
  *
- * 动画架构（F2 阶段）：
- *   背景色过渡 Storyboard 与 Ripple 均注册到 AnimationClock，
- *   由应用层（或未来框架层）统一调用 AnimationClock::instance().tick_all(dt) 驱动，
- *   控件自身不再暴露任何 tick/has_active 接口。
+ * 动画架构（F3 范式——三层分离）：
+ *   背景色过渡由 VisualStateManager 的 Storyboard 管理：go_to_state() 先通过
+ *   StyleTrigger(P4) 写入终值，再以 animate_dp()（仅声明路径）插值到该终值；
+ *   Ripple 涟漪动画直接由 AnimationClock 驱动。两者共用 anim_tick_callback，
+ *   在 on_visual_state_changed 中注册到 AnimationClock，tick 返回 false 时自动注销。
  */
 
 #pragma once
@@ -29,10 +30,9 @@
 
 namespace mine::paint { class Canvas; }
 namespace mine::ui::input { class MouseEventArgs; }
-namespace mine::ui::animation { class Storyboard; }
 
-// ICommand 前向声明（完整定义在 Button.cpp 中通过 ICommand.h 引入）
-namespace mine::ui { class ICommand; }
+// 前向声明（完整定义仅在 Button.cpp 中引入）
+namespace mine::ui { class ICommand; class ContentPresenter; }
 
 namespace mine::ui {
 
@@ -59,10 +59,12 @@ public:
     using ContentControl::ContentProperty;
 
     /**
-     * @brief 当前渲染背景画刷（由 Storyboard 在 Animation 槽写入插值画刷）。
+     * @brief 背景画刷属性（Variant 存储 paint::Brush）。
      *
-     * Default = MD3 Primary Brush::solid(#6750A4)。用户设定的 Normal 态画刷通过 set_background()
-     * 写入 Local 槽；Storyboard 在 Animation 槽（优先级 60）覆盖，on_render 读取最高优先级。
+     * Default(P0) = MD3 Primary #6750A4；默认样式以 StyleSetter(P5) 写入基线值；
+     * Hovered/Pressed/Disabled 状态由 StyleTrigger(P4) 写入终值，VSM Storyboard
+     * 以 Animation(P1) 进行插值过渡；on_render 通过 get_value 读取最高优先级层。
+     * 用户调用 set_background() 写入 Local(P2)，高于 StyleTrigger，故不受状态影响。
      */
     static const DependencyProperty& BackgroundProperty;
 
@@ -87,22 +89,6 @@ public:
      * Default = Brush::solid(Transparent)（MD3 Filled Button 无外边框）。
      */
     static const DependencyProperty& BorderColorProperty;
-
-    /**
-     * @brief Hovered 状态目标背景画刷（Variant 存储 paint::Brush）。
-     *
-     * Default = Brush::solid(MD3 Primary + OnPrimary * 8%，≈ #735BAC)。
-     * set_background_hovered() 写入 Local 槽；on_visual_state_changed 读取作为过渡终值。
-     */
-    static const DependencyProperty& HoveredBackgroundProperty;
-
-    /**
-     * @brief Pressed 状态目标背景画刷（Variant 存储 paint::Brush）。
-     *
-     * Default = Brush::solid(MD3 Primary + OnPrimary * 12%，≈ #7A65AF)。
-     * set_background_pressed() 写入 Local 槽；on_visual_state_changed 读取作为过渡终值。
-     */
-    static const DependencyProperty& PressedBackgroundProperty;
 
     /**
      * @brief 命令属性（Variant 存储 ICommand*）。
@@ -160,16 +146,6 @@ public:
     /// 写入 BackgroundProperty Local 槽（同时停止进行中的 Storyboard）
     void set_background(paint::Brush brush);
 
-    /// 读取 HoveredBackgroundProperty
-    [[nodiscard]] paint::Brush background_hovered() const noexcept;
-    /// 写入 HoveredBackgroundProperty Local 槽
-    void set_background_hovered(paint::Brush brush);
-
-    /// 读取 PressedBackgroundProperty
-    [[nodiscard]] paint::Brush background_pressed() const noexcept;
-    /// 写入 PressedBackgroundProperty Local 槽
-    void set_background_pressed(paint::Brush brush);
-
     /// 读取 BorderColorProperty
     [[nodiscard]] paint::Brush border_color() const noexcept;
     /// 写入 BorderColorProperty Local 槽
@@ -199,6 +175,20 @@ protected:
     void on_render(paint::Canvas& canvas) override;
     UIElement* hit_test(math::Point p) override;
     [[nodiscard]] ControlVisualState compute_visual_state() const override;
+    /**
+     * @brief 模板构建完成钩子——缓存模板子元素指针。
+     *
+     * 调用 find_template_child("content") 并缓存到 content_part_，
+     * 同时将当前前景色/字体同步到 ContentPresenter（初始一次性同步）。
+     * 后续属性变更通过 on_foreground_changed 等 DP 回调自动传播。
+     */
+    void on_apply_template() noexcept override;
+    /**
+     * @brief 视觉状态切换钩子——注册 AnimationClock 驱动 VSM 动画。
+     *
+     * 背景色过渡完全由 VSM Storyboard 管理，此钩子只负责将 anim_tick_callback
+     * 注册到 AnimationClock（幂等）；Ripple 涟漪的停止/启动在 on_mouse_down 中控制。
+     */
     void on_visual_state_changed(ControlVisualState old_state,
                                  ControlVisualState new_state) override;
 
@@ -276,10 +266,6 @@ private:
     uint32_t                 cmd_token_    = 0;        ///< can_execute_changed 订阅 token（0 表示未订阅）
     /// 内边距缓存（由 on_padding_changed 从 PaddingProperty 同步）
     math::Thickness          padding_      = math::Thickness::symmetric(24.0f, 10.0f);
-    /// Normal 态目标背景画刷（用户通过 set_background() 设定的语义値）
-    /// F2 临时保留：用于 on_visual_state_changed 中 Normal 态目标画刷查找，
-    /// F3 将改为从 BackgroundProperty Local 槽读取（配合 StyleSetter）
-    paint::Brush             background_   = paint::Brush::solid_rgb(0x6750A4);
     void*                    font_face_    = nullptr;
     float                    font_size_px_ = 14.0f;
 
@@ -291,9 +277,7 @@ private:
         bool  active     = false; ///< 是否正在播放
     };
     RippleState ripple_;  ///< 当前涟漪状态
-
-    /// MD3 背景色过渡 Storyboard（在 AnimationClock tick 中推进）
-    core::OwnedPtr<animation::Storyboard> bg_storyboard_;
+    ContentPresenter*        content_part_ = nullptr;  ///< 模板子元素指针（on_apply_template 中填充）
 };
 
 } // namespace mine::ui

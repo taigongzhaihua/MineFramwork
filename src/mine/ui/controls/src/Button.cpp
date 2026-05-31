@@ -9,6 +9,7 @@
 #include <mine/paint/Canvas.h>
 #include <mine/paint/Brush.h>
 #include <mine/math/RoundedRect.h>
+#include <mine/math/Color.h>
 #include <mine/ui/event/EventManager.h>
 #include <mine/ui/event/ICommand.h>
 #include <mine/ui/input/InputEvents.h>
@@ -16,6 +17,8 @@
 #include <mine/ui/property/DependencyProperty.h>
 #include <mine/ui/property/PropertyMetadata.h>
 #include <mine/ui/property/ValuePriority.h>
+#include <mine/ui/style/Style.h>
+#include <mine/ui/style/StyleSetter.h>
 #include <mine/ui/style/TemplateRegistry.h>
 #include <mine/ui/animation/Storyboard.h>
 #include <mine/ui/animation/EasingFunction.h>
@@ -43,15 +46,13 @@ const DependencyProperty& Button::PaddingProperty =
             .changed         = &Button::on_padding_changed,
         });
 
-// Button::BackgroundProperty — 当前渲染背景画刷（由 Storyboard 在 Animation 优先级写入插値画刷）
-// 默认値为 MD3 Primary（#6750A4）的纯色画刷，on_visual_state_changed 启动时先将当前画刷写入 Local 槽，
-// 之后 Storyboard 在 Animation 槽（优先级 60）写入帧间插値，on_render 通过 get_value 读取。
+// Button::BackgroundProperty — 背景画刷（MD3 Primary #6750A4；样式层会在 P5 覆写基线值）
 const DependencyProperty& Button::BackgroundProperty =
     register_property<Button>(
         "Background",
-        core::Variant{ paint::Brush::solid_rgb(0x6750A4) },  // MD3 Primary
+        core::Variant{ paint::Brush::solid_rgb(0x6750A4) },  // Default(P0)
         PropertyMetadata{
-            .affects_render = true,  // 属性变更时自动触发 invalidate_render
+            .affects_render = true,
         });
 
 // Button::ForegroundProperty — 文字前景画刷（MD3 On Primary 白色）
@@ -70,26 +71,6 @@ const DependencyProperty& Button::BorderColorProperty =
     register_property<Button>(
         "BorderColor",
         core::Variant{ paint::Brush::solid(math::Color::Transparent) },
-        PropertyMetadata{
-            .affects_render = true,
-        });
-
-// Button::HoveredBackgroundProperty — Hovered 状态目标背景画刷
-// MD3 Primary + OnPrimary * 8%（hover state layer = 8% of OnPrimary）
-const DependencyProperty& Button::HoveredBackgroundProperty =
-    register_property<Button>(
-        "HoveredBackground",
-        core::Variant{ paint::Brush::solid(math::Color{0.452f, 0.369f, 0.672f, 1.0f}) },  // ≈ #735BAC
-        PropertyMetadata{
-            .affects_render = true,
-        });
-
-// Button::PressedBackgroundProperty — Pressed 状态目标背景画刷
-// MD3 Primary + OnPrimary * 12%（pressed state layer = 12% of OnPrimary）
-const DependencyProperty& Button::PressedBackgroundProperty =
-    register_property<Button>(
-        "PressedBackground",
-        core::Variant{ paint::Brush::solid(math::Color{0.476f, 0.396f, 0.686f, 1.0f}) },  // ≈ #7A65AF
         PropertyMetadata{
             .affects_render = true,
         });
@@ -113,30 +94,142 @@ const DependencyProperty& Button::CommandParameterProperty =
         PropertyMetadata{});
 
 // ============================================================================
+// 默认样式（第三层：样式层）
+// ============================================================================
+
+/**
+ * @brief 构建默认 Button 样式对象（Construct On First Use，避免静态初始化顺序问题）。
+ *
+ * 层 P5 StyleSetter：Normal 状态的基线外观值（背景色、前景色、边框色）。
+ * 层 P4 StyleTrigger：Hovered/Pressed/Disabled 状态的终值（由 VSM go_to_state 自动写入）。
+ *
+ * 注意：状态 setter 只写终值，不描述动画曲线（动画曲线在模板的 VSM 过渡中配置）。
+ */
+static style::Style& default_button_style()
+{
+    static style::Style s = [] {
+        using namespace mine::paint;
+        using namespace mine::math;
+
+        style::Style s;
+        s.set_target_type(core::TypeId::of<Button>());
+        s.set_name("DefaultButton");
+
+        // ── P5 StyleSetter：Normal 基线外观 ──────────────────────────────────
+        s.add_setter({ &Button::BackgroundProperty,
+                       core::Variant{ Brush::solid_rgb(0x6750A4) } });          // MD3 Primary
+        s.add_setter({ &Button::ForegroundProperty,
+                       core::Variant{ Brush::solid(Color::White) } });           // MD3 On Primary
+        s.add_setter({ &Button::BorderColorProperty,
+                       core::Variant{ Brush::solid(Color::Transparent) } });
+
+        // ── P4 StyleTrigger：Hovered 状态终值 ───────────────────────────────────
+        style::VisualStateSetters hovered;
+        hovered.state_name = "Hovered";
+        hovered.setters.push_back({ &Button::BackgroundProperty,
+            core::Variant{ Brush::solid(Color{0.452f, 0.369f, 0.672f, 1.0f}) } });  // ≈ #735BAC
+        s.add_state_setters(std::move(hovered));
+
+        // ── P4 StyleTrigger：Pressed 状态终值 ───────────────────────────────────
+        style::VisualStateSetters pressed;
+        pressed.state_name = "Pressed";
+        pressed.setters.push_back({ &Button::BackgroundProperty,
+            core::Variant{ Brush::solid(Color{0.476f, 0.396f, 0.686f, 1.0f}) } });  // ≈ #7A65AF
+        s.add_state_setters(std::move(pressed));
+
+        // ── P4 StyleTrigger：Disabled 状态终值（无动画——直接跳变） ─────────────────
+        style::VisualStateSetters disabled;
+        disabled.state_name = "Disabled";
+        disabled.setters.push_back({ &Button::BackgroundProperty,
+            core::Variant{ Brush::solid(Color{0.11f, 0.11f, 0.12f, 0.12f}) } });  // OnSurface 12%
+        disabled.setters.push_back({ &Button::ForegroundProperty,
+            core::Variant{ Brush::solid(Color{0.11f, 0.11f, 0.12f, 0.38f}) } });  // OnSurface 38%
+        s.add_state_setters(std::move(disabled));
+
+        return s;
+    }();
+    return s;
+}
+
+// ============================================================================
 // 默认 ControlTemplate 构建函数
 // ============================================================================
 
 /**
- * @brief 默认按钮模板构建函数（无捕获，可作为函数指针传入 register_template）。
+ * @brief 默认按鈕模板构建函数（三层分离范式：模板层）。
  *
- * 创建 ContentPresenter 作为模板根，并与 Button 的 Content/Padding 属性建立绑定。
+ * 阶段 A：创建视觉元素（ContentPresenter 作为模板根）
+ * 阶段 B：bind_template 建立 TemplateBind(P3) 同步（Content / Padding）
+ * 阶段 C：配置 VisualStateManager（定义状态 + 动画过渡）+ 连接默认样式
+ * 阶段 D：应用样式 P5 基线値 + 安装模板根
+ *
+ * on_apply_template() 由 Control::measure_override 在 build_fn 返回后自动调用。
  */
 static void s_build_default_button_template(DependencyObject& target)
 {
     auto& button    = static_cast<Button&>(target);
     auto  presenter = core::make_owned<ContentPresenter>();
+    ContentPresenter* presenter_ptr = presenter.get();
     presenter->set_template_name("content");
 
-    // 建立 TemplateBind：宿主属性 → 模板子元素属性
+    // ── 阶段 B：TemplateBind(P3) 同步 ───────────────────────────────────────
+    // Content 和 Padding 属性通过 bind_template 自动同步到 ContentPresenter
     button.bind_template(*presenter,
                          ContentPresenter::ContentProperty,
-                         ContentControl::ContentProperty);  // 继承自 ContentControl
+                         ContentControl::ContentProperty);
     button.bind_template(*presenter,
                          ContentPresenter::PaddingProperty,
                          Button::PaddingProperty);
+    // 注：Foreground 通过 on_foreground_changed 回调传播（ContentPresenter 无 ForegroundProperty DP）
 
-    // 将模板根加入视觉子树，并转移所有权给 Control（避免内存泄漏）
+    // ── 阶段 C：VisualStateManager 配置 ───────────────────────────────────────
+    style::VisualStateManager vsm{ button };
+
+    vsm.define_state("Normal");
+    vsm.define_state("Hovered");
+    vsm.define_state("Pressed");
+    vsm.define_state("Disabled");  // Disabled 无动画，不注册过渡
+
+    // 任意状态 → Hovered：120ms 平滑过渡
+    // animate_dp 只声明动画路径，不硬编码颜色：
+    //   from = capture_from_values() 采样当前最高优先级値
+    //   to   = StyleTrigger(P4) 由 go_to_state 写入的 Hovered 终値
+    auto* btn_ptr = &button;
+    vsm.add_transition("*", "Hovered",
+        [btn_ptr](animation::Storyboard& sb) {
+            sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
+                          animation::Duration::milliseconds(120.0f),
+                          animation::QuadEaseOut);
+        });
+
+    // 任意状态 → Normal：100ms 平滑回退
+    vsm.add_transition("*", "Normal",
+        [btn_ptr](animation::Storyboard& sb) {
+            sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
+                          animation::Duration::milliseconds(100.0f),
+                          animation::QuadEaseOut);
+        });
+
+    // 任意状态 → Pressed：60ms 快速按下
+    vsm.add_transition("*", "Pressed",
+        [btn_ptr](animation::Storyboard& sb) {
+            sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
+                          animation::Duration::milliseconds(60.0f),
+                          animation::QuadEaseIn);
+        });
+
+    // ★ 连接样式层：go_to_state 自动调用 style->apply_state(P4)
+    vsm.set_style(&default_button_style());
+
+    button.set_visual_state_manager(std::move(vsm));
+
+    // ── 阶段 D：应用 P5 基线値 + 安装模板根 ──────────────────────────────
+    // 写入 StyleSetter(P5)：Normal 基线背景色、前景色、边框色
+    default_button_style().apply(button);
+
+    // on_apply_template() 由 Control::measure_override 在此函数返回后自动调用
     button.set_template_root(std::move(presenter));
+    (void)presenter_ptr;  // 建立后不再直接使用，缓存在 content_part_
 }
 
 /**
@@ -241,7 +334,7 @@ const RoutedEvent& Button::ClickEvent()
 
 Button::Button()
 {
-    set_style_slot("DefaultButton");
+    // 只设模板槽位，样式由 build_fn 内直接应用（apply P5）并连接 VSM（set_style P4）
     set_template_slot("DefaultButtonTemplate");
 
     add_handler(input::MouseDownEvent(), &Button::on_mouse_down_router, this);
@@ -332,45 +425,16 @@ void Button::set_foreground(paint::Brush brush)
 
 paint::Brush Button::background() const noexcept
 {
-    return background_;
+    // 返回 BackgroundProperty 的最高优先级値（Animation > Local > TemplateBind > StyleTrigger > StyleSetter）
+    const core::Variant& v = get_value(BackgroundProperty);
+    return v.has<paint::Brush>() ? v.get<paint::Brush>() : paint::Brush::solid_rgb(0x6750A4);
 }
 
 void Button::set_background(paint::Brush brush)
 {
-    background_ = brush;
-    // 无论动画是否完成，都清除 Animation 槽（is_complete 时 Animation(60) 仍残留），
-    // 防止已完成动画的终值遮盖新写入的 Local 值导致画面不更新
-    if (bg_storyboard_) {
-        bg_storyboard_->stop();
-        bg_storyboard_ = nullptr;
-    }
-    // 将新画刷写入 BackgroundProperty Local 槽：on_render 通过 get_value 读取此属性，
-    // affects_render=true → set_value 内部自动触发 invalidate_render，无需额外调用
+    // 写入 Local(P2) 槽。由于 P2 > P4(StyleTrigger)，将不受状态色影响。
+    // 如需允许状态色影响，应使用样式系统替换占位符样式。
     set_value(BackgroundProperty, core::Variant{brush}, ValuePriority::Local);
-}
-
-paint::Brush Button::background_hovered() const noexcept
-{
-    const core::Variant& v = get_value(HoveredBackgroundProperty);
-    return v.has<paint::Brush>() ? v.get<paint::Brush>() : paint::Brush{};
-}
-
-void Button::set_background_hovered(paint::Brush brush)
-{
-    // 写入 HoveredBackgroundProperty Local 槽；affects_render=true → 自动触发 invalidate_render
-    set_value(HoveredBackgroundProperty, core::Variant{brush}, ValuePriority::Local);
-}
-
-paint::Brush Button::background_pressed() const noexcept
-{
-    const core::Variant& v = get_value(PressedBackgroundProperty);
-    return v.has<paint::Brush>() ? v.get<paint::Brush>() : paint::Brush{};
-}
-
-void Button::set_background_pressed(paint::Brush brush)
-{
-    // 写入 PressedBackgroundProperty Local 槽；affects_render=true → 自动触发 invalidate_render
-    set_value(PressedBackgroundProperty, core::Variant{brush}, ValuePriority::Local);
 }
 
 paint::Brush Button::border_color() const noexcept
@@ -388,15 +452,12 @@ void Button::set_border_color(paint::Brush brush)
 void Button::set_font_face(void* font_face) noexcept
 {
     font_face_ = font_face;
-    // 若模板已构建，立即将字体与当前前景画刷传播到 ContentPresenter
-    UIElement* child = find_template_child("content");
-    if (child != nullptr) {
-        auto* presenter = static_cast<ContentPresenter*>(child);
-        presenter->set_font_face(font_face_);
-        // 从 ForegroundProperty（唯一真相源）读取当前前景画刷并同步
+    // 若模板已构建，立即将字体与当前前景色传播到 ContentPresenter
+    if (content_part_ != nullptr) {
+        content_part_->set_font_face(font_face_);
         const core::Variant& fg_var = get_value(ForegroundProperty);
         if (fg_var.has<paint::Brush>()) {
-            presenter->set_foreground(fg_var.get<paint::Brush>());
+            content_part_->set_foreground(fg_var.get<paint::Brush>());
         }
     }
 }
@@ -405,10 +466,28 @@ void Button::set_font_size(float size_px) noexcept
 {
     font_size_px_ = size_px;
     // 若模板已构建，立即将字号传播到 ContentPresenter
-    UIElement* child = find_template_child("content");
-    if (child != nullptr) {
-        auto* presenter = static_cast<ContentPresenter*>(child);
-        presenter->set_font_size(font_size_px_);
+    if (content_part_ != nullptr) {
+        content_part_->set_font_size(font_size_px_);
+    }
+}
+
+void Button::on_apply_template() noexcept
+{
+    // 缓存模板子元素指针（名称与 build_fn 中 set_template_name 一致）
+    content_part_ = static_cast<ContentPresenter*>(find_template_child("content"));
+
+    if (content_part_ != nullptr) {
+        // 初始一次性同步前景色到 ContentPresenter
+        // （后续变更由 on_foreground_changed DP 回调自动传播）
+        const core::Variant& fg_var = get_value(ForegroundProperty);
+        if (fg_var.has<paint::Brush>()) {
+            content_part_->set_foreground(fg_var.get<paint::Brush>());
+        }
+        // 字体同步
+        if (font_face_ != nullptr) {
+            content_part_->set_font_face(font_face_);
+        }
+        content_part_->set_font_size(font_size_px_);
     }
 }
 
@@ -417,34 +496,22 @@ void Button::on_measure(math::Size available_size)
     // 通过 Control::on_measure 自动构建模板（首次调用）并委托给模板根
     Control::on_measure(available_size);
 
-    // 模板已构建，Control::on_measure 已采用模板根的期望尺寸
-    if (template_root()) {
-        // 每次 measure 时将字体属性同步到 ContentPresenter（幂等，确保动态设置生效）
-        UIElement* child = find_template_child("content");
-        if (child != nullptr && font_face_ != nullptr) {
-            auto* presenter = static_cast<ContentPresenter*>(child);
-            presenter->set_font_face(font_face_);
-            // 从 ForegroundProperty（唯一真相源）读取前景画刷
-            const core::Variant& fg_var = get_value(ForegroundProperty);
-            const paint::Brush base_fg = fg_var.has<paint::Brush>()
-                ? fg_var.get<paint::Brush>() : paint::Brush::solid(math::Color::White);
-            // MD3 Disabled 状态：OnSurface 38% opacity（暗灰半透明文字）
-            const paint::Brush effective_fg = is_enabled_
-                ? base_fg
-                : paint::Brush::solid(math::Color{0.11f, 0.11f, 0.12f, 0.38f});
-            presenter->set_foreground(effective_fg);
-            presenter->set_font_size(font_size_px_);
-        }
+    // 模板已构建：同步字体属性到 ContentPresenter（幂等）
+    if (content_part_ != nullptr && font_face_ != nullptr) {
+        content_part_->set_font_face(font_face_);
+        content_part_->set_font_size(font_size_px_);
         return;
     }
 
     // 无模板时的回退路径：按字符数估算宽度
-    const float text_w = static_cast<float>(text_.size()) * 14.0f * 0.55f;
-    const float text_h = 14.0f * 1.4f;
-    set_desired_size({
-        text_w + padding_.horizontal(),
-        text_h + padding_.vertical(),
-    });
+    if (!template_root()) {
+        const float text_w = static_cast<float>(text_.size()) * 14.0f * 0.55f;
+        const float text_h = 14.0f * 1.4f;
+        set_desired_size({
+            text_w + padding_.horizontal(),
+            text_h + padding_.vertical(),
+        });
+    }
 }
 
 void Button::on_arrange(math::Rect final_rect)
@@ -472,18 +539,16 @@ void Button::on_render(paint::Canvas& canvas)
         return;
     }
 
-    // Material Design 3 Filled Button：背景画刷从 BackgroundProperty DP 读取
-    // 动画期间 Storyboard 写入 Animation 优先级（60）的插値画刷，get_value 自动返回最高优先级値
-    paint::Brush fill;
-    if (!is_enabled_) {
-        // MD3 Disabled：OnSurface(#1C1B1F) at 12% opacity，不参与过渡
-        fill = paint::Brush::solid(math::Color{0.11f, 0.11f, 0.12f, 0.12f});
-    } else {
-        const core::Variant& bg_var = get_value(BackgroundProperty);
-        fill = bg_var.has<paint::Brush>() ? bg_var.get<paint::Brush>() : background_;
-    }
+    // 背景画刷通过 DP 优先级链读取：
+    //   Animation(P1) = Storyboard 插値（状态切换动画期间）
+    //   StyleTrigger(P4) = 当前状态终値（动画结束后稳定显示）
+    //   StyleSetter(P5) = Normal 基线値（没有动画且没有状态覆写时）
+    const core::Variant& bg_var = get_value(BackgroundProperty);
+    const paint::Brush fill = bg_var.has<paint::Brush>()
+        ? bg_var.get<paint::Brush>()
+        : paint::Brush::solid_rgb(0x6750A4);  // 回退：MD3 Primary
 
-    // Material Design 3 Filled Button：完全圆角（胶囊形，radius = height / 2）
+    // MD3 Filled Button：完全圆角（胶囊形，radius = height / 2）
     const float radius = rect.height * 0.5f;
     canvas.fill_rounded_rect(math::RoundedRect{rect, radius}, fill);
 
@@ -521,11 +586,7 @@ void Button::on_render(paint::Canvas& canvas)
 
     // 无模板时的回退路径：用居中横条表示文字区域
     const core::Variant& fg_var = get_value(ForegroundProperty);
-    paint::Brush base_fg = fg_var.has<paint::Brush>() ? fg_var.get<paint::Brush>() : paint::Brush::solid(math::Color::White);
-    // Disabled 状态降低前景画刷不透明度
-    if (!is_enabled_ && base_fg.kind() == paint::BrushKind::SolidColor) {
-        base_fg = paint::Brush::solid(base_fg.color().with_alpha(0.38f));
-    }
+    const paint::Brush base_fg = fg_var.has<paint::Brush>() ? fg_var.get<paint::Brush>() : paint::Brush::solid(math::Color::White);
     const float line_w = rect.width - padding_.horizontal();
     const float line_y = rect.y + rect.height * 0.5f - 1.0f;
     if (line_w > 0.0f) {
@@ -693,18 +754,11 @@ bool Button::anim_tick_callback(void* user_data, float dt) noexcept
         self->invalidate_render();
     }
 
-    // ── 背景色过渡 Storyboard ────────────────────────────────────────────────
-    if (self->bg_storyboard_ && !self->bg_storyboard_->is_complete()) {
-        // tick 内部将插值色以 Animation 优先级写回 BackgroundProperty，
-        // affects_render=true → 自动触发 invalidate_render
-        const bool done = self->bg_storyboard_->tick(dt);
-        if (done) {
-            // 动画完成后，保留 Animation(60) 槽中的终值，画面自然稳定在目标颜色。
-            // 不持久化到 Local(50)：若持久化，会把 Hovered/Pressed 终值写入 Local，
-            // 下次切换回 Normal 时 get_value 读到该污染值，导致 Normal 目标色错误。
-            // Animation(60) 将在下次 on_visual_state_changed 调用 stop() 时被正确清除。
-            // anim_tick_callback 返回 any_active=false，AnimationClock 自动移除此项。
-        } else {
+    // ── VSM 背景色过渡 Storyboard（由 VisualStateManager 统一管理）─────────────────────
+    // go_to_state 已写入 StyleTrigger(P4) 终値并创建 Storyboard；
+    // affects_render=true → tick 内部写入 P1 时自动触发 invalidate_render
+    if (auto* v = self->vsm()) {
+        if (v->tick_animations(dt)) {
             any_active = true;
         }
     }
@@ -716,78 +770,19 @@ bool Button::anim_tick_callback(void* user_data, float dt) noexcept
 void Button::on_visual_state_changed(ControlVisualState old_state,
                                      ControlVisualState new_state)
 {
-    const paint::Brush disabled_brush =
-        paint::Brush::solid(math::Color{0.11f, 0.11f, 0.12f, 0.12f});
+    // 调用基类：
+    //   1. 触发 invalidate_render（确保下一帧重绘）
+    //   2. 若 VSM 已配置，调用 vsm()->go_to_state(新状态名)——
+    //      其内部将自动完成：
+    //        a) capture_from_values()  — 采样当前 P1/P2/P3/P4/P5 各层开始值
+    //        b) apply_state(P4)        — 将状态终值写入 BackgroundProperty / ForegroundProperty
+    //        c) resolve_and_begin()    — 创建 Storyboard，启动插值
+    Control::on_visual_state_changed(old_state, new_state);
 
-    // ── 1. 采样当前渲染画刷作为新动画的起始画刷 ────────────────────────────
-    // get_value 在 Storyboard 活跃时返回 Animation 优先级的插值画刷，
-    // 确保中断旧过渡时从当前可见画刷开始，而非从目标画刷跳变。
-    paint::Brush from_brush = background_;  // 默认 fallback
-    if (old_state == ControlVisualState::Disabled) {
-        // Disabled 状态的可见背景并不来自 BackgroundProperty，而是 on_render 的固定禁用色。
-        from_brush = disabled_brush;
-    } else {
-        const core::Variant& cur = get_value(BackgroundProperty);
-        if (cur.has<paint::Brush>()) {
-            from_brush = cur.get<paint::Brush>();
-        }
-    }
-
-    // ── 2. 停止上一个 Storyboard（清除 Animation 槽）────────────────────────
-    if (bg_storyboard_) {
-        bg_storyboard_->stop();
-    }
-
-    // ── 3. 在写入 Local 之前，读取目标画刷（唯一真相源）────────────────────
-    // 必须在 set_value(Local) 之前确定 to_brush：stop() 已清除 Animation(60) 槽，
-    // 此时 get_value 返回的是 StyleSetter(20) 或 Default(0) 的值（即 Style 设置的颜色）。
-    // 若在 set_value(Local, from_brush) 之后读取，Local(50) 会遮蔽 StyleSetter(20)，
-    // 导致 Normal 状态目标色错误地回退到 background_ 成员变量（忽略 Style 配色）。
-    //
-    // HoveredBackgroundProperty / PressedBackgroundProperty 也须在此读取，
-    // 同样需要优先返回 StyleSetter(20) 写入的值（若用户已 Style::apply）。
-    paint::Brush to_brush;
-    switch (new_state) {
-    case ControlVisualState::Pressed: {
-        const core::Variant& v = get_value(PressedBackgroundProperty);
-        to_brush = v.has<paint::Brush>() ? v.get<paint::Brush>() : background_;
-        break;
-    }
-    case ControlVisualState::Hovered: {
-        const core::Variant& v = get_value(HoveredBackgroundProperty);
-        to_brush = v.has<paint::Brush>() ? v.get<paint::Brush>() : background_;
-        break;
-    }
-    case ControlVisualState::Disabled:
-        to_brush = disabled_brush;
-        break;
-    default: {
-        // Normal 状态：优先读取 BackgroundProperty 的 StyleSetter(20) 值，
-        // 若 Style 已通过 apply() 写入（如 demo_style_.apply(btn)），将正确返回该颜色；
-        // 若无 Style 写入，回退到 background_ 成员变量（直接调用 set_background 写入的值）。
-        const core::Variant& v = get_value(BackgroundProperty);
-        to_brush = v.has<paint::Brush>() ? v.get<paint::Brush>() : background_;
-        break;
-    }
-    }
-
-    // ── 4. 构建新 Storyboard 并启动 ─────────────────────────────────────
-    // 使用显式 from/to，避免为了给 capture_from_values 喂起始值而污染
-    // BackgroundProperty 的 Local 槽。否则从 Pressed/Hovered/Disabled 回到 Normal 时，
-    // Normal 目标色会错误读取到前一状态留下的 Local 值。
-    bg_storyboard_ = core::make_owned<animation::Storyboard>();
-    bg_storyboard_->animate_dp_from_to(
-        *this,
-        BackgroundProperty,
-        core::Variant{from_brush},
-        core::Variant{to_brush},
-        animation::Duration::milliseconds(100.0f),  // MD3 状态切换过渡时长
-        animation::QuadEaseOut);                     // ease-out quad：末尾减速感更自然
-    bg_storyboard_->resolve_and_begin();    // 写入 Animation=from，启动插值
-
-    // ── 5. 向 AnimationClock 注册 tick 回调（幂等，不会产生重复项）────────
-    // AnimationClock 统一驱动 Ripple + Storyboard 两种动画，
-    // 取代了原来分散在 App 层的 tick_bg_animation() 调用
+    // 注册 AnimationClock（幂等）：
+    //   - 驱动 VSM::tick_animations(dt)（背景色过渡 Storyboard）
+    //   - 驱动 Ripple 涟漪动画（on_mouse_down 中已激活 ripple_.active）
+    // tick 回调返回 false 时 AnimationClock 自动移除注册项
     animation::AnimationClock::instance().register_animation(this, &Button::anim_tick_callback);
 }
 
