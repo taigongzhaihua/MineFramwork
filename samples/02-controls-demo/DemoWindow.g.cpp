@@ -92,13 +92,14 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     btn_row_.set_margin(math::Thickness{ 16.0f, 16.0f, 16.0f, 0.0f });
     body_panel_.add_child(&btn_row_);
 
-    // ── 5a. "计数 +1" 主操作按钮（蓝色）──────────────────────────────────────
+    // ── 5a. "计数 +1" 主操作按鈕（蓝色）───────────────────────────────────────────────────
     btn_count_.set_text("计数 +1");
     btn_count_.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
     btn_count_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
+    // 注：set_background 写入 Local(P2)，优先级高于 StyleTrigger(P4)，
+    // 因此 Hover/Pressed 状态色被遁盖（按鈕颜色不随状态变化）。
+    // 若需 Hover/Pressed 颜色动画，应改用 Style(P5+P4) 驱动（参见下方绿色按鈕示例）。
     btn_count_.set_background(paint::Brush::solid_rgb(0x1976D2));
-    btn_count_.set_background_hovered(paint::Brush::solid_rgb(0x1E88E5));
-    btn_count_.set_background_pressed(paint::Brush::solid_rgb(0x0D47A1));
     btn_count_.set_border_color(paint::Brush::solid_rgb(0x0D47A1));
     btn_count_.set_margin(math::Thickness{ 0.0f, 0.0f, 10.0f, 0.0f });
     if (font) { btn_count_.set_font_face(font); }
@@ -110,9 +111,7 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     btn_reset_.set_text("重  置");
     btn_reset_.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
     btn_reset_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
-    btn_reset_.set_background(paint::Brush::solid_rgb(0x455A64));
-    btn_reset_.set_background_hovered(paint::Brush::solid_rgb(0x546E7A));
-    btn_reset_.set_background_pressed(paint::Brush::solid_rgb(0x263238));
+    btn_reset_.set_background(paint::Brush::solid_rgb(0x455A64));  // Local(P2)，遁盖 P4 状态色
     btn_reset_.set_border_color(paint::Brush::solid_rgb(0x263238));
     btn_reset_.set_margin(math::Thickness{ 0.0f, 0.0f, 10.0f, 0.0f });
     if (font) { btn_reset_.set_font_face(font); }
@@ -124,9 +123,7 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     btn_quit_.set_text("退  出");
     btn_quit_.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
     btn_quit_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
-    btn_quit_.set_background(paint::Brush::solid_rgb(0xC62828));
-    btn_quit_.set_background_hovered(paint::Brush::solid_rgb(0xD32F2F));
-    btn_quit_.set_background_pressed(paint::Brush::solid_rgb(0x7F0000));
+    btn_quit_.set_background(paint::Brush::solid_rgb(0xC62828));  // Local(P2)，遁盖 P4 状态色
     btn_quit_.set_border_color(paint::Brush::solid_rgb(0x7F0000));
     if (font) { btn_quit_.set_font_face(font); }
     // 点击 → 触发 closeRequested 信号（MML 声明式绑定，无需 code-behind method）
@@ -145,20 +142,35 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
 
     // ── 7. Style 演示区 ───────────────────────────────────────────────────────
 
-    // 构建绿色主题 Style（StyleSetter 优先级 20，不覆盖 Local 层 50 及以上）
+    // 构建绿色主题 Style（三层分离范式）：
+    //   P5 StyleSetter  = Normal 状态基线外观値（apply 写入）
+    //   P4 VisualStateSetters = Hovered / Pressed 状态终値（go_to_state 自动写入）
     demo_style_
         .set_name("GreenButtonStyle")
         .set_target_type(core::TypeId::of<ui::Button>())
         .add_setter({ &ui::Button::BackgroundProperty,
-                      core::Variant{ paint::Brush::solid_rgb(0x2E7D32) } })   // 深绿 Normal
-        .add_setter({ &ui::Button::HoveredBackgroundProperty,
-                      core::Variant{ paint::Brush::solid_rgb(0x43A047) } })   // 中绿 Hovered
-        .add_setter({ &ui::Button::PressedBackgroundProperty,
-                      core::Variant{ paint::Brush::solid_rgb(0x1B5E20) } })   // 墨绿 Pressed
+                      core::Variant{ paint::Brush::solid_rgb(0x2E7D32) } })   // 深综Normal(P5)
         .add_setter({ &ui::Button::ForegroundProperty,
-                      core::Variant{ paint::Brush::solid_rgb(0xFFFFFF) } })   // 白色文字
+                      core::Variant{ paint::Brush::solid_rgb(0xFFFFFF) } })   // 白色文字(P5)
         .add_setter({ &ui::Button::PaddingProperty,
                       core::Variant{ math::Thickness{ 20.0f, 10.0f, 20.0f, 10.0f } } });
+
+    // P4 StyleTrigger：Hovered 状态终値（中综Hover）
+    {
+        style::VisualStateSetters vs;
+        vs.state_name = "Hovered";
+        vs.setters.push_back({ &ui::Button::BackgroundProperty,
+            core::Variant{ paint::Brush::solid_rgb(0x43A047) } });
+        demo_style_.add_state_setters(std::move(vs));
+    }
+    // P4 StyleTrigger：Pressed 状态终値（墨综Pressed）
+    {
+        style::VisualStateSetters vs;
+        vs.state_name = "Pressed";
+        vs.setters.push_back({ &ui::Button::BackgroundProperty,
+            core::Variant{ paint::Brush::solid_rgb(0x1B5E20) } });
+        demo_style_.add_state_setters(std::move(vs));
+    }
 
     // 区域分隔标题
     style_section_.set_text("── Style & 属性优先级演示 ──");
@@ -171,7 +183,10 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     body_panel_.add_child(&style_section_);
 
     // 演示说明
-    style_info_.set_text("下方绿色按钮颜色仅由 Style::add_setter(StyleSetter/20) 设置，未调用 set_background*");
+    style_info_.set_text(
+        "绿色按鈕用 Style 驱动："
+        "StyleSetter(P5) 写 Normal 基线色，"
+        "VisualStateSetters(P4) 写 Hovered/Pressed 终値");
     style_info_.set_font_size(11.0f);
     style_info_.set_foreground(paint::Brush::solid_rgb(0x757575));
     style_info_.set_background(paint::Brush::solid(math::Color::Transparent));
