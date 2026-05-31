@@ -23,9 +23,38 @@
 #include <mine/containers/SmallVector.h>
 #include <mine/ui/style/VisualStateManager.h>
 #include <mine/ui/style/TemplateRegistry.h>
+#include <mine/ui/style/ControlTemplate.h>
 #include <mine/core/Memory.h>
 
 namespace mine::ui {
+
+// ============================================================================
+// 依赖属性注册
+// ============================================================================
+
+/**
+ * @brief TemplateProperty 变更回调：清除旧模板根，触发重新测量（下次 measure 时重建视觉树）。
+ */
+static void on_template_dp_changed(DependencyObject*         sender,
+                                   const DependencyProperty& /*prop*/,
+                                   const core::Variant&      /*old_v*/,
+                                   const core::Variant&      /*new_v*/) noexcept
+{
+    auto* ctrl = static_cast<Control*>(sender);
+    // 清除旧模板根：下次 measure 时会按新 TemplateProperty 值重建模板视觉树
+    ctrl->set_template_root(static_cast<UIElement*>(nullptr));
+    ctrl->invalidate_measure();
+}
+
+/// TemplateProperty —— 存储 `const style::ControlTemplate*`，默认空 Variant
+const DependencyProperty& Control::TemplateProperty =
+    register_property<Control>(
+        "Template",
+        core::Variant{},  // 默认空：回退到 template_slot_ 注册表查找
+        PropertyMetadata{
+            .affects_measure = true,
+            .changed         = &on_template_dp_changed,
+        });
 
 // ============================================================================
 // Control::Impl 私有实现结构体
@@ -115,6 +144,28 @@ Control::~Control()
         unsubscribe_property_changed(cp_->binding_sub_token_);
         cp_->binding_sub_token_ = 0;
     }
+}
+
+// ============================================================================
+// 控件模板（TemplateProperty 访问器）
+// ============================================================================
+
+void Control::set_control_template(const style::ControlTemplate* tmpl) noexcept
+{
+    // 写入 TemplateProperty Local(50) 槽。
+    // on_template_dp_changed 回调会清除 template_root_ 并 invalidate_measure()。
+    set_value(TemplateProperty,
+              core::Variant{ tmpl },
+              ValuePriority::Local);
+}
+
+const style::ControlTemplate* Control::control_template() const noexcept
+{
+    const core::Variant& v = get_value(TemplateProperty);
+    if (v.has<const style::ControlTemplate*>()) {
+        return v.get<const style::ControlTemplate*>();
+    }
+    return nullptr;
 }
 
 // ============================================================================
@@ -295,11 +346,21 @@ UIElement* Control::template_root() const noexcept
 
 math::Size Control::measure_override(math::Size available)
 {
-    // 若模板槽位非空且模板根尚未构建，从 TemplateRegistry 查找并构建模板
-    if (!cp_->template_root_ && !template_slot_.empty()) {
-        const core::StringView slot{ template_slot_.data(), template_slot_.size() };
-        const style::ControlTemplate* tmpl =
-            style::TemplateRegistry::instance().find(slot);
+    // 若模板根尚未构建，尝试获取并执行模板构建函数
+    if (!cp_->template_root_) {
+        // 阶段 1：优先检查 TemplateProperty DP（用户通过 set_control_template() 写入）
+        const style::ControlTemplate* tmpl = nullptr;
+        const core::Variant& tmpl_var = get_value(TemplateProperty);
+        if (tmpl_var.has<const style::ControlTemplate*>()) {
+            tmpl = tmpl_var.get<const style::ControlTemplate*>();
+        }
+
+        // 阶段 2：回退到 template_slot_ 注册表查找（向后兼容——Button 等店通过槽位名注册默认模板）
+        if (!tmpl && !template_slot_.empty()) {
+            const core::StringView slot{ template_slot_.data(), template_slot_.size() };
+            tmpl = style::TemplateRegistry::instance().find(slot);
+        }
+
         if (tmpl && tmpl->build_fn_) {
             // build_fn_ 内部会调用 set_template_root 将根元素加入视觉子树
             tmpl->build_fn_(*this);

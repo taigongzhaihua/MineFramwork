@@ -173,6 +173,7 @@ protected:
      */
     virtual bool hit_test_local(math::Point p) const;
 
+public:
     // ── 覆盖 DependencyObject 布局失效接口 ───────────────────────────────
 
     /// 布局测量失效：设置内部脏标志（mine.ui.layout 接管后转为队列通知）
@@ -180,6 +181,7 @@ protected:
 
     /// 布局排列失效：设置内部脏标志
     void invalidate_arrange() override;
+protected:
     /**
      * @brief 设置期望尺寸（供 FrameworkElement 等子类在 on_measure 中调用）。
      *

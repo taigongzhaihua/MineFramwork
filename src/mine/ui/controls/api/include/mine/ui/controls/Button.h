@@ -176,15 +176,6 @@ public:
 
 protected:
     void on_measure(math::Size available_size) override;
-    /**
-     * @brief 排列阶段：按需设置胶囊形裁剪以保持命中测试与视觉边界一致。
-     *
-     * 仅当模板由注册表 build_fn_（即 on_apply_template() 被调用）构建时，
-     * 才根据 bounds_rect 高度（radius = height / 2）设置胶囊圆角裁剪；
-     * 若用户通过 set_template_root() 直接设置自定义模板根，则清除裁剪，
-     * 由自定义模板自身定义视觉形状与命中范围（默认为矩形 bounds_rect）。
-     */
-    void on_arrange(math::Rect final_rect) override;
     void on_render(paint::Canvas& canvas) override;
     UIElement* hit_test(math::Point p) override;
     [[nodiscard]] ControlVisualState compute_visual_state() const override;
@@ -292,7 +283,6 @@ private:
     RippleState ripple_;  ///< 当前涟漪状态
     ContentPresenter*        content_part_           = nullptr;  ///< 模板子元素指针（on_apply_template 中填充）
     style::Style*            vsm_style_              = nullptr;  ///< 用户指定的 VSM 样式（nullptr 则用 default_button_style）
-    bool                     template_from_registry_ = false;    ///< 模板由 build_fn_ 构建（on_arrange 据此决定是否应用胶囊裁剪）
 };
 
 } // namespace mine::ui

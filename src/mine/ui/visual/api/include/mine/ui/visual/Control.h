@@ -25,6 +25,7 @@
 #include <mine/ui/visual/Api.h>
 #include <mine/ui/visual/FrameworkElement.h>
 #include <mine/ui/style/VisualStateManager.h>
+#include <mine/ui/style/ControlTemplate.h>
 #include <mine/core/Pimpl.h>
 #include <mine/core/StringView.h>
 #include <mine/containers/InlineString.h>
@@ -54,6 +55,25 @@ enum class ControlVisualState : uint8_t {
  */
 class MINE_UI_VISUAL_API Control : public FrameworkElement {
 public:
+    // ── 依赖属性（DP）声明 ────────────────────────────────────────────────
+
+    /**
+     * @brief 控件模板 DP。
+     *
+     * 存储 `const style::ControlTemplate*` 指针。
+     * 默认为空（measure_override 回退到 template_slot_ 注册表查找）。
+     * 用户通过 set_control_template() 写入 Local(P2) 槽，变更时自动清除
+     * 旧模板根并触发 invalidate_measure()（下次 measure 时重建视觉树）。
+     *
+     * 用法：
+     * @code
+     *   ControlTemplate my_tmpl;
+     *   my_tmpl.build_fn_ = &my_build_fn;
+     *   btn.set_control_template(&my_tmpl);
+     * @endcode
+     */
+    static const DependencyProperty& TemplateProperty;
+
     Control();
     ~Control() override;
 
@@ -97,6 +117,23 @@ public:
     void update_visual_state();
 
     // ── 控件模板（mine.ui.style 任务 #12）────────────────────────────────
+
+    /**
+     * @brief 设置控件模板（写入 TemplateProperty 的 Local 槽）。
+     *
+     * 若与当前模板不同，自动清除旧模板根并请求重新测量（下次 measure 时重建）。
+     * 传入 nullptr 时回退到 template_slot_ 注册表查找（默认行为）。
+     *
+     * @param tmpl 新模板指针（生命周期由调用方负责，Control 不拥有所有权）
+     */
+    void set_control_template(const style::ControlTemplate* tmpl) noexcept;
+
+    /**
+     * @brief 读取当前生效的控件模板（TemplateProperty 最高优先级值）。
+     *
+     * 若 TemplateProperty 为空，返回 nullptr（此时走 template_slot_ 路径）。
+     */
+    [[nodiscard]] const style::ControlTemplate* control_template() const noexcept;
 
     /**
      * @brief 设置模板根元素，将其加入控件的视觉子树（不拥有所有权）。

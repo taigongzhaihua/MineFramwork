@@ -492,9 +492,6 @@ void Button::set_font_size(float size_px) noexcept
 
 void Button::on_apply_template() noexcept
 {
-    // 标记模板来自注册表的 build_fn_（on_arrange 据此决定是否应用胶囊裁剪）
-    template_from_registry_ = true;
-
     // 缓存模板子元素指针（名称与 build_fn 中 set_template_name 一致）
     content_part_ = static_cast<ContentPresenter*>(find_template_child("content"));
 
@@ -533,27 +530,6 @@ void Button::on_measure(math::Size available_size)
             text_w + padding_.horizontal(),
             text_h + padding_.vertical(),
         });
-    }
-}
-
-void Button::on_arrange(math::Rect final_rect)
-{
-    // 先让基类完成排列（设置 bounds_rect_，并递归排列模板子元素）
-    Control::on_arrange(final_rect);
-
-    const math::Rect rect = bounds_rect();
-    if (!rect.empty() && template_from_registry_) {
-        // 默认 ContentPresenter 模板：胶囊形裁剪（渲染裁剪 + 命中测试）。
-        // 此裁剪同时服务于两个目的：
-        //   1. 渲染裁剪：模板子元素（ContentPresenter 等）不溢出圆角之外
-        //   2. 命中测试：UIElement::hit_test 的外角早出 + hit_test_local 的边界判断
-        const float radius = rect.height * 0.5f;
-        set_clip_rounded_rect(math::RoundedRect{ rect, radius });
-    } else {
-        // 用户自定义模板根（set_template_root 直接设置）：
-        //   不应用胶囊裁剪，由模板自身定义视觉形状和命中范围
-        //   （默认出局：bounds_rect 内的矩形区域均可命中）
-        clear_clip_rounded_rect();
     }
 }
 
@@ -635,16 +611,18 @@ UIElement* Button::hit_test(math::Point p)
     if (inv) {
         local_p = inv.value().apply(p);
     }
-    // 裁剪区域检查（优先使用圆角矩形裁剪，on_arrange 中由胶囊形状写入）
-    // 圆角外角区域（包围盒内但圆角外）不触发 Hover/Press 等视觉状态
-    if (has_clip_rounded_rect()) {
-        return clip_rounded_rect().contains(local_p) ? this : nullptr;
+    // 命中边界委托给模板根（WPF 风格）：
+    // 模板根的 bounds_rect 即按钮的命中区域，返回 this 确保事件路由到 Button 自身。
+    // 裁剪仅在用户显式调用 set_clip_rounded_rect() 时生效。
+    if (UIElement* tr = template_root()) {
+        if (has_clip_rounded_rect()) {
+            // 用户显式设置了圆角裁剪：圆角外角区域不触发命中
+            return clip_rounded_rect().contains(local_p) ? this : nullptr;
+        }
+        // 使用模板根的矩形边界判断命中
+        return tr->bounds_rect().contains(local_p) ? this : nullptr;
     }
-    // 降级：尚未排列或未设置圆角裁剪时，回退矩形裁剪 + 包围盒判断
-    if (has_clip_rect() && !clip_rect().contains(local_p)) {
-        return nullptr;
-    }
-    // 直接判断本节点范围，不再递归子节点
+    // 无模板根：回退到自身矩形边界
     return bounds_rect().contains(local_p) ? this : nullptr;
 }
 

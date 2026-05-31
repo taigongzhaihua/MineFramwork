@@ -4,6 +4,27 @@
 
 ## [Unreleased]
 
+### Changed
+- **mine.ui.visual：`Control::TemplateProperty` DP（WPF 风格模板属性）**：
+  新增 `Control::TemplateProperty`（存储 `const style::ControlTemplate*`），
+  用户通过 `set_control_template(tmpl)` 写入 Local(P2) 槽以替换整个控件模板；
+  `measure_override` 优先检查 TemplateProperty，回退到 `template_slot_` 注册表查找（向后兼容）；
+  DP 变更时自动清除旧模板根并 `invalidate_measure()`，下次 measure 时重建视觉树。
+
+- **mine.ui.visual：`UIElement::invalidate_measure() / invalidate_arrange()` 改为 public**：
+  与 WPF `UIElement.InvalidateMeasure()` 保持一致，允许外部（非成员函数、工厂函数）
+  触发布局失效；原 protected 语义通过文档约束（非布局协议内部勿滥用）替代。
+
+- **mine.ui.controls：移除 `Button::on_arrange` 胶囊裁剪——裁剪完全由用户显式控制**：
+  删除 `template_from_registry_` 标志和整个 `Button::on_arrange()` override；
+  裁剪不再由框架自动设置——如需胶囊形裁剪，用户显式调用 `set_clip_rounded_rect()`；
+  默认行为：模板根的矩形 `bounds_rect` 即为命中区域，无自动圆角截断。
+
+- **mine.ui.controls：`Button::hit_test` 委托给模板根（WPF 风格命中边界）**：
+  命中区域由 `template_root()->bounds_rect()` 决定，返回 `this` 确保 MouseEnter/Leave
+  仍路由到 Button 自身；若用户显式设置了 `clip_rounded_rect`，则圆角外不可命中；
+  无模板根时回退到自身 `bounds_rect()`（向后兼容）。
+
 ### Fixed
 - **mine.ui.controls：修复 Button 自定义模板胶囊裁剪问题（Issue 1）**：
   `Button::on_arrange` 之前无条件对所有按钮设置胶囊形 `clip_rounded_rect`（radius = height / 2），
