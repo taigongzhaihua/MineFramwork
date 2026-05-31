@@ -10,6 +10,11 @@
  */
 #include "DemoWindow.g.h"
 #include <mine/core/TypeId.h>
+#include <mine/core/Memory.h>
+#include <mine/ui/controls/ContentPresenter.h>
+#include <mine/ui/animation/Storyboard.h>
+#include <mine/ui/animation/EasingFunction.h>
+#include <mine/ui/animation/Duration.h>
 
 // ── 命名空间别名 ──────────────────────────────────────────────────────────────
 namespace core  = mine::core;
@@ -17,6 +22,164 @@ namespace math  = mine::math;
 namespace paint = mine::paint;
 namespace ui    = mine::ui;
 namespace style = mine::ui::style;
+namespace anim  = mine::ui::animation;
+
+// ── ControlTemplate BuildFn（文件作用域，供 tmpl_green_ / tmpl_orange_ 使用）──────────────────
+
+/// 绿色圆角模板：Border（深绿 + 圆角边框）> ContentPresenter（"content" Part）
+static void s_build_green_template(mine::ui::DependencyObject& target)
+{
+    auto& btn     = static_cast<ui::Button&>(target);
+    auto  root    = core::make_owned<ui::Border>();
+    auto  content = core::make_owned<ui::ContentPresenter>();
+
+    // 给元素打 Part 名称标签（on_apply_template 中通过 find_template_child 查找）
+    root->set_template_name("root");
+    content->set_template_name("content");  // 与 Button 的 Part 契约一致
+
+    // TemplateBind：宿主 Content/Padding 属性自动同步到 ContentPresenter
+    btn.bind_template(*content,
+                      ui::ContentPresenter::ContentProperty,
+                      ui::ContentControl::ContentProperty);
+    btn.bind_template(*content,
+                      ui::ContentPresenter::PaddingProperty,
+                      ui::Button::PaddingProperty);
+
+    // 根容器外观（绿色圆角）
+    root->set_background(paint::Brush::solid_rgb(0x1B5E20));
+    root->set_border_color(paint::Brush::solid_rgb(0x4CAF50));
+    root->set_border_thickness(math::Thickness::uniform(2.0f));
+
+    // 将 ContentPresenter 所有权转移给 Border（Border 持有子元素）
+    root->set_child(std::move(content));
+
+    // 安装 VSM（绿色状态机）
+    static style::Style s_green_style = []() {
+        style::Style s;
+        s.set_name("GreenTemplate_Style")
+         .set_target_type(core::TypeId::of<ui::Button>())
+         .add_setter({ &ui::Button::BackgroundProperty,
+                       core::Variant{ paint::Brush::solid_rgb(0x1B5E20) } })
+         .add_setter({ &ui::Button::ForegroundProperty,
+                       core::Variant{ paint::Brush::solid_rgb(0xFFFFFF) } });
+        {
+            style::VisualStateSetters vs;
+            vs.state_name = "Hovered";
+            vs.setters.push_back({ &ui::Button::BackgroundProperty,
+                core::Variant{ paint::Brush::solid_rgb(0x2E7D32) } });
+            s.add_state_setters(std::move(vs));
+        }
+        {
+            style::VisualStateSetters vs;
+            vs.state_name = "Pressed";
+            vs.setters.push_back({ &ui::Button::BackgroundProperty,
+                core::Variant{ paint::Brush::solid_rgb(0x388E3C) } });
+            s.add_state_setters(std::move(vs));
+        }
+        return s;
+    }();
+
+    btn.set_vsm_style(&s_green_style);  // 使用绿色样式驱动 VSM
+
+    style::VisualStateManager vsm{ btn };
+    vsm.define_state("Normal");
+    vsm.define_state("Hovered");
+    vsm.define_state("Pressed");
+    vsm.define_state("Disabled");
+    auto* btn_ptr = &btn;
+    vsm.add_transition("*", "Hovered", [btn_ptr](anim::Storyboard& sb) {
+        sb.animate_dp(*btn_ptr, ui::Button::BackgroundProperty,
+                      anim::Duration::milliseconds(120.0f), anim::QuadEaseOut);
+    });
+    vsm.add_transition("*", "Normal", [btn_ptr](anim::Storyboard& sb) {
+        sb.animate_dp(*btn_ptr, ui::Button::BackgroundProperty,
+                      anim::Duration::milliseconds(100.0f), anim::QuadEaseOut);
+    });
+    vsm.add_transition("*", "Pressed", [btn_ptr](anim::Storyboard& sb) {
+        sb.animate_dp(*btn_ptr, ui::Button::BackgroundProperty,
+                      anim::Duration::milliseconds(60.0f), anim::QuadEaseIn);
+    });
+    vsm.set_style(&s_green_style);
+    btn.set_visual_state_manager(std::move(vsm));
+    s_green_style.apply(btn);  // 写入 P5 基线値
+
+    btn.set_template_root(std::move(root));
+}
+
+/// 橙色矩形模板：Border（深橙 + 矩形边框）> ContentPresenter（"content" Part）
+static void s_build_orange_template(mine::ui::DependencyObject& target)
+{
+    auto& btn     = static_cast<ui::Button&>(target);
+    auto  root    = core::make_owned<ui::Border>();
+    auto  content = core::make_owned<ui::ContentPresenter>();
+
+    root->set_template_name("root");
+    content->set_template_name("content");
+
+    btn.bind_template(*content,
+                      ui::ContentPresenter::ContentProperty,
+                      ui::ContentControl::ContentProperty);
+    btn.bind_template(*content,
+                      ui::ContentPresenter::PaddingProperty,
+                      ui::Button::PaddingProperty);
+
+    root->set_background(paint::Brush::solid_rgb(0xBF360C));
+    root->set_border_color(paint::Brush::solid_rgb(0xFF7043));
+    root->set_border_thickness(math::Thickness::uniform(2.0f));
+
+    root->set_child(std::move(content));
+
+    static style::Style s_orange_style = []() {
+        style::Style s;
+        s.set_name("OrangeTemplate_Style")
+         .set_target_type(core::TypeId::of<ui::Button>())
+         .add_setter({ &ui::Button::BackgroundProperty,
+                       core::Variant{ paint::Brush::solid_rgb(0xBF360C) } })
+         .add_setter({ &ui::Button::ForegroundProperty,
+                       core::Variant{ paint::Brush::solid_rgb(0xFFFFFF) } });
+        {
+            style::VisualStateSetters vs;
+            vs.state_name = "Hovered";
+            vs.setters.push_back({ &ui::Button::BackgroundProperty,
+                core::Variant{ paint::Brush::solid_rgb(0xE64A19) } });
+            s.add_state_setters(std::move(vs));
+        }
+        {
+            style::VisualStateSetters vs;
+            vs.state_name = "Pressed";
+            vs.setters.push_back({ &ui::Button::BackgroundProperty,
+                core::Variant{ paint::Brush::solid_rgb(0xFF5722) } });
+            s.add_state_setters(std::move(vs));
+        }
+        return s;
+    }();
+
+    btn.set_vsm_style(&s_orange_style);
+
+    style::VisualStateManager vsm{ btn };
+    vsm.define_state("Normal");
+    vsm.define_state("Hovered");
+    vsm.define_state("Pressed");
+    vsm.define_state("Disabled");
+    auto* btn_ptr = &btn;
+    vsm.add_transition("*", "Hovered", [btn_ptr](anim::Storyboard& sb) {
+        sb.animate_dp(*btn_ptr, ui::Button::BackgroundProperty,
+                      anim::Duration::milliseconds(120.0f), anim::QuadEaseOut);
+    });
+    vsm.add_transition("*", "Normal", [btn_ptr](anim::Storyboard& sb) {
+        sb.animate_dp(*btn_ptr, ui::Button::BackgroundProperty,
+                      anim::Duration::milliseconds(100.0f), anim::QuadEaseOut);
+    });
+    vsm.add_transition("*", "Pressed", [btn_ptr](anim::Storyboard& sb) {
+        sb.animate_dp(*btn_ptr, ui::Button::BackgroundProperty,
+                      anim::Duration::milliseconds(60.0f), anim::QuadEaseIn);
+    });
+    vsm.set_style(&s_orange_style);
+    btn.set_visual_state_manager(std::move(vsm));
+    s_orange_style.apply(btn);
+
+    btn.set_template_root(std::move(root));
+}
 
 namespace app {
 
@@ -206,10 +369,10 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     btn_styled_.add_handler(ui::Button::ClickEvent(), &DemoWindowBase::s_on_click_count, this);
     body_panel_.add_child(&btn_styled_);
 
-    // ── 8. ControlTemplate 演示区 ────────────────────────────────────────────
+    // ── 8. ControlTemplate 演示区（WPF 风格：BuildFn + 命名 Part + set_control_template 切换）────
 
     // 区域分隔标题
-    tmpl_section_.set_text("── ControlTemplate（自定义视觉树）演示 ──");
+    tmpl_section_.set_text("── ControlTemplate（BuildFn + Part 命名 + 动态切换）演示 ──");
     tmpl_section_.set_font_size(11.0f);
     tmpl_section_.set_foreground(paint::Brush::solid_rgb(0x757575));
     tmpl_section_.set_background(paint::Brush::solid_rgb(0xF0F0F0));
@@ -219,7 +382,10 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     body_panel_.add_child(&tmpl_section_);
 
     // 演示说明
-    tmpl_info_.set_text("下方按钮用 set_template_root() 设置自定义模板根（Border + TextBlock 替换默认模板）");
+    tmpl_info_.set_text(
+        "下方按钮用 ControlTemplate（BuildFn + set_template_name 命名）。"
+        "点击「切换模板」后 on_apply_template() 自动重新绑定同名 Part \"content\"，"
+        "按钮功能（计数）透明延续。");
     tmpl_info_.set_font_size(11.0f);
     tmpl_info_.set_foreground(paint::Brush::solid_rgb(0x757575));
     tmpl_info_.set_background(paint::Brush::solid(math::Color::Transparent));
@@ -228,34 +394,31 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     if (font) { tmpl_info_.set_font_face(font); }
     body_panel_.add_child(&tmpl_info_);
 
-    // 构建自定义模板根（Border + TextBlock）
-    // tmpl_label_ 是 DemoWindowBase 成员，生命周期覆盖模板根
-    tmpl_label_.set_text("自定义 ControlTemplate 视觉树");
-    tmpl_label_.set_font_size(13.0f);
-    tmpl_label_.set_foreground(paint::Brush::solid_rgb(0x4A148C));
-    tmpl_label_.set_background(paint::Brush::solid(math::Color::Transparent));
-    tmpl_label_.set_padding(math::Thickness{ 16.0f, 8.0f, 16.0f, 8.0f });
-    if (font) { tmpl_label_.set_font_face(font); }
+    // 配置两个 ControlTemplate（BuildFn 为文件作用域 static 函数，无捕获，可隐式转换为函数指针）
+    tmpl_green_.build_fn_  = &s_build_green_template;
+    tmpl_orange_.build_fn_ = &s_build_orange_template;
 
-    // 直接调用 set_template_root 跳过了 build_fn_，default_button_style().apply() 不会执行，
-    // BackgroundProperty 保留 Default(P0)=#6750A4（MD3 Primary 紫）。
-    // 写入 Local(P2) 透明画刷，防止 MD3 紫色从 Border 后方漏出影响视觉。
-    btn_tmpl_.set_background(paint::Brush::solid(math::Color::Transparent));
-    {
-        // Border 作为模板根，通过 OwnedPtr 转移所有权给 btn_tmpl_
-        auto border_root = core::make_owned<ui::Border>();
-        border_root->set_border_thickness(math::Thickness::uniform(2.0f));
-        border_root->set_border_color(paint::Brush::solid_rgb(0x7B1FA2));  // 深紫边框
-        border_root->set_background(paint::Brush::solid_rgb(0xF3E5F5));   // 浅紫背景
-        border_root->set_child(&tmpl_label_);  // Border 通过裸指针引用（不拥有）
-        btn_tmpl_.set_template_root(std::move(border_root));
-    }
-
-    // 点击也触发计数（演示 Template 不影响功能）
-    btn_tmpl_.set_margin(math::Thickness{ 16.0f, 10.0f, 16.0f, 0.0f });
+    // btn_tmpl_：演示按钮，初始使用绿色模板
+    btn_tmpl_.set_text("ControlTemplate 演示按钮（点击计数）");
+    btn_tmpl_.set_padding(math::Thickness{ 16.0f, 10.0f, 16.0f, 10.0f });
     if (font) { btn_tmpl_.set_font_face(font); }
+    btn_tmpl_.set_margin(math::Thickness{ 16.0f, 10.0f, 16.0f, 0.0f });
+    // 通过 TemplateProperty DP 设置模板，on_template_dp_changed 会在下次 measure 时
+    // 调用 build_fn_ 构建视觉树，并触发 on_apply_template() 绑定 "content" Part
+    btn_tmpl_.set_control_template(&tmpl_green_);
     btn_tmpl_.add_handler(ui::Button::ClickEvent(), &DemoWindowBase::s_on_click_count, this);
     body_panel_.add_child(&btn_tmpl_);
+
+    // btn_switch_tmpl_：切换模板按钮（本身使用默认模板，不影响演示）
+    btn_switch_tmpl_.set_text("切换模板（绿色 \u2194 橙色）");
+    btn_switch_tmpl_.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
+    btn_switch_tmpl_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
+    btn_switch_tmpl_.set_background(paint::Brush::solid_rgb(0x37474F));
+    btn_switch_tmpl_.set_border_color(paint::Brush::solid_rgb(0x263238));
+    if (font) { btn_switch_tmpl_.set_font_face(font); }
+    btn_switch_tmpl_.set_margin(math::Thickness{ 16.0f, 8.0f, 16.0f, 16.0f });
+    btn_switch_tmpl_.add_handler(ui::Button::ClickEvent(), &DemoWindowBase::s_on_switch_tmpl, this);
+    body_panel_.add_child(&btn_switch_tmpl_);
 
     // ── 9. 将根布局挂载到窗口 ────────────────────────────────────────────────
     // 直接调用继承自 Window 的 set_content()（无 win_. 前缀）
@@ -304,6 +467,21 @@ void DemoWindowBase::s_on_click_quit(void* /*sender*/,
 {
     // 触发 closeRequested 信号（MML 声明式绑定，无需 method）
     static_cast<DemoWindowBase*>(user_data)->emit_close_requested();
+}
+
+void DemoWindowBase::s_on_switch_tmpl(void* /*sender*/,
+                                      mine::ui::RoutedEventArgs& /*args*/,
+                                      void* user_data)
+{
+    auto* self = static_cast<DemoWindowBase*>(user_data);
+    // 切换模板标志
+    self->tmpl_is_green_ = !self->tmpl_is_green_;
+    // set_control_template() 写入 TemplateProperty Local 槽，
+    // on_template_dp_changed 清除旧模板根 → 下次 measure 时按新模板重建视觉树
+    // → on_apply_template() 重新 find_template_child("content") 绑定同名 Part
+    self->btn_tmpl_.set_control_template(
+        self->tmpl_is_green_ ? &self->tmpl_green_ : &self->tmpl_orange_);
+    self->render();
 }
 
 } // namespace app

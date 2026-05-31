@@ -7,6 +7,7 @@
 
 #include <mine/ui/controls/Api.h>
 #include <mine/ui/visual/Control.h>
+#include <mine/core/Memory.h>
 #include <mine/math/Thickness.h>
 #include <mine/paint/Brush.h>
 
@@ -32,7 +33,10 @@ public:
     Border& operator=(Border&&)      = default;
 
     [[nodiscard]] UIElement* child() const noexcept;
+    /// 设置子元素（裸指针，Border 不拥有所有权）
     void set_child(UIElement* child);
+    /// 设置子元素并转移所有权（BuildFn 中动态创建子元素时使用）
+    void set_child(core::OwnedPtr<UIElement> child);
 
     [[nodiscard]] math::Thickness border_thickness() const noexcept;
     void set_border_thickness(math::Thickness thickness);
@@ -49,8 +53,9 @@ protected:
     void on_render(paint::Canvas& canvas) override;
 
 private:
-    UIElement*      child_            = nullptr;
-    math::Thickness border_thickness_ = math::Thickness::uniform(1.0f);
+    UIElement*               child_            = nullptr;
+    core::OwnedPtr<UIElement> owned_child_;              ///< 可选：BuildFn 中创建的子元素所有权
+    math::Thickness          border_thickness_ = math::Thickness::uniform(1.0f);
     paint::Brush    border_color_     = paint::Brush::solid_rgb(0x808080);
     paint::Brush    background_       = paint::Brush::solid(math::Color::Transparent);
 };

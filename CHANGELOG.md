@@ -4,6 +4,29 @@
 
 ## [Unreleased]
 
+### Added
+- **mine.core：`OwnedPtr<T>` 新增协变转换构造函数和赋值运算符**：
+  实现了注释中声明但代码中缺失的隐式协变转换能力（`OwnedPtr<Derived>` → `OwnedPtr<Base>`）；
+  要求 `Derived*` 可隐式转换为 `T*`（`std::is_convertible_v<U*, T*>`），转移所有权和删除器；
+  为 `BuildFn` 中 `OwnedPtr<ContentPresenter>` 向 `OwnedPtr<UIElement>` 的安全转型提供语言支持。
+
+- **mine.ui.controls：`Border::set_child(OwnedPtr<UIElement>)` — 所有权转移重载**：
+  新增接受 `core::OwnedPtr<UIElement>` 参数的 `set_child` 重载，允许 `BuildFn` 中动态创建的子元素
+  （如 `ContentPresenter`）所有权完整转移到 `Border`；`Border` 析构时自动释放子元素，
+  无需外部管理生命周期；旧裸指针重载在设置时同时清除可能存在的 `owned_child_`（防止双持）。
+
+- **samples/02-controls-demo：WPF 风格 ControlTemplate 完整演示**：
+  改造第 8 节（ControlTemplate 演示区），展示 BuildFn + Part 命名 + 动态切换的完整工作流：
+  - 新增文件作用域 `s_build_green_template` / `s_build_orange_template` 两个 `BuildFn`；
+    各 BuildFn 通过 `set_template_name("root"/"content")` 命名元素，
+    通过 `bind_template()` 绑定 ContentPresenter 与宿主 Content/Padding 属性，
+    并通过 `Border::set_child(OwnedPtr)` 完整转移 ContentPresenter 所有权；
+  - `btn_tmpl_` 通过 `set_control_template(&tmpl_green_)` 使用 TemplateProperty DP（WPF 风格），
+    初始呈现绿色圆角外观，点击计数功能正常；
+  - `btn_switch_tmpl_`（切换模板按钮）点击后调用 `s_on_switch_tmpl`，
+    通过 `set_control_template` 切换到 `tmpl_orange_`，`on_apply_template()` 自动重新
+    `find_template_child("content")` 绑定同名 Part，计数功能透明延续，展示 WPF 换模板不换功能的设计。
+
 ### Changed
 - **mine.ui.visual：`Control::TemplateProperty` DP（WPF 风格模板属性）**：
   新增 `Control::TemplateProperty`（存储 `const style::ControlTemplate*`），

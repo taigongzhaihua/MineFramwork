@@ -137,6 +137,26 @@ public:
         return *this;
     }
 
+    /// 协变转换构造：OwnedPtr<Derived> → OwnedPtr<Base>（需 Derived* 可安全赋值给 T*）
+    template<typename U>
+        requires std::is_convertible_v<U*, T*>
+    OwnedPtr(OwnedPtr<U>&& other) noexcept
+        : ptr_{other.get()}, deleter_{other.get_deleter()}
+    {
+        (void)other.release();
+    }
+
+    /// 协变赋值：OwnedPtr<Derived> → OwnedPtr<Base>
+    template<typename U>
+        requires std::is_convertible_v<U*, T*>
+    OwnedPtr& operator=(OwnedPtr<U>&& other) noexcept {
+        reset();
+        ptr_     = other.get();
+        deleter_ = other.get_deleter();
+        (void)other.release();
+        return *this;
+    }
+
     OwnedPtr(const OwnedPtr&)            = delete;
     OwnedPtr& operator=(const OwnedPtr&) = delete;
 

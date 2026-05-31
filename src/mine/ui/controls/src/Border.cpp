@@ -5,6 +5,7 @@
 
 #include <mine/ui/controls/Border.h>
 
+#include <mine/core/Memory.h>
 #include <mine/paint/Canvas.h>
 #include <mine/paint/Brush.h>
 
@@ -33,7 +34,26 @@ void Border::set_child(UIElement* child)
         Visual::remove_child(child_);
     }
 
+    // 设置裸指针时，清除之前可能持有的所有权（不应同时持有两种引用）
+    owned_child_.reset();
     child_ = child;
+    if (child_ != nullptr) {
+        Visual::add_child(child_);
+    }
+
+    invalidate_measure();
+    invalidate_render();
+}
+
+void Border::set_child(core::OwnedPtr<UIElement> child)
+{
+    if (child_ != nullptr) {
+        Visual::remove_child(child_);
+    }
+
+    // 转移所有权：Border 拥有子元素，析构时自动释放
+    owned_child_ = std::move(child);
+    child_ = owned_child_.get();
     if (child_ != nullptr) {
         Visual::add_child(child_);
     }
