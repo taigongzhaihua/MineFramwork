@@ -46,6 +46,7 @@ struct TextRun {
     float    size_px{0.0f};          ///< 字号（像素）
     float    origin_x{0.0f};         ///< 基线起始点 X（屏幕坐标，像素）
     float    origin_y{0.0f};         ///< 基线起始点 Y（屏幕坐标，像素，向下为正）
+    float    character_spacing{0.0f};///< 字符间额外间距（像素，默认 0；每个字形 advance 后追加）
 };
 
 /**

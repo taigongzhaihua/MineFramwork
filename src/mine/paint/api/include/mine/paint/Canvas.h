@@ -308,14 +308,16 @@ public:
      * @param origin    基线起始点（屏幕像素坐标）
      * @param font_face 字体面指针（不可为 nullptr；生命周期须长于 DisplayList）
      * @param size_px   字号（像素）
-     * @param brush     文字颜色画刷（当前仅支持 SolidColor）
+     * @param brush             文字颜色画刷（当前仅支持 SolidColor）
+     * @param character_spacing 字符间额外间距（像素；默认 0，即不加间距）
      */
     void draw_text(
         core::StringView text,
         math::Vec2       origin,
         void*            font_face,
         float            size_px,
-        const Brush&     brush);
+        const Brush&     brush,
+        float            character_spacing = 0.0f);
 
     // ── 完成录制 ────────────────────────────────────────────────────────
 

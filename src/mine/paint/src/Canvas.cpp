@@ -379,7 +379,8 @@ void Canvas::draw_text(
     math::Vec2       origin,
     void*            font_face,
     float            size_px,
-    const Brush&     brush) {
+    const Brush&     brush,
+    float            character_spacing) {
 
     if (font_face == nullptr || text.empty() || size_px <= 0.0f) {
         return;
@@ -397,11 +398,12 @@ void Canvas::draw_text(
         run.utf8[i] = text[i];
     }
     run.utf8[copy_len] = '\0';
-    run.length    = copy_len;
-    run.font_face = font_face;
-    run.size_px   = size_px;
-    run.origin_x  = origin.x;
-    run.origin_y  = origin.y;
+    run.length            = copy_len;
+    run.font_face         = font_face;
+    run.size_px           = size_px;
+    run.origin_x          = origin.x;
+    run.origin_y          = origin.y;
+    run.character_spacing = character_spacing;
 
     const uint32_t run_index = intern_text_run(std::move(run));
 

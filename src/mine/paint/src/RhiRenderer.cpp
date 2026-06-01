@@ -4108,7 +4108,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
                     text_verts.push_back({gx + gw, gy + gh, u1, v1, cr, cg, cb, ca});
                     text_verts.push_back({gx,      gy + gh, u0, v1, cr, cg, cb, ca});
 
-                    pen_x += static_cast<float>(entry->advance_x);
+                    pen_x += static_cast<float>(entry->advance_x) + run.character_spacing;
                 }
             }
 

@@ -4,6 +4,37 @@
 
 ## [Unreleased]
 
+### Added / Changed
+- **mine.ui.controls：完善 TextBlock 多行排版支持**：
+
+  新增以下 DependencyProperty 及对应成员 API：
+  - `TextWrappingProperty`（`TextWrapping`：NoWrap / Wrap / WrapAtWord）
+  - `TextAlignmentProperty`（`TextAlignment`：Left / Center / Right）
+  - `TextTrimmingProperty`（`TextTrimming`：None / CharacterEllipsis，省略号为 U+2026）
+  - `LineHeightProperty`（`float`，0 = 自动使用字体行高）
+  - `CharacterSpacingProperty`（`float`，每字形 advance 后追加的额外间距，像素）
+  - `MaxLinesProperty`（`int32_t`，0 = 不限制；正值截断超出的行）
+
+  行布局引擎（`build_lines()`）：
+  - 支持 `\n` 硬换行；
+  - Wrap 模式按字符边界折叠（保证至少放入 1 字符，防死循环）；
+  - WrapAtWord 模式按空格定位词边界贪心折叠，单词本身超宽时回退到字符折叠；
+  - CharacterEllipsis 省略号后处理：对超出宽度的行逐字前向搜索最长前缀 + "…"；
+  - MaxLines 截断：超出行数时剪去多余行，最后一行若启用省略号则追加 "…"。
+
+  渲染（`on_render()`）：
+  - 逐行计算基线 Y（行高居中）；
+  - 对齐偏移（Left/Center/Right 根据行宽与内容区宽计算 X）；
+  - 行文字调用 `canvas.draw_text(…, char_spacing_px_)` 带字符间距；
+  - 省略号单独一次 `draw_text(…, 0.0f)` 追加在前缀末尾。
+
+- **mine.paint：`Canvas::draw_text` 新增 `character_spacing` 参数**（默认 `0.0f`）：
+  该参数向下穿透 `TextRun::character_spacing` 字段，
+  最终在 `RhiRenderer` 的字形渲染循环中追加到每个字形的 advance 之后。
+
+- **mine.paint：`TextRun` 新增 `character_spacing` 字段**（`float`，默认 `0.0f`）：
+  存储在 `DisplayList` 中，渲染器读取时叠加到字间距。
+
 ### Fixed
 - **mine.ui.property：修复 `DependencyObject` 全局防递归标志误拦截跨属性写入**：
 
