@@ -29,6 +29,7 @@
 #include <mine/ui/controls/Button.h>
 #include <mine/ui/controls/Border.h>
 #include <mine/ui/event/RoutedEventArgs.h>
+#include <mine/ui/style/StyleAll.h>
 #include <mine/text/FontFace.h>
 #include <mine/math/Thickness.h>
 #include <mine/paint/Brush.h>
@@ -98,6 +99,10 @@ private:
     mine::ui::Button     btn_minimize_;   ///< 最小化按钮 ─
     mine::ui::Button     btn_maximize_;   ///< 最大化/还原按钮 □
     mine::ui::Button     btn_close_;      ///< 关闭按钮 ✕
+
+    // 标题栏按钮 VSM 样式（替代已移除的 set_background_hovered / set_background_pressed）
+    mine::ui::style::Style chrome_btn_style_;  ///< 最小化/最大化按钮透明→灰色悬停/按下
+    mine::ui::style::Style close_btn_style_;   ///< 关闭按钮透明→红色悬停/按下
 
     // 内容区：垂直 StackPanel + 说明文字
     mine::ui::StackPanel content_panel_;

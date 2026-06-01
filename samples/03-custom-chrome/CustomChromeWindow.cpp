@@ -32,11 +32,15 @@
 #include <mine/ui/input/InputEvents.h>
 #include <mine/ui/input/MouseEventArgs.h>
 #include <mine/ui/input/MouseButton.h>
+#include <mine/core/TypeId.h>
+#include <mine/core/Variant.h>
 
-// ── 命名空间别名 ──────────────────────────────────────────────────────────────
+// ── 命名空间别名 ──────────────────────────────────────────────────────────────────
+namespace core  = mine::core;
 namespace math  = mine::math;
 namespace paint = mine::paint;
 namespace ui    = mine::ui;
+namespace style = mine::ui::style;
 namespace input = mine::ui::input;
 
 namespace app {
@@ -77,7 +81,48 @@ void CustomChromeWindow::setup(mine::text::FontFace* font)
 // ── 视觉树构建 ────────────────────────────────────────────────────────────────
 
 void CustomChromeWindow::build_(mine::text::FontFace* font)
-{
+{    // ── 初始化标题栏按钮 VSM 样式（替代已移除的 set_background_hovered / set_background_pressed） ─────
+    // 最小化 / 最大化按钮：透明底色，悬停/#3A3A3A，按下/#2A2A2A
+    chrome_btn_style_
+        .set_name("ChromeBtn_Style")
+        .set_target_type(core::TypeId::of<ui::Button>())
+        .add_setter({ &ui::Button::BackgroundProperty,
+                      core::Variant{ paint::Brush::solid_rgba(0x00000000) } });
+    {
+        style::VisualStateSetters vs;
+        vs.state_name = "Hovered";
+        vs.setters.push_back({ &ui::Button::BackgroundProperty,
+            core::Variant{ paint::Brush::solid_rgb(0x3A3A3A) } });
+        chrome_btn_style_.add_state_setters(std::move(vs));
+    }
+    {
+        style::VisualStateSetters vs;
+        vs.state_name = "Pressed";
+        vs.setters.push_back({ &ui::Button::BackgroundProperty,
+            core::Variant{ paint::Brush::solid_rgb(0x2A2A2A) } });
+        chrome_btn_style_.add_state_setters(std::move(vs));
+    }
+
+    // 关闭按钮：透明底色，悬停/Windows 红 #C42B1C，按下/深红 #9B2213
+    close_btn_style_
+        .set_name("CloseBtn_Style")
+        .set_target_type(core::TypeId::of<ui::Button>())
+        .add_setter({ &ui::Button::BackgroundProperty,
+                      core::Variant{ paint::Brush::solid_rgba(0x00000000) } });
+    {
+        style::VisualStateSetters vs;
+        vs.state_name = "Hovered";
+        vs.setters.push_back({ &ui::Button::BackgroundProperty,
+            core::Variant{ paint::Brush::solid_rgb(0xC42B1C) } });
+        close_btn_style_.add_state_setters(std::move(vs));
+    }
+    {
+        style::VisualStateSetters vs;
+        vs.state_name = "Pressed";
+        vs.setters.push_back({ &ui::Button::BackgroundProperty,
+            core::Variant{ paint::Brush::solid_rgb(0x9B2213) } });
+        close_btn_style_.add_state_setters(std::move(vs));
+    }
     // ── 根 Grid：两行 ─────────────────────────────────────────────────────
     root_grid_.add_row(ui::RowDefinition{ ui::GridLength::pixel(48.0f) });  // 标题栏固定高度
     root_grid_.add_row(ui::RowDefinition{ ui::GridLength::star() });         // 内容区弹性填充
@@ -118,18 +163,15 @@ void CustomChromeWindow::build_(mine::text::FontFace* font)
     btn_panel_.set_orientation(ui::Orientation::Horizontal);
     ui::Grid::set_column(btn_panel_, 1);
 
-    // 配置标题栏按钮公共外观（透明底色、悬停高亮、充满标题栏高度）
+    // 配置标题栏按钮公共外观（悬停高亮由 VSM 样式控制，充满标题栏高度）
     auto setup_chrome_btn = [&](ui::Button& btn,
                                 const char* label,
-                                uint32_t    hover_bg,
-                                uint32_t    pressed_bg) {
+                                style::Style* vsm_style) {
         btn.set_text(label);
         btn.set_font_size(12.0f);
         btn.set_foreground(paint::Brush::solid_rgb(0xCCCCCC));
-        // 默认背景完全透明（标题栏深灰底色透出）
-        btn.set_background(paint::Brush::solid_rgba(0x00000000));
-        btn.set_background_hovered(paint::Brush::solid_rgb(hover_bg));
-        btn.set_background_pressed(paint::Brush::solid_rgb(pressed_bg));
+        // 透明底色和悬停/按下高亮由 vsm_style P5/P4 层控制，不使用 Local(P2)（避免覆盖状态）
+        btn.set_vsm_style(vsm_style);
         // 水平内边距 20px 保证点击面积；垂直 0 使按钮 Stretch 充满 48px 标题栏
         btn.set_padding(math::Thickness{ 20.0f, 0.0f, 20.0f, 0.0f });
         btn.set_vertical_alignment(ui::VerticalAlignment::Stretch);
@@ -137,7 +179,7 @@ void CustomChromeWindow::build_(mine::text::FontFace* font)
     };
 
     // 最小化按钮（─，U+2500 BOX DRAWINGS LIGHT HORIZONTAL）
-    setup_chrome_btn(btn_minimize_, "\xe2\x94\x80", 0x3A3A3A, 0x2A2A2A);
+    setup_chrome_btn(btn_minimize_, "\xe2\x94\x80", &chrome_btn_style_);
     btn_minimize_.add_handler(
         ui::Button::ClickEvent(),
         &CustomChromeWindow::s_on_minimize_click,
@@ -145,7 +187,7 @@ void CustomChromeWindow::build_(mine::text::FontFace* font)
     btn_panel_.add_child(&btn_minimize_);
 
     // 最大化/还原按钮（□，U+25A1 WHITE SQUARE）
-    setup_chrome_btn(btn_maximize_, "\xe2\x96\xa1", 0x3A3A3A, 0x2A2A2A);
+    setup_chrome_btn(btn_maximize_, "\xe2\x96\xa1", &chrome_btn_style_);
     btn_maximize_.add_handler(
         ui::Button::ClickEvent(),
         &CustomChromeWindow::s_on_maximize_click,
@@ -153,7 +195,7 @@ void CustomChromeWindow::build_(mine::text::FontFace* font)
     btn_panel_.add_child(&btn_maximize_);
 
     // 关闭按钮（✕，U+2715）：悬停变 Windows 红（#C42B1C）
-    setup_chrome_btn(btn_close_, "\xe2\x9c\x95", 0xC42B1C, 0x9B2213);
+    setup_chrome_btn(btn_close_, "\xe2\x9c\x95", &close_btn_style_);
     btn_close_.add_handler(
         ui::Button::ClickEvent(),
         &CustomChromeWindow::s_on_close_click,
