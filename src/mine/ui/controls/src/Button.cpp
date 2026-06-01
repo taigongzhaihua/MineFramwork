@@ -555,11 +555,14 @@ void Button::on_render(paint::Canvas& canvas)
 
 void Button::on_arrange(math::Rect final_rect)
 {
-    // 将控件形状（胶囊形，MD3 Filled Button 规范：corner_radius = height / 2）
-    // 作为 Visual 级别裁剪区域，统一驱动：
+    // 先调用基类完成 ContentPresenter 的排列
+    // （FrameworkElement::on_arrange → arrange_override → ContentPresenter::arrange）
+    // 若跳过此调用，inner_element 的 bounds_rect 将保持零矩形，文字不可见
+    FrameworkElement::on_arrange(final_rect);
+
+    // 设置胶囊形裁剪（MD3 规范：corner_radius = height / 2），统一驱动：
     //   1. 渲染裁剪：子元素（ContentPresenter 等）不会溢出胶囊边界
     //   2. 命中测试边界：hit_test_local() 自动使用此形状，无需覆写 hit_test()
-    // 等价于 Qt setMask(QRegion) 对渲染与命中测试的统一作用。
     const float radius = final_rect.height * 0.5f;
     set_clip_rounded_rect(math::RoundedRect{final_rect, radius});
 }
