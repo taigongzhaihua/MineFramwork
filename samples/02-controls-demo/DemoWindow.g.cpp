@@ -316,8 +316,8 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
 
     body_panel_.add_child(&tb_align_grid_);
 
-    // ── 8d. 字符间距对比（CharacterSpacing 0 vs 4px）──────────────────────────
-    tb_label_spacing_.set_text("\u5b57\u7b26\u95f4\u8ddd  CharacterSpacing: 0px vs 4px");
+    // ── 8d. 字符间距对比（CharacterSpacing 0 / 2 / 4 px 三列等宽）────────────
+    tb_label_spacing_.set_text("字符间距  CharacterSpacing: 0px / 2px / 4px");
     tb_label_spacing_.set_font_size(10.0f);
     tb_label_spacing_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
     tb_label_spacing_.set_background(paint::Brush::solid(math::Color::Transparent));
@@ -325,32 +325,48 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     if (font) { tb_label_spacing_.set_font_face(font); }
     body_panel_.add_child(&tb_label_spacing_);
 
-    tb_spacing_row_.set_orientation(ui::Orientation::Horizontal);
-    tb_spacing_row_.set_margin(math::Thickness{ 16.0f, 0.0f, 16.0f, 0.0f });
+    tb_spacing_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
+    tb_spacing_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
+    tb_spacing_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
+    tb_spacing_grid_.set_margin(math::Thickness{ 16.0f, 0.0f, 16.0f, 0.0f });
 
-    tb_spacing_norm_.set_text("\u5c55\u793a\u6587\u5b57\u95f4\u8ddd 0px");
+    tb_spacing_norm_.set_text("字间距 0px\n文字排列紧凑");
     tb_spacing_norm_.set_font_size(14.0f);
     tb_spacing_norm_.set_foreground(paint::Brush::solid_rgb(0x212121));
     tb_spacing_norm_.set_background(paint::Brush::solid_rgb(0xE3F2FD));
-    tb_spacing_norm_.set_padding(math::Thickness{ 10.0f, 8.0f, 10.0f, 8.0f });
+    tb_spacing_norm_.set_padding(math::Thickness{ 10.0f, 10.0f, 10.0f, 10.0f });
     tb_spacing_norm_.set_character_spacing(0.0f);
+    tb_spacing_norm_.set_text_wrapping(ui::TextWrapping::Wrap);
     if (font) { tb_spacing_norm_.set_font_face(font); }
-    tb_spacing_row_.add_child(&tb_spacing_norm_);
+    ui::Grid::set_column(tb_spacing_norm_, 0);
+    tb_spacing_grid_.add_child(&tb_spacing_norm_);
 
-    tb_spacing_wide_.set_text("\u5c55\u793a\u6587\u5b57\u95f4\u8ddd 4px");
+    tb_spacing_2px_.set_text("字间距 2px\n文字略宽松");
+    tb_spacing_2px_.set_font_size(14.0f);
+    tb_spacing_2px_.set_foreground(paint::Brush::solid_rgb(0x212121));
+    tb_spacing_2px_.set_background(paint::Brush::solid_rgb(0xE8F5E9));
+    tb_spacing_2px_.set_padding(math::Thickness{ 10.0f, 10.0f, 10.0f, 10.0f });
+    tb_spacing_2px_.set_character_spacing(2.0f);
+    tb_spacing_2px_.set_text_wrapping(ui::TextWrapping::Wrap);
+    if (font) { tb_spacing_2px_.set_font_face(font); }
+    ui::Grid::set_column(tb_spacing_2px_, 1);
+    tb_spacing_grid_.add_child(&tb_spacing_2px_);
+
+    tb_spacing_wide_.set_text("字间距 4px\n文字更宽松");
     tb_spacing_wide_.set_font_size(14.0f);
     tb_spacing_wide_.set_foreground(paint::Brush::solid_rgb(0x212121));
     tb_spacing_wide_.set_background(paint::Brush::solid_rgb(0xFCE4EC));
-    tb_spacing_wide_.set_padding(math::Thickness{ 10.0f, 8.0f, 10.0f, 8.0f });
-    tb_spacing_wide_.set_margin(math::Thickness{ 8.0f, 0.0f, 0.0f, 0.0f });
+    tb_spacing_wide_.set_padding(math::Thickness{ 10.0f, 10.0f, 10.0f, 10.0f });
     tb_spacing_wide_.set_character_spacing(4.0f);
+    tb_spacing_wide_.set_text_wrapping(ui::TextWrapping::Wrap);
     if (font) { tb_spacing_wide_.set_font_face(font); }
-    tb_spacing_row_.add_child(&tb_spacing_wide_);
+    ui::Grid::set_column(tb_spacing_wide_, 2);
+    tb_spacing_grid_.add_child(&tb_spacing_wide_);
 
-    body_panel_.add_child(&tb_spacing_row_);
+    body_panel_.add_child(&tb_spacing_grid_);
 
-    // ── 8e. 行高设置（LineHeight=28px vs 自动）────────────────────────────────
-    tb_label_lineh_.set_text("\u884c\u9ad8  LineHeight: 28px \uff08\u9ed8\u8ba4\u884c\u9ad8\u7ea6 16px\uff09");
+    // ── 8e. 行高对比（默认行高 vs LineHeight=28px）────────────────────────────
+    tb_label_lineh_.set_text("行距  LineHeight: 默认（自动）vs 28px");
     tb_label_lineh_.set_font_size(10.0f);
     tb_label_lineh_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
     tb_label_lineh_.set_background(paint::Brush::solid(math::Color::Transparent));
@@ -358,15 +374,30 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     if (font) { tb_label_lineh_.set_font_face(font); }
     body_panel_.add_child(&tb_label_lineh_);
 
-    tb_lineh_.set_text("\u7b2c\u4e00\u884c\u6587\u5b57\n\u7b2c\u4e8c\u884c\u6587\u5b57\n\u7b2c\u4e09\u884c\u6587\u5b57");
+    tb_lineh_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
+    tb_lineh_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
+    tb_lineh_grid_.set_margin(math::Thickness{ 16.0f, 0.0f, 16.0f, 0.0f });
+
+    tb_lineh_default_.set_text("默认行距\n第一行文字\n第二行文字\n第三行文字");
+    tb_lineh_default_.set_font_size(13.0f);
+    tb_lineh_default_.set_foreground(paint::Brush::solid_rgb(0x212121));
+    tb_lineh_default_.set_background(paint::Brush::solid_rgb(0xECEFF1));
+    tb_lineh_default_.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
+    if (font) { tb_lineh_default_.set_font_face(font); }
+    ui::Grid::set_column(tb_lineh_default_, 0);
+    tb_lineh_grid_.add_child(&tb_lineh_default_);
+
+    tb_lineh_.set_text("行距 28px\n第一行文字\n第二行文字\n第三行文字");
     tb_lineh_.set_font_size(13.0f);
     tb_lineh_.set_foreground(paint::Brush::solid_rgb(0x212121));
     tb_lineh_.set_background(paint::Brush::solid_rgb(0xF3E5F5));
-    tb_lineh_.set_padding(math::Thickness{ 12.0f, 4.0f, 12.0f, 4.0f });
-    tb_lineh_.set_margin(math::Thickness{ 16.0f, 0.0f, 16.0f, 0.0f });
+    tb_lineh_.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
     tb_lineh_.set_line_height(28.0f);
     if (font) { tb_lineh_.set_font_face(font); }
-    body_panel_.add_child(&tb_lineh_);
+    ui::Grid::set_column(tb_lineh_, 1);
+    tb_lineh_grid_.add_child(&tb_lineh_);
+
+    body_panel_.add_child(&tb_lineh_grid_);
 
     // ── 9. 将根布局挂载到窗口 ────────────────────────────────────────────────
     // 直接调用继承自 Window 的 set_content()（无 win_. 前缀）

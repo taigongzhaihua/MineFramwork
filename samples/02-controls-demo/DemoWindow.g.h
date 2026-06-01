@@ -194,12 +194,15 @@ private:
     mine::ui::TextBlock       tb_align_right_;     ///< Right 对齐
     // 字符间距
     mine::ui::TextBlock       tb_label_spacing_;   ///< "字符间距" 标签
-    mine::ui::StackPanel      tb_spacing_row_;     ///< 水平对比行
-    mine::ui::TextBlock       tb_spacing_norm_;    ///< 默认间距
-    mine::ui::TextBlock       tb_spacing_wide_;    ///< 宽间距（spacing=4px）
+    mine::ui::Grid            tb_spacing_grid_;    ///< 三列等宽 Grid（0px / 2px / 4px）
+    mine::ui::TextBlock       tb_spacing_norm_;    ///< 字间距 0px
+    mine::ui::TextBlock       tb_spacing_2px_;     ///< 字间距 2px
+    mine::ui::TextBlock       tb_spacing_wide_;    ///< 字间距 4px
     // 行高
     mine::ui::TextBlock       tb_label_lineh_;     ///< "行高" 标签
-    mine::ui::TextBlock       tb_lineh_;           ///< LineHeight 演示
+    mine::ui::Grid            tb_lineh_grid_;      ///< 两列 Grid（默认行高 vs 28px）
+    mine::ui::TextBlock       tb_lineh_default_;   ///< 默认行高对比
+    mine::ui::TextBlock       tb_lineh_;           ///< LineHeight=28px 演示
 };
 
 } // namespace app
