@@ -187,8 +187,8 @@ private:
     mine::ui::Button                 btn_switch_tmpl_;   ///< 切换模板按鈕
     mine::ui::style::ControlTemplate tmpl_green_;        ///< 绿色圆角模板（A）
     mine::ui::style::ControlTemplate tmpl_orange_;       ///< 橙色矩形模板（B）
+    mine::ui::style::ControlTemplate tmpl_switch_;       ///< btn_switch_tmpl_ 深灰色模板（与 tmpl_green_/tmpl_orange_ 同路径）
     bool                             tmpl_is_green_ = true; ///< 当前按鈕使用的是哪个模板
-    mine::ui::style::Style           switch_style_;      ///< btn_switch_tmpl_ 深灰色主题样式（避免 Local P50 遮盖 VSM 状态色）
 };
 
 } // namespace app

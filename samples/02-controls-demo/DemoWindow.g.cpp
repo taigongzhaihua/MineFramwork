@@ -173,6 +173,75 @@ static void s_build_orange_template(mine::ui::DependencyObject& target)
     btn.set_template_root(std::move(content));
 }
 
+/// 深蓝灰模板：btn_switch_tmpl_ 专用，与 s_build_green/orange_template 结构完全一致
+/// 使用独立 ControlTemplate 而非默认模板，确保 VSM 颜色过渡路径与自定义模板完全相同
+static void s_build_switch_template(mine::ui::DependencyObject& target)
+{
+    auto& btn     = static_cast<ui::Button&>(target);
+    auto  content = core::make_owned<ui::ContentPresenter>();
+
+    content->set_template_name("content");
+    btn.bind_template(*content,
+                      ui::ContentPresenter::ContentProperty,
+                      ui::ContentControl::ContentProperty);
+    btn.bind_template(*content,
+                      ui::ContentPresenter::PaddingProperty,
+                      ui::Button::PaddingProperty);
+
+    static style::Style s_switch_style = []() {
+        style::Style s;
+        s.set_name("SwitchTemplate_Style")
+         .set_target_type(core::TypeId::of<ui::Button>())
+         .add_setter({ &ui::Button::BackgroundProperty,
+                       core::Variant{ paint::Brush::solid_rgb(0x37474F) } })  // 深蓝灰 Normal
+         .add_setter({ &ui::Button::ForegroundProperty,
+                       core::Variant{ paint::Brush::solid_rgb(0xFFFFFF) } })  // 白色文字
+         .add_setter({ &ui::Button::PaddingProperty,
+                       core::Variant{ math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f } } });
+        {
+            style::VisualStateSetters vs;
+            vs.state_name = "Hovered";
+            vs.setters.push_back({ &ui::Button::BackgroundProperty,
+                core::Variant{ paint::Brush::solid_rgb(0x546E7A) } });  // 略亮蓝灰
+            s.add_state_setters(std::move(vs));
+        }
+        {
+            style::VisualStateSetters vs;
+            vs.state_name = "Pressed";
+            vs.setters.push_back({ &ui::Button::BackgroundProperty,
+                core::Variant{ paint::Brush::solid_rgb(0x263238) } });  // 极深蓝灰
+            s.add_state_setters(std::move(vs));
+        }
+        return s;
+    }();
+
+    btn.set_vsm_style(&s_switch_style);
+
+    style::VisualStateManager vsm{ btn };
+    vsm.define_state("Normal");
+    vsm.define_state("Hovered");
+    vsm.define_state("Pressed");
+    vsm.define_state("Disabled");
+    auto* btn_ptr = &btn;
+    vsm.add_transition("*", "Hovered", [btn_ptr](anim::Storyboard& sb) {
+        sb.animate_dp(*btn_ptr, ui::Button::BackgroundProperty,
+                      anim::Duration::milliseconds(120.0f), anim::QuadEaseOut);
+    });
+    vsm.add_transition("*", "Normal", [btn_ptr](anim::Storyboard& sb) {
+        sb.animate_dp(*btn_ptr, ui::Button::BackgroundProperty,
+                      anim::Duration::milliseconds(100.0f), anim::QuadEaseOut);
+    });
+    vsm.add_transition("*", "Pressed", [btn_ptr](anim::Storyboard& sb) {
+        sb.animate_dp(*btn_ptr, ui::Button::BackgroundProperty,
+                      anim::Duration::milliseconds(60.0f), anim::QuadEaseIn);
+    });
+    vsm.set_style(&s_switch_style);
+    btn.set_visual_state_manager(std::move(vsm));
+    s_switch_style.apply(btn);
+
+    btn.set_template_root(std::move(content));
+}
+
 namespace app {
 
 // ── 构造 / 析构 ───────────────────────────────────────────────────────────────
@@ -389,54 +458,23 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     // 配置两个 ControlTemplate（BuildFn 为文件作用域 static 函数，无捕获，可隐式转换为函数指针）
     tmpl_green_.build_fn_  = &s_build_green_template;
     tmpl_orange_.build_fn_ = &s_build_orange_template;
+    tmpl_switch_.build_fn_ = &s_build_switch_template;
 
     // btn_tmpl_：演示按钮，初始使用绿色模板
     btn_tmpl_.set_text("ControlTemplate 演示按钮（点击计数）");
     btn_tmpl_.set_padding(math::Thickness{ 16.0f, 10.0f, 16.0f, 10.0f });
     if (font) { btn_tmpl_.set_font_face(font); }
     btn_tmpl_.set_margin(math::Thickness{ 16.0f, 10.0f, 16.0f, 0.0f });
-    // 通过 TemplateProperty DP 设置模板，on_template_dp_changed 会在下次 measure 时
-    // 调用 build_fn_ 构建视觉树，并触发 on_apply_template() 绑定 "content" Part
     btn_tmpl_.set_control_template(&tmpl_green_);
     btn_tmpl_.add_handler(ui::Button::ClickEvent(), &DemoWindowBase::s_on_click_count, this);
     body_panel_.add_child(&btn_tmpl_);
 
-    // btn_switch_tmpl_：切换模板按钮（本身使用默认模板，演示 StyleSetter+VSM 路径）
-    //
-    // 注意：此前用 set_background(Local P50) 设置深灰色，导致 Local 优先级 > StyleTrigger，
-    // VSM 状态颜色被遮盖，Hover/Pressed 颜色始终无效。
-    // 修复：改用 switch_style_（StyleSetter P20 + StateSetters P30），确保 VSM 可正常驱动颜色。
-    switch_style_
-        .set_name("SwitchButtonStyle")
-        .set_target_type(core::TypeId::of<ui::Button>())
-        .add_setter({ &ui::Button::BackgroundProperty,
-                      core::Variant{ paint::Brush::solid_rgb(0x37474F) } })   // 深蓝灰 Normal(P20)
-        .add_setter({ &ui::Button::ForegroundProperty,
-                      core::Variant{ paint::Brush::solid_rgb(0xFFFFFF) } })   // 白色文字(P20)
-        .add_setter({ &ui::Button::PaddingProperty,
-                      core::Variant{ math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f } } });
-
-    // P30 StyleTrigger：Hovered 状态终値（略亮蓝灰）
-    {
-        style::VisualStateSetters vs;
-        vs.state_name = "Hovered";
-        vs.setters.push_back({ &ui::Button::BackgroundProperty,
-            core::Variant{ paint::Brush::solid_rgb(0x546E7A) } });
-        switch_style_.add_state_setters(std::move(vs));
-    }
-    // P30 StyleTrigger：Pressed 状态终値（极深蓝灰）
-    {
-        style::VisualStateSetters vs;
-        vs.state_name = "Pressed";
-        vs.setters.push_back({ &ui::Button::BackgroundProperty,
-            core::Variant{ paint::Brush::solid_rgb(0x263238) } });
-        switch_style_.add_state_setters(std::move(vs));
-    }
-
+    // btn_switch_tmpl_：切换模板按钮，使用独立的 tmpl_switch_ 而非默认模板，
+    // 确保与 btn_tmpl_ 走完全相同的 ControlTemplate 代码路径（VSM 颜色过渡正常生效）
     btn_switch_tmpl_.set_text("切换模板（绿色 \u2194 橙色）");
     if (font) { btn_switch_tmpl_.set_font_face(font); }
     btn_switch_tmpl_.set_margin(math::Thickness{ 16.0f, 8.0f, 16.0f, 16.0f });
-    btn_switch_tmpl_.set_vsm_style(&switch_style_);   // 用样式驱动颜色，避免 Local 遮盖 VSM 状态色
+    btn_switch_tmpl_.set_control_template(&tmpl_switch_);
     btn_switch_tmpl_.add_handler(ui::Button::ClickEvent(), &DemoWindowBase::s_on_switch_tmpl, this);
     body_panel_.add_child(&btn_switch_tmpl_);
 
