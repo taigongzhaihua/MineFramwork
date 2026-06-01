@@ -547,3 +547,80 @@ TEST_CASE("layout_Grid_无行列定义视为单行单列1Star") {
     CHECK(br.width  == doctest::Approx(400.0f));
     CHECK(br.height == doctest::Approx(300.0f));
 }
+
+// ============================================================================
+// Grid — 无限可用空间下 Star 行/列的 star_unit 策略
+// ============================================================================
+
+TEST_CASE("layout_Grid_Star列_无限宽度_按内容最小等比分配") {
+    // 两列：1* 和 2*，宽度方向无限可用
+    // 内容：1* 列子元素期望宽 30px，2* 列子元素期望宽 40px
+    // 期望：unit = max(30/1, 40/2) = 30px；1* → 30px，2* → 60px
+    Grid grid;
+    grid.add_row(RowDefinition{GridLength::pixel(50.0f)});
+    grid.add_column(ColumnDefinition{GridLength::star(1.0f)});  // 1*
+    grid.add_column(ColumnDefinition{GridLength::star(2.0f)});  // 2*
+
+    FixedLeaf a{30.0f, 10.0f};   // 1* 列，期望宽 30px
+    FixedLeaf b{40.0f, 10.0f};   // 2* 列，期望宽 40px
+    Grid::set_column(b, 1);
+    grid.add_child(&a);
+    grid.add_child(&b);
+
+    const float kInf = std::numeric_limits<float>::infinity();
+    grid.measure({kInf, 200.0f});
+
+    // desired_width = 1* (30px) + 2* (60px) = 90px
+    const Size ds = grid.desired_size();
+    CHECK(ds.width == doctest::Approx(90.0f));
+
+    // arrange 时父给出实际有限宽度 200px：1* → 200/3 ≈ 66.67，2* → 400/3 ≈ 133.33
+    grid.arrange({0.0f, 0.0f, 200.0f, 200.0f});
+    CHECK(a.bounds_rect().width == doctest::Approx(200.0f / 3.0f));
+    CHECK(b.bounds_rect().width == doctest::Approx(400.0f / 3.0f));
+}
+
+TEST_CASE("layout_Grid_Star行_无限高度_按内容最小等比分配") {
+    // 三行：12px（Pixel）+ auto + 1*，高度方向无限可用
+    // auto 行子元素期望高 20px，1* 行子元素期望高 50px
+    // 期望：unit = 50/1 = 50px；1* → 50px；total = 12 + 20 + 50 = 82px
+    Grid grid;
+    grid.add_row(RowDefinition{GridLength::pixel(12.0f)});
+    grid.add_row(RowDefinition{GridLength::auto_()});
+    grid.add_row(RowDefinition{GridLength::star(1.0f)});
+    grid.add_column(ColumnDefinition{GridLength::pixel(100.0f)});
+
+    FixedLeaf leaf_auto{10.0f, 20.0f};  // 在 auto 行
+    FixedLeaf leaf_star{10.0f, 50.0f};  // 在 star 行
+    Grid::set_row(leaf_auto, 1);
+    Grid::set_row(leaf_star, 2);
+    grid.add_child(&leaf_auto);
+    grid.add_child(&leaf_star);
+
+    const float kInf = std::numeric_limits<float>::infinity();
+    grid.measure({200.0f, kInf});
+
+    const Size ds = grid.desired_size();
+    CHECK(ds.height == doctest::Approx(82.0f));  // 12 + 20 + 50
+}
+
+TEST_CASE("layout_Grid_Star行列_两个Star行_等比保持") {
+    // 两个 Star 行：1* 内容 30px，2* 内容 40px
+    // unit = max(30/1, 40/2) = 30px；1* → 30px，2* → 60px；total = 90px
+    Grid grid;
+    grid.add_row(RowDefinition{GridLength::star(1.0f)});
+    grid.add_row(RowDefinition{GridLength::star(2.0f)});
+    grid.add_column(ColumnDefinition{GridLength::pixel(100.0f)});
+
+    FixedLeaf a{10.0f, 30.0f};   // 1* 行
+    FixedLeaf b{10.0f, 40.0f};   // 2* 行
+    Grid::set_row(b, 1);
+    grid.add_child(&a);
+    grid.add_child(&b);
+
+    const float kInf = std::numeric_limits<float>::infinity();
+    grid.measure({200.0f, kInf});
+
+    const Size ds = grid.desired_size();
+    CHECK(ds.height == doctest::Approx(90.0f));  // 30 + 60
+}

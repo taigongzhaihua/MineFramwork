@@ -36,6 +36,22 @@
   存储在 `DisplayList` 中，渲染器读取时叠加到字间距。
 
 ### Fixed
+- **mine.ui.layout（Grid）：修复 Star 行/列在无限可用空间下无限延伸的布局问题**：
+
+  当 Grid 在某方向获得无限空间时（如置于 StackPanel 的堆叠方向），
+  原行为：`remaining = ∞ - fixed = ∞`，Star 轨道分得无限尺寸，
+  Grid 上报 `desired_size = ∞`，导致父容器布局溢出、内容不可见。
+
+  修复：在 `compute_row_heights` / `compute_col_widths` 中检测 `std::isinf(remaining)`，
+  启用 star_unit 最小等比分配策略：
+  - `star_unit = max(content_size[i] / weight[i])`（对所有 Star 轨道取最大）
+  - 各 Star 轨道尺寸 = `weight[i] * star_unit`
+
+  保证各 Star 轨道均可容纳子内容，权重比例关系正确，
+  Grid 上报有限 `desired_size`，递归适用于嵌套 Grid。
+
+  新增 3 个布局单元测试：Star列/行无限空间等比分配、两个Star行等比保持。
+
 - **samples/02-controls-demo：增大字符间距演示对比值（0 → 0/6/12px）**：
   原演示使用 0/2/4px 间距，在 14px 字号下视觉差异过于细微（2px 约占字宽 14%）。
   调整为 0/6/12px 后，第三列文字整体宽度比第一列宽 60px（+71%），差异一目了然；

@@ -6,10 +6,19 @@
  *   1. Pixel 行/列：直接使用固定像素值（应用 min/max 约束）
  *   2. Auto 行/列：收集该行/列内所有子元素在该方向的 desiredSize 取最大值
  *      （子元素必须先经过 Measure 才有 desiredSize）
- *   3. Star 行/列：按权重比例分配剩余空间（先减去 Pixel 和 Auto 的总尺寸）
+ *   3. Star 行/列：
+ *      a. 可用空间有限时：按权重比例分配剩余空间（剩余 = 可用 - Pixel - Auto 之和）
+ *      b. 可用空间无限时（如 StackPanel 在堆叠方向给子元素无限空间）：
+ *         Star 行/列不得无限延伸，改为基于内容的最小等比分配：
+ *           unit = max(content_size[i] / weight[i])  对所有 Star 行/列取最大值
+ *           每个 Star 行/列的实际尺寸 = weight[i] * unit
+ *         该策略保证各 Star 行/列均能容纳其内容，且彼此保持正确的权重比例。
+ *         示例：1* 内容 30px，2* 内容 40px
+ *           unit = max(30/1, 40/2) = 30px
+ *           1* 得 30px，2* 得 60px，两列比例正确且内容均可显示
  *
  * 注意事项：
- *   - 跨行列（RowSpan/ColumnSpan > 1）的子元素在 Auto 计算时不参与
+ *   - 跨行列（RowSpan/ColumnSpan > 1）的子元素在内容尺寸收集时不参与
  *     （简化实现，与 WPF 不同；后续可完善）
  *   - Star 权重之和为 0 时，所有 Star 行/列尺寸为 0
  */
@@ -176,16 +185,16 @@ namespace {
 /**
  * @brief 根据行定义列表计算实际行高数组。
  *
- * @param rows          行定义列表
- * @param row_children  每行对应的子元素（用于 Auto 计算，为 desiredHeight 来源）
- *                      外层索引对应行号，内层存储该行的子元素 desiredHeight
- * @param available_h   可用总高度（用于 Star 分配）
- * @param[out] heights  输出：各行实际高度
+ * @param rows           行定义列表
+ * @param row_count      行数
+ * @param content_max_h  每行子元素期望高度的最大值（Pixel/Auto/Star 行均填充，来自 Measure 后的 desiredSize）
+ * @param available_h    可用总高度（有限值时 Star 按剩余比例分配；infinity 时按内容最小等比策略）
+ * @param[out] heights   输出：各行实际高度
  */
 void compute_row_heights(
     const containers::SmallVector<RowDefinition, 4>& rows,
     uint32_t                                          row_count,
-    const containers::SmallVector<float, 4>&          auto_row_max,
+    const containers::SmallVector<float, 4>&          content_max_h,
     float                                             available_h,
     containers::SmallVector<float, 4>&                heights)
 {
@@ -202,7 +211,7 @@ void compute_row_heights(
             heights[r]   = h;
             fixed_used_h += h;
         } else if (def.height.is_auto()) {
-            const float h = clamp_sz(auto_row_max[r], def.min_height, def.max_height);
+            const float h = clamp_sz(content_max_h[r], def.min_height, def.max_height);
             heights[r]   = h;
             fixed_used_h += h;
         } else {
@@ -211,16 +220,34 @@ void compute_row_heights(
         }
     }
 
-    // ── Pass 2：Star 按剩余空间按权重分配 ─────────────────────────────────
-    const float remaining = std::max(0.0f, available_h - fixed_used_h);
+    // ── Pass 2：Star 分配 ──────────────────────────────────────────────────
     if (star_total_weight > 0.0f) {
-        for (uint32_t r = 0; r < row_count; ++r) {
-            const RowDefinition& def = rows[r];
-            if (def.height.is_star()) {
-                const float h = clamp_sz(
-                    remaining * (def.height.value / star_total_weight),
-                    def.min_height, def.max_height);
-                heights[r] = h;
+        const float remaining = std::max(0.0f, available_h - fixed_used_h);
+
+        if (std::isinf(remaining)) {
+            // 可用空间无限：Star 行不得无限延伸，改为基于内容的最小等比分配。
+            // unit = max(content_max_h[r] / weight[r])，保证每行均能容纳其内容，
+            // 且各 Star 行之间保持正确的权重比例关系。
+            float star_unit = 0.0f;
+            for (uint32_t r = 0; r < row_count; ++r) {
+                const RowDefinition& def = rows[r];
+                if (def.height.is_star() && def.height.value > 0.0f)
+                    star_unit = std::max(star_unit, content_max_h[r] / def.height.value);
+            }
+            for (uint32_t r = 0; r < row_count; ++r) {
+                const RowDefinition& def = rows[r];
+                if (def.height.is_star())
+                    heights[r] = clamp_sz(def.height.value * star_unit, def.min_height, def.max_height);
+            }
+        } else {
+            // 可用空间有限：按剩余空间权重比例分配
+            for (uint32_t r = 0; r < row_count; ++r) {
+                const RowDefinition& def = rows[r];
+                if (def.height.is_star()) {
+                    heights[r] = clamp_sz(
+                        remaining * (def.height.value / star_total_weight),
+                        def.min_height, def.max_height);
+                }
             }
         }
     }
@@ -228,11 +255,17 @@ void compute_row_heights(
 
 /**
  * @brief 根据列定义列表计算实际列宽数组（与 compute_row_heights 对称）。
+ *
+ * @param columns        列定义列表
+ * @param col_count      列数
+ * @param content_max_w  每列子元素期望宽度的最大值（Pixel/Auto/Star 列均填充）
+ * @param available_w    可用总宽度（有限值时 Star 按剩余比例分配；infinity 时按内容最小等比策略）
+ * @param[out] widths    输出：各列实际宽度
  */
 void compute_col_widths(
     const containers::SmallVector<ColumnDefinition, 4>& columns,
     uint32_t                                             col_count,
-    const containers::SmallVector<float, 4>&             auto_col_max,
+    const containers::SmallVector<float, 4>&             content_max_w,
     float                                                available_w,
     containers::SmallVector<float, 4>&                   widths)
 {
@@ -241,30 +274,50 @@ void compute_col_widths(
     float star_total_weight = 0.0f;
     float fixed_used_w      = 0.0f;
 
+    // ── Pass 1：Pixel 和 Auto ──────────────────────────────────────────────
     for (uint32_t c = 0; c < col_count; ++c) {
         const ColumnDefinition& def = columns[c];
         if (def.width.is_pixel()) {
             const float w = clamp_sz(def.width.value, def.min_width, def.max_width);
-            widths[c]   = w;
+            widths[c]    = w;
             fixed_used_w += w;
         } else if (def.width.is_auto()) {
-            const float w = clamp_sz(auto_col_max[c], def.min_width, def.max_width);
-            widths[c]   = w;
+            const float w = clamp_sz(content_max_w[c], def.min_width, def.max_width);
+            widths[c]    = w;
             fixed_used_w += w;
         } else {
             star_total_weight += def.width.value;
         }
     }
 
-    const float remaining = std::max(0.0f, available_w - fixed_used_w);
+    // ── Pass 2：Star 分配 ──────────────────────────────────────────────────
     if (star_total_weight > 0.0f) {
-        for (uint32_t c = 0; c < col_count; ++c) {
-            const ColumnDefinition& def = columns[c];
-            if (def.width.is_star()) {
-                const float w = clamp_sz(
-                    remaining * (def.width.value / star_total_weight),
-                    def.min_width, def.max_width);
-                widths[c] = w;
+        const float remaining = std::max(0.0f, available_w - fixed_used_w);
+
+        if (std::isinf(remaining)) {
+            // 可用空间无限：Star 列不得无限延伸，改为基于内容的最小等比分配。
+            // unit = max(content_max_w[c] / weight[c])，保证每列均能容纳其内容，
+            // 且各 Star 列之间保持正确的权重比例关系。
+            float star_unit = 0.0f;
+            for (uint32_t c = 0; c < col_count; ++c) {
+                const ColumnDefinition& def = columns[c];
+                if (def.width.is_star() && def.width.value > 0.0f)
+                    star_unit = std::max(star_unit, content_max_w[c] / def.width.value);
+            }
+            for (uint32_t c = 0; c < col_count; ++c) {
+                const ColumnDefinition& def = columns[c];
+                if (def.width.is_star())
+                    widths[c] = clamp_sz(def.width.value * star_unit, def.min_width, def.max_width);
+            }
+        } else {
+            // 可用空间有限：按剩余空间权重比例分配
+            for (uint32_t c = 0; c < col_count; ++c) {
+                const ColumnDefinition& def = columns[c];
+                if (def.width.is_star()) {
+                    widths[c] = clamp_sz(
+                        remaining * (def.width.value / star_total_weight),
+                        def.min_width, def.max_width);
+                }
             }
         }
     }
@@ -282,13 +335,13 @@ math::Size Grid::measure_override(math::Size available)
     const uint32_t num_rows = (row_count()    == 0) ? 1u : row_count();
     const uint32_t num_cols = (column_count() == 0) ? 1u : column_count();
 
-    // 每行/列的 Auto 内容最大值（仅跨度为 1 的子元素参与）
-    containers::SmallVector<float, 4> auto_row_max(num_rows, 0.0f);
-    containers::SmallVector<float, 4> auto_col_max(num_cols, 0.0f);
+    // 每行/列中所有子元素期望尺寸的最大值（跨度为 1 的子元素参与；Auto/Star/Pixel 行列均填充）
+    containers::SmallVector<float, 4> content_max_h(num_rows, 0.0f);
+    containers::SmallVector<float, 4> content_max_w(num_cols, 0.0f);
 
-    // ── 第一遍 Measure：先对非 Star 行/列做子元素 measure ─────────────────
-    // 对每个子元素，给定约束为（非 Star 列宽之和, 非 Star 行高之和）
-    // 简化：对所有子元素先提供 available（足够保守），收集 Auto 最大值
+    // ── Measure Pass：对所有子元素提供 available 约束，收集各行列内容最大尺寸 ──
+    // 注：子元素先以父给定的 available 尺寸进行 measure，子元素内部
+    //     （如嵌套 Grid）会递归应用同样的无限空间 star_unit 策略。
     const uint32_t child_cnt = children_count();
     for (uint32_t i = 0; i < child_cnt; ++i) {
         UIElement* child = child_at(i);
@@ -303,18 +356,18 @@ math::Size Grid::measure_override(math::Size available)
         const int r_clamped = std::max(0, std::min(row, (int)num_rows - 1));
         const int c_clamped = std::max(0, std::min(col, (int)num_cols - 1));
 
-        // 先以无限可用尺寸 measure（Auto 行/列需要子元素的 desiredSize）
+        // 以 available 约束 measure，收集各行列的内容最大尺寸
         child->measure({available.width, available.height});
         const math::Size ds = child->desired_size();
 
-        // 仅跨度为 1 的子元素更新 Auto 最大值（简化处理）
+        // 仅跨度为 1 的子元素参与内容最大值收集（跨行列简化处理）
         if (row_span == 1) {
-            auto_row_max[static_cast<uint32_t>(r_clamped)] =
-                std::max(auto_row_max[static_cast<uint32_t>(r_clamped)], ds.height);
+            content_max_h[static_cast<uint32_t>(r_clamped)] =
+                std::max(content_max_h[static_cast<uint32_t>(r_clamped)], ds.height);
         }
         if (col_span == 1) {
-            auto_col_max[static_cast<uint32_t>(c_clamped)] =
-                std::max(auto_col_max[static_cast<uint32_t>(c_clamped)], ds.width);
+            content_max_w[static_cast<uint32_t>(c_clamped)] =
+                std::max(content_max_w[static_cast<uint32_t>(c_clamped)], ds.width);
         }
     }
 
@@ -340,8 +393,8 @@ math::Size Grid::measure_override(math::Size available)
         }
     }
 
-    compute_row_heights(eff_rows, num_rows, auto_row_max, available.height, p_->row_heights);
-    compute_col_widths(eff_cols,  num_cols, auto_col_max, available.width,  p_->col_widths);
+    compute_row_heights(eff_rows, num_rows, content_max_h, available.height, p_->row_heights);
+    compute_col_widths(eff_cols,  num_cols, content_max_w, available.width,  p_->col_widths);
 
     // ── 汇总总期望尺寸 ────────────────────────────────────────────────────
     float total_w = 0.0f;
@@ -361,11 +414,11 @@ math::Size Grid::arrange_override(math::Size final_size)
     const uint32_t num_rows = (row_count()    == 0) ? 1u : row_count();
     const uint32_t num_cols = (column_count() == 0) ? 1u : column_count();
 
-    // 用 final_size 重新计算行列尺寸（Star 按实际分配尺寸重算）
-    containers::SmallVector<float, 4> auto_row_max(num_rows, 0.0f);
-    containers::SmallVector<float, 4> auto_col_max(num_cols, 0.0f);
+    // 用 final_size 重新计算行列尺寸（Star 按实际 final_size 分配，Auto 复用 Measure 缓存）
+    containers::SmallVector<float, 4> content_max_h(num_rows, 0.0f);
+    containers::SmallVector<float, 4> content_max_w(num_cols, 0.0f);
 
-    // 收集 Auto 行/列的子元素 desiredSize（复用 Measure 后的缓存结果）
+    // 收集各行列子元素的 desiredSize（复用 Measure 后的缓存结果，避免重新 measure）
     const uint32_t child_cnt = children_count();
     for (uint32_t i = 0; i < child_cnt; ++i) {
         UIElement* child = child_at(i);
@@ -379,12 +432,12 @@ math::Size Grid::arrange_override(math::Size final_size)
 
         const math::Size ds = child->desired_size();
         if (row_span == 1) {
-            auto_row_max[static_cast<uint32_t>(r_clamped)] =
-                std::max(auto_row_max[static_cast<uint32_t>(r_clamped)], ds.height);
+            content_max_h[static_cast<uint32_t>(r_clamped)] =
+                std::max(content_max_h[static_cast<uint32_t>(r_clamped)], ds.height);
         }
         if (col_span == 1) {
-            auto_col_max[static_cast<uint32_t>(c_clamped)] =
-                std::max(auto_col_max[static_cast<uint32_t>(c_clamped)], ds.width);
+            content_max_w[static_cast<uint32_t>(c_clamped)] =
+                std::max(content_max_w[static_cast<uint32_t>(c_clamped)], ds.width);
         }
     }
 
@@ -403,9 +456,9 @@ math::Size Grid::arrange_override(math::Size final_size)
         for (uint32_t c = 0; c < column_count(); ++c) eff_cols.push_back(p_->columns[c]);
     }
 
-    // 用 final_size 重新计算，确保 Star 行/列按实际分配空间展开
-    compute_row_heights(eff_rows, num_rows, auto_row_max, final_size.height, p_->row_heights);
-    compute_col_widths(eff_cols,  num_cols, auto_col_max, final_size.width,  p_->col_widths);
+    // 用 final_size 重新计算，Star 行/列按 final_size 中的有限剩余空间展开
+    compute_row_heights(eff_rows, num_rows, content_max_h, final_size.height, p_->row_heights);
+    compute_col_widths(eff_cols,  num_cols, content_max_w, final_size.width,  p_->col_widths);
 
     // ── 计算每行/列的起始偏移 ─────────────────────────────────────────────
     containers::SmallVector<float, 4> row_offsets(num_rows, 0.0f);
