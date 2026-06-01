@@ -56,7 +56,7 @@ void DemoWindowBase::_configure()
     // 直接调用继承自 Window 的方法（无 win_. 前缀）
     // 值暂存于 Impl::pending_* 字段，首次 show() 时应用到原生窗口
     set_title("MineFramework - 控件交互演示");
-    set_size({ 800.0f, 700.0f });
+    set_size({ 800.0f, 1060.0f });
 }
 
 // ── _build：视觉树构建（对应 MML 中的嵌套元素声明）───────────────────────────
@@ -201,6 +201,172 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     btn_styled_.set_vsm_style(&demo_style_);   // 勿再单独调用 demo_style_.apply()
     btn_styled_.add_handler(ui::Button::ClickEvent(), &DemoWindowBase::s_on_click_count, this);
     body_panel_.add_child(&btn_styled_);
+
+    // ── 8. TextBlock 功能演示区 ─────────────────────────────────────────────────
+
+    // 区域分隔标题
+    tb_section_.set_text("\u2500\u2500 TextBlock \u6392\u7248\u529f\u80fd\u6f14\u793a \u2500\u2500");
+    tb_section_.set_font_size(11.0f);
+    tb_section_.set_foreground(paint::Brush::solid_rgb(0x757575));
+    tb_section_.set_background(paint::Brush::solid_rgb(0xF0F0F0));
+    tb_section_.set_padding(math::Thickness{ 16.0f, 6.0f, 16.0f, 6.0f });
+    tb_section_.set_margin(math::Thickness{ 0.0f, 16.0f, 0.0f, 0.0f });
+    if (font) { tb_section_.set_font_face(font); }
+    body_panel_.add_child(&tb_section_);
+
+    // ── 8a. 自动换行（TextWrapping::Wrap）──────────────────────────────────────
+    tb_label_wrap_.set_text("\u81ea\u52a8\u6362\u884c  TextWrapping::Wrap");
+    tb_label_wrap_.set_font_size(10.0f);
+    tb_label_wrap_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
+    tb_label_wrap_.set_background(paint::Brush::solid(math::Color::Transparent));
+    tb_label_wrap_.set_padding(math::Thickness{ 16.0f, 8.0f, 16.0f, 2.0f });
+    if (font) { tb_label_wrap_.set_font_face(font); }
+    body_panel_.add_child(&tb_label_wrap_);
+
+    tb_wrap_.set_text(
+        "MineFramework \u662f\u4e00\u4e2a\u9ad8\u6027\u80fd C++ UI \u6846\u67b6\uff0c"
+        "\u652f\u6301\u591a\u884c\u6587\u5b57\u81ea\u52a8\u6362\u884c\u3001\u5b57\u7b26\u95f4\u8ddd\u3001"
+        "\u884c\u9ad8\u8986\u76d6\u3001\u6587\u5b57\u5bf9\u9f50\u4e0e\u7701\u7565\u53f7\u88c1\u526a\u7b49"
+        "\u5b8c\u6574\u6392\u7248\u529f\u80fd\u3002"
+        "\u5b57\u4f53\u6e32\u67d3\u4f9d\u6258 FreeType \u63d0\u4f9b\u6e05\u6670\u7684\u5b57\u5f62\u8f93\u51fa\uff0c"
+        "\u9002\u7528\u4e8e\u684c\u9762\u7aef\u539f\u751f\u5e94\u7528\u5f00\u53d1\u3002"
+        "\u6b64\u5904\u6f14\u793a Wrap \u6a21\u5f0f\uff1a\u5f53\u6587\u5b57\u5bbd\u5ea6\u8d85\u8fc7"
+        "\u53ef\u7528\u533a\u57df\u5bbd\u5ea6\u65f6\uff0c\u6309\u5b57\u7b26\u8fb9\u754c\u81ea\u52a8\u6298\u884c\u3002");
+    tb_wrap_.set_font_size(13.0f);
+    tb_wrap_.set_foreground(paint::Brush::solid_rgb(0x212121));
+    tb_wrap_.set_background(paint::Brush::solid_rgb(0xF5F5F5));
+    tb_wrap_.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
+    tb_wrap_.set_margin(math::Thickness{ 16.0f, 0.0f, 16.0f, 0.0f });
+    tb_wrap_.set_text_wrapping(ui::TextWrapping::Wrap);
+    if (font) { tb_wrap_.set_font_face(font); }
+    body_panel_.add_child(&tb_wrap_);
+
+    // ── 8b. 省略号裁剪（MaxLines=2 + CharacterEllipsis）──────────────────────
+    tb_label_ellipsis_.set_text("\u7701\u7565\u53f7\u88c1\u526a  TextTrimming::CharacterEllipsis  MaxLines=2");
+    tb_label_ellipsis_.set_font_size(10.0f);
+    tb_label_ellipsis_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
+    tb_label_ellipsis_.set_background(paint::Brush::solid(math::Color::Transparent));
+    tb_label_ellipsis_.set_padding(math::Thickness{ 16.0f, 8.0f, 16.0f, 2.0f });
+    if (font) { tb_label_ellipsis_.set_font_face(font); }
+    body_panel_.add_child(&tb_label_ellipsis_);
+
+    tb_ellipsis_.set_text(
+        "\u7b2c\u4e00\u884c\uff1a\u8fd9\u662f\u4e00\u6bb5\u8d85\u957f\u7684\u6587\u5b57\uff0c"
+        "\u7528\u6765\u6f14\u793a\u5f53\u5185\u5bb9\u8d85\u51fa\u53ef\u7528\u5bbd\u5ea6\u65f6"
+        "\u4f1a\u81ea\u52a8\u8ffd\u52a0\u7701\u7565\u53f7\u88c1\u526a\u6548\u679c\u3002\n"
+        "\u7b2c\u4e8c\u884c\uff1a\u540c\u6837\u662f\u4e00\u6bb5\u8d85\u957f\u7684\u5185\u5bb9\uff0c"
+        "MaxLines=2 \u9650\u5236\u6700\u591a\u663e\u793a\u4e24\u884c\uff0c"
+        "\u8d85\u51fa\u90e8\u5206\u88ab\u7701\u7565\u53f7\u66ff\u4ee3\u3002\n"
+        "\u7b2c\u4e09\u884c\uff1a\u8fd9\u884c\u5c06\u4e0d\u4f1a\u88ab\u663e\u793a\u3002");
+    tb_ellipsis_.set_font_size(13.0f);
+    tb_ellipsis_.set_foreground(paint::Brush::solid_rgb(0x212121));
+    tb_ellipsis_.set_background(paint::Brush::solid_rgb(0xFFFDE7));
+    tb_ellipsis_.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
+    tb_ellipsis_.set_margin(math::Thickness{ 16.0f, 0.0f, 16.0f, 0.0f });
+    tb_ellipsis_.set_text_wrapping(ui::TextWrapping::Wrap);
+    tb_ellipsis_.set_text_trimming(ui::TextTrimming::CharacterEllipsis);
+    tb_ellipsis_.set_max_lines(2);
+    if (font) { tb_ellipsis_.set_font_face(font); }
+    body_panel_.add_child(&tb_ellipsis_);
+
+    // ── 8c. 文字对齐（Left / Center / Right）──────────────────────────────────
+    tb_label_align_.set_text("\u6587\u5b57\u5bf9\u9f50  TextAlignment::Left / Center / Right");
+    tb_label_align_.set_font_size(10.0f);
+    tb_label_align_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
+    tb_label_align_.set_background(paint::Brush::solid(math::Color::Transparent));
+    tb_label_align_.set_padding(math::Thickness{ 16.0f, 8.0f, 16.0f, 2.0f });
+    if (font) { tb_label_align_.set_font_face(font); }
+    body_panel_.add_child(&tb_label_align_);
+
+    // 三列等宽 Grid
+    tb_align_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
+    tb_align_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
+    tb_align_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
+    tb_align_grid_.set_margin(math::Thickness{ 16.0f, 0.0f, 16.0f, 0.0f });
+
+    tb_align_left_.set_text("\u5de6\u5bf9\u9f50\nLeft");
+    tb_align_left_.set_font_size(13.0f);
+    tb_align_left_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
+    tb_align_left_.set_background(paint::Brush::solid_rgb(0x1565C0));
+    tb_align_left_.set_padding(math::Thickness{ 8.0f, 6.0f, 8.0f, 6.0f });
+    tb_align_left_.set_text_alignment(ui::TextAlignment::Left);
+    if (font) { tb_align_left_.set_font_face(font); }
+    ui::Grid::set_column(tb_align_left_, 0);
+    tb_align_grid_.add_child(&tb_align_left_);
+
+    tb_align_center_.set_text("\u5c45\u4e2d\u5bf9\u9f50\nCenter");
+    tb_align_center_.set_font_size(13.0f);
+    tb_align_center_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
+    tb_align_center_.set_background(paint::Brush::solid_rgb(0x2E7D32));
+    tb_align_center_.set_padding(math::Thickness{ 8.0f, 6.0f, 8.0f, 6.0f });
+    tb_align_center_.set_text_alignment(ui::TextAlignment::Center);
+    if (font) { tb_align_center_.set_font_face(font); }
+    ui::Grid::set_column(tb_align_center_, 1);
+    tb_align_grid_.add_child(&tb_align_center_);
+
+    tb_align_right_.set_text("\u53f3\u5bf9\u9f50\nRight");
+    tb_align_right_.set_font_size(13.0f);
+    tb_align_right_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
+    tb_align_right_.set_background(paint::Brush::solid_rgb(0x6A1B9A));
+    tb_align_right_.set_padding(math::Thickness{ 8.0f, 6.0f, 8.0f, 6.0f });
+    tb_align_right_.set_text_alignment(ui::TextAlignment::Right);
+    if (font) { tb_align_right_.set_font_face(font); }
+    ui::Grid::set_column(tb_align_right_, 2);
+    tb_align_grid_.add_child(&tb_align_right_);
+
+    body_panel_.add_child(&tb_align_grid_);
+
+    // ── 8d. 字符间距对比（CharacterSpacing 0 vs 4px）──────────────────────────
+    tb_label_spacing_.set_text("\u5b57\u7b26\u95f4\u8ddd  CharacterSpacing: 0px vs 4px");
+    tb_label_spacing_.set_font_size(10.0f);
+    tb_label_spacing_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
+    tb_label_spacing_.set_background(paint::Brush::solid(math::Color::Transparent));
+    tb_label_spacing_.set_padding(math::Thickness{ 16.0f, 8.0f, 16.0f, 2.0f });
+    if (font) { tb_label_spacing_.set_font_face(font); }
+    body_panel_.add_child(&tb_label_spacing_);
+
+    tb_spacing_row_.set_orientation(ui::Orientation::Horizontal);
+    tb_spacing_row_.set_margin(math::Thickness{ 16.0f, 0.0f, 16.0f, 0.0f });
+
+    tb_spacing_norm_.set_text("\u5c55\u793a\u6587\u5b57\u95f4\u8ddd 0px");
+    tb_spacing_norm_.set_font_size(14.0f);
+    tb_spacing_norm_.set_foreground(paint::Brush::solid_rgb(0x212121));
+    tb_spacing_norm_.set_background(paint::Brush::solid_rgb(0xE3F2FD));
+    tb_spacing_norm_.set_padding(math::Thickness{ 10.0f, 8.0f, 10.0f, 8.0f });
+    tb_spacing_norm_.set_character_spacing(0.0f);
+    if (font) { tb_spacing_norm_.set_font_face(font); }
+    tb_spacing_row_.add_child(&tb_spacing_norm_);
+
+    tb_spacing_wide_.set_text("\u5c55\u793a\u6587\u5b57\u95f4\u8ddd 4px");
+    tb_spacing_wide_.set_font_size(14.0f);
+    tb_spacing_wide_.set_foreground(paint::Brush::solid_rgb(0x212121));
+    tb_spacing_wide_.set_background(paint::Brush::solid_rgb(0xFCE4EC));
+    tb_spacing_wide_.set_padding(math::Thickness{ 10.0f, 8.0f, 10.0f, 8.0f });
+    tb_spacing_wide_.set_margin(math::Thickness{ 8.0f, 0.0f, 0.0f, 0.0f });
+    tb_spacing_wide_.set_character_spacing(4.0f);
+    if (font) { tb_spacing_wide_.set_font_face(font); }
+    tb_spacing_row_.add_child(&tb_spacing_wide_);
+
+    body_panel_.add_child(&tb_spacing_row_);
+
+    // ── 8e. 行高设置（LineHeight=28px vs 自动）────────────────────────────────
+    tb_label_lineh_.set_text("\u884c\u9ad8  LineHeight: 28px \uff08\u9ed8\u8ba4\u884c\u9ad8\u7ea6 16px\uff09");
+    tb_label_lineh_.set_font_size(10.0f);
+    tb_label_lineh_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
+    tb_label_lineh_.set_background(paint::Brush::solid(math::Color::Transparent));
+    tb_label_lineh_.set_padding(math::Thickness{ 16.0f, 8.0f, 16.0f, 2.0f });
+    if (font) { tb_label_lineh_.set_font_face(font); }
+    body_panel_.add_child(&tb_label_lineh_);
+
+    tb_lineh_.set_text("\u7b2c\u4e00\u884c\u6587\u5b57\n\u7b2c\u4e8c\u884c\u6587\u5b57\n\u7b2c\u4e09\u884c\u6587\u5b57");
+    tb_lineh_.set_font_size(13.0f);
+    tb_lineh_.set_foreground(paint::Brush::solid_rgb(0x212121));
+    tb_lineh_.set_background(paint::Brush::solid_rgb(0xF3E5F5));
+    tb_lineh_.set_padding(math::Thickness{ 12.0f, 4.0f, 12.0f, 4.0f });
+    tb_lineh_.set_margin(math::Thickness{ 16.0f, 0.0f, 16.0f, 0.0f });
+    tb_lineh_.set_line_height(28.0f);
+    if (font) { tb_lineh_.set_font_face(font); }
+    body_panel_.add_child(&tb_lineh_);
 
     // ── 9. 将根布局挂载到窗口 ────────────────────────────────────────────────
     // 直接调用继承自 Window 的 set_content()（无 win_. 前缀）

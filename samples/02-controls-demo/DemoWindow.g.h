@@ -177,6 +177,29 @@ private:
     mine::ui::TextBlock       style_info_;    ///< 演示说明文字
     mine::ui::Button          btn_styled_;    ///< Style 驱动的绿色按钮
     mine::ui::style::Style    demo_style_;    ///< 绿色主题 Style 对象
+
+    // TextBlock 功能演示区
+    mine::ui::TextBlock       tb_section_;         ///< 区域分隔标题
+    // 自动换行
+    mine::ui::TextBlock       tb_label_wrap_;      ///< "自动换行" 标签
+    mine::ui::TextBlock       tb_wrap_;            ///< Wrap 模式演示
+    // 省略号裁剪 + 最大行数
+    mine::ui::TextBlock       tb_label_ellipsis_;  ///< "省略号裁剪" 标签
+    mine::ui::TextBlock       tb_ellipsis_;        ///< Ellipsis + MaxLines 演示
+    // 文字对齐
+    mine::ui::TextBlock       tb_label_align_;     ///< "文字对齐" 标签
+    mine::ui::Grid            tb_align_grid_;      ///< 三栏等宽 Grid（Left/Center/Right）
+    mine::ui::TextBlock       tb_align_left_;      ///< Left 对齐
+    mine::ui::TextBlock       tb_align_center_;    ///< Center 对齐
+    mine::ui::TextBlock       tb_align_right_;     ///< Right 对齐
+    // 字符间距
+    mine::ui::TextBlock       tb_label_spacing_;   ///< "字符间距" 标签
+    mine::ui::StackPanel      tb_spacing_row_;     ///< 水平对比行
+    mine::ui::TextBlock       tb_spacing_norm_;    ///< 默认间距
+    mine::ui::TextBlock       tb_spacing_wide_;    ///< 宽间距（spacing=4px）
+    // 行高
+    mine::ui::TextBlock       tb_label_lineh_;     ///< "行高" 标签
+    mine::ui::TextBlock       tb_lineh_;           ///< LineHeight 演示
 };
 
 } // namespace app
