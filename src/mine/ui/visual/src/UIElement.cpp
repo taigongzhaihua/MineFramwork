@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file UIElement.cpp
  * @brief UIElement 实现。
  *
@@ -11,7 +11,6 @@
 
 #include <mine/ui/visual/UIElement.h>
 #include <mine/core/Assert.h>
-#include <mine/containers/InlineString.h>
 #include <mine/math/RoundedRect.h>
 
 namespace mine::ui {
@@ -33,8 +32,6 @@ struct UIElement::Impl {
     /// 排列失效标志
     bool arrange_dirty_ = true;
 
-    /// 模板树元素标识名称（供 Control::find_template_child 使用）
-    containers::InlineString template_name_;
 };
 
 // ============================================================================
@@ -54,20 +51,6 @@ UIElement::~UIElement() = default;
 UIElement* UIElement::as_element() noexcept
 {
     return this;
-}
-
-// ============================================================================
-// 模板命名
-// ============================================================================
-
-void UIElement::set_template_name(core::StringView name)
-{
-    p_->template_name_ = containers::InlineString{ name.data(), name.size() };
-}
-
-core::StringView UIElement::template_name() const noexcept
-{
-    return core::StringView{ p_->template_name_.data(), p_->template_name_.size() };
 }
 
 // ============================================================================

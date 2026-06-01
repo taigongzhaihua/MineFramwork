@@ -139,7 +139,6 @@ void TextBlock::on_padding_changed(DependencyObject*         sender,
 TextBlock::TextBlock()
 {
     set_style_slot("DefaultTextBlock");
-    set_template_slot("DefaultTextBlockTemplate");
 }
 
 TextBlock::~TextBlock() = default;

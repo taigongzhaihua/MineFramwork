@@ -215,14 +215,12 @@ TEST_CASE("controls_伞形头可直接使用StackPanel与Grid")
     CHECK(grid.row_count() == 0u);
 }
 
-TEST_CASE("controls_样式模板槽位可设置")
+TEST_CASE("controls_样式槽位可设置")
 {
     Button button;
     button.set_style_slot("AccentButton");
-    button.set_template_slot("AccentButtonTemplate");
 
     CHECK(button.style_slot() == mine::core::StringView{"AccentButton"});
-    CHECK(button.template_slot() == mine::core::StringView{"AccentButtonTemplate"});
 }
 
 // ============================================================================
@@ -290,23 +288,23 @@ TEST_CASE("controls_ContentPresenter_无内容时Canvas无绘制命令")
     CHECK(canvas.cmd_count() <= 3u);
 }
 
-TEST_CASE("controls_Button_有模板根时测量委托给ContentPresenter")
+TEST_CASE("controls_Button_测量委托给内部ContentPresenter")
 {
     Button button;
-    // 构造函数中 set_template_slot("DefaultButtonTemplate") 已触发
-    // 第一次 measure 时 Control::on_measure 会自动构建模板
+    // 构造函数已创建内部 ContentPresenter（set_inner_element）
+    // measure 将委托给内部 ContentPresenter 计算期望尺寸
     button.set_text("OK");
     button.measure({300.0f, 200.0f});
 
-    // 有模板根时，期望尺寸由 ContentPresenter 计算得出
+    // 期望尺寸由 ContentPresenter 计算得出
     CHECK(button.desired_size().width > 0.0f);
     CHECK(button.desired_size().height > 0.0f);
 }
 
-TEST_CASE("controls_Button_ContentProperty变更传播到模板根")
+TEST_CASE("controls_Button_ContentProperty变更传播到ContentPresenter")
 {
     Button button;
-    button.measure({300.0f, 200.0f});   // 触发模板构建
+    button.measure({300.0f, 200.0f});
 
     // 初始空文字：期望尺寸应包含 Padding 部分
     const float initial_w = button.desired_size().width;
@@ -383,16 +381,16 @@ TEST_CASE("controls_ContentControl_set_content_nullptr清空内容")
     CHECK(button.content_element() == nullptr);
 }
 
-TEST_CASE("controls_ContentControl_内容变更传播到ContentPresenter（Button模板路径）")
+TEST_CASE("controls_ContentControl_内容变更传播到ContentPresenter")
 {
     Button button;
-    button.measure({300.0f, 200.0f});   // 触发模板构建
+    button.measure({300.0f, 200.0f});
 
-    // 通过 set_content 写入字符串，模板绑定应将其传播到 ContentPresenter
+    // 通过 set_content 写入字符串，on_content_changed 直接将其同步到 ContentPresenter
     button.set_content(mine::core::StringView{"OK"});
     button.measure({300.0f, 200.0f});
 
-    // 有模板根时，期望尺寸由 ContentPresenter 计算得出（文字宽度 > 0）
+    // 期望尺寸由 ContentPresenter 计算得出（文字宽度 > 0）
     CHECK(button.desired_size().width > 0.0f);
 }
 

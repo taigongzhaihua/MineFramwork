@@ -112,27 +112,6 @@ public:
      */
     virtual UIElement* hit_test(math::Point p);
 
-    // ── 模板命名 ──────────────────────────────────────────────────────────
-
-    /**
-     * @brief 设置模板树中的元素标识名称（供 Control::find_template_child 使用）。
-     *
-     * 通常由 mmlc 生成的 build_fn_ 在构建模板树时调用，
-     * 使控件可以通过名称定位特定的模板子元素。
-     *
-     * @param name 元素名称（如 "border"、"content"）
-     */
-    void set_template_name(core::StringView name);
-
-    /**
-     * @brief 返回模板树中的元素标识名称。
-     *
-     * 默认为空字符串（未命名元素）。
-     *
-     * @return 元素名称的 StringView（引用内部存储，生命周期与对象相同）
-     */
-    [[nodiscard]] core::StringView template_name() const noexcept;
-
 protected:
     // ── 布局虚方法（由 mine.ui.layout 覆盖）─────────────────────────────
 

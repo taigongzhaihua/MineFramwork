@@ -19,7 +19,6 @@
 #include <mine/ui/property/ValuePriority.h>
 #include <mine/ui/style/Style.h>
 #include <mine/ui/style/StyleSetter.h>
-#include <mine/ui/style/TemplateRegistry.h>
 #include <mine/ui/animation/Storyboard.h>
 #include <mine/ui/animation/EasingFunction.h>
 #include <mine/ui/animation/Duration.h>
@@ -152,112 +151,21 @@ static style::Style& default_button_style()
 }
 
 // ============================================================================
-// 默认 ControlTemplate 构建函数
-// ============================================================================
-
-/**
- * @brief 默认按鈕模板构建函数（三层分离范式：模板层）。
- *
- * 阶段 A：创建视觉元素（ContentPresenter 作为模板根）
- * 阶段 B：bind_template 建立 TemplateBind(P3) 同步（Content / Padding）
- * 阶段 C：配置 VisualStateManager（定义状态 + 动画过渡）+ 连接默认样式
- * 阶段 D：应用样式 P5 基线値 + 安装模板根
- *
- * on_apply_template() 由 Control::measure_override 在 build_fn 返回后自动调用。
- */
-static void s_build_default_button_template(DependencyObject& target)
-{
-    auto& button    = static_cast<Button&>(target);
-    auto  presenter = core::make_owned<ContentPresenter>();
-    ContentPresenter* presenter_ptr = presenter.get();
-    presenter->set_template_name("content");
-
-    // ── 阶段 B：TemplateBind(P3) 同步 ───────────────────────────────────────
-    // Content 和 Padding 属性通过 bind_template 自动同步到 ContentPresenter
-    button.bind_template(*presenter,
-                         ContentPresenter::ContentProperty,
-                         ContentControl::ContentProperty);
-    button.bind_template(*presenter,
-                         ContentPresenter::PaddingProperty,
-                         Button::PaddingProperty);
-    // 注：Foreground 通过 on_foreground_changed 回调传播（ContentPresenter 无 ForegroundProperty DP）
-
-    // ── 阶段 C：VisualStateManager 配置 ───────────────────────────────────────
-    style::VisualStateManager vsm{ button };
-
-    vsm.define_state("Normal");
-    vsm.define_state("Hovered");
-    vsm.define_state("Pressed");
-    vsm.define_state("Disabled");  // Disabled 无动画，不注册过渡
-
-    // 任意状态 → Hovered：120ms 平滑过渡
-    // animate_dp 只声明动画路径，不硬编码颜色：
-    //   from = capture_from_values() 采样当前最高优先级値
-    //   to   = StyleTrigger(P4) 由 go_to_state 写入的 Hovered 终値
-    auto* btn_ptr = &button;
-    vsm.add_transition("*", "Hovered",
-        [btn_ptr](animation::Storyboard& sb) {
-            sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
-                          animation::Duration::milliseconds(120.0f),
-                          animation::QuadEaseOut);
-        });
-
-    // 任意状态 → Normal：100ms 平滑回退
-    vsm.add_transition("*", "Normal",
-        [btn_ptr](animation::Storyboard& sb) {
-            sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
-                          animation::Duration::milliseconds(100.0f),
-                          animation::QuadEaseOut);
-        });
-
-    // 任意状态 → Pressed：60ms 快速按下
-    vsm.add_transition("*", "Pressed",
-        [btn_ptr](animation::Storyboard& sb) {
-            sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
-                          animation::Duration::milliseconds(60.0f),
-                          animation::QuadEaseIn);
-        });
-
-    // ★ 连接样式层：go_to_state 自动调用 style->apply_state(P4)
-    // 若用户在模板构建前通过 set_vsm_style() 指定了自定义样式，则使用该样式；
-    // 否则回退到内置的 default_button_style()（MD3 Primary 紫色配色）
-    style::Style& active_style = button.vsm_style()
-        ? *button.vsm_style()
-        : default_button_style();
-    vsm.set_style(&active_style);
-
-    button.set_visual_state_manager(std::move(vsm));
-
-    // ── 阶段 D：应用 P5 基线値 + 安装模板根 ────────────────────────────
-    // 写入 StyleSetter(P5)：Normal 基线背景色、前景色、边框色（来自 active_style）
-    active_style.apply(button);
-
-    // on_apply_template() 由 Control::measure_override 在此函数返回后自动调用
-    button.set_template_root(std::move(presenter));
-    (void)presenter_ptr;  // 建立后不再直接使用，缓存在 content_part_
-}
-
-/**
- * @brief 注册 "DefaultButtonTemplate"（程序启动时静态初始化，保证仅注册一次）。
- */
-static const style::ControlTemplate& s_default_button_template =
-    style::TemplateRegistry::instance().register_template(
-        "DefaultButtonTemplate",
-        core::TypeId::of<Button>(),
-        &s_build_default_button_template);
-
-// ============================================================================
 // 依赖属性变更回调
 // ============================================================================
 
 void Button::on_content_changed(const core::Variant& /*old_v*/,
                                 const core::Variant& new_v) noexcept
 {
-    // 同步文字成员缓存（无模板回退路径在 on_measure/on_render 中使用）
+    // 同步文字成员缓存
     if (new_v.has<containers::InlineString>()) {
         text_ = new_v.get<containers::InlineString>();
     } else {
         text_ = containers::InlineString{};
+    }
+    // 直接同步到 ContentPresenter（无 bind_template 机制）
+    if (content_part_ != nullptr) {
+        content_part_->set_value(ContentPresenter::ContentProperty, new_v);
     }
 }
 
@@ -271,6 +179,10 @@ void Button::on_padding_changed(DependencyObject*         sender,
     if (new_v.has<math::Thickness>()) {
         self->padding_ = new_v.get<math::Thickness>();
     }
+    // 直接同步到 ContentPresenter（无 bind_template 机制）
+    if (self->content_part_ != nullptr) {
+        self->content_part_->set_value(ContentPresenter::PaddingProperty, new_v);
+    }
 }
 
 void Button::on_foreground_changed(DependencyObject*         sender,
@@ -279,10 +191,9 @@ void Button::on_foreground_changed(DependencyObject*         sender,
                                    const core::Variant&      new_v) noexcept
 {
     auto* self = static_cast<Button*>(sender);
-    // 若模板已构建，将新前景画刷推送到 ContentPresenter（幂等，template_root 为 nullptr 则跳过）
-    UIElement* child = self->find_template_child("content");
-    if (child != nullptr && new_v.has<paint::Brush>()) {
-        static_cast<ContentPresenter*>(child)->set_foreground(new_v.get<paint::Brush>());
+    // 直接推送到 ContentPresenter（无 find_template_child 间接层）
+    if (self->content_part_ != nullptr && new_v.has<paint::Brush>()) {
+        self->content_part_->set_foreground(new_v.get<paint::Brush>());
     }
 }
 
@@ -339,13 +250,67 @@ const RoutedEvent& Button::ClickEvent()
 
 Button::Button()
 {
-    // 只设模板槽位，样式由 build_fn 内直接应用（apply P5）并连接 VSM（set_style P4）
-    set_template_slot("DefaultButtonTemplate");
+    // 创建并直接安装 ContentPresenter 作为内部子元素（无 ControlTemplate 机制）
+    auto presenter = core::make_owned<ContentPresenter>();
+    content_part_ = presenter.get();
 
+    // 配置 VisualStateManager（内联原 BuildFn 中的 VSM 配置）
+    style::VisualStateManager vsm{ *this };
+    vsm.define_state("Normal");
+    vsm.define_state("Hovered");
+    vsm.define_state("Pressed");
+    vsm.define_state("Disabled");
+
+    auto* btn_ptr = this;
+    vsm.add_transition("*", "Hovered",
+        [btn_ptr](animation::Storyboard& sb) {
+            sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
+                          animation::Duration::milliseconds(120.0f),
+                          animation::QuadEaseOut);
+        });
+    vsm.add_transition("*", "Normal",
+        [btn_ptr](animation::Storyboard& sb) {
+            sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
+                          animation::Duration::milliseconds(100.0f),
+                          animation::QuadEaseOut);
+        });
+    vsm.add_transition("*", "Pressed",
+        [btn_ptr](animation::Storyboard& sb) {
+            sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
+                          animation::Duration::milliseconds(60.0f),
+                          animation::QuadEaseIn);
+        });
+
+    // 连接样式层（若用户已通过 set_vsm_style 指定自定义样式则使用该样式）
+    style::Style& active_style = vsm_style_ ? *vsm_style_ : default_button_style();
+    vsm.set_style(&active_style);
+    set_visual_state_manager(std::move(vsm));
+
+    // 应用 P5 基线值（StyleSetter：Normal 背景色、前景色、边框色）
+    active_style.apply(*this);
+
+    // 同步 Padding 默认值到 ContentPresenter（Content 默认为空，无需同步）
+    content_part_->set_value(ContentPresenter::PaddingProperty, get_value(PaddingProperty));
+
+    // 初始同步前景色到 ContentPresenter
+    {
+        const core::Variant& fg_var = get_value(ForegroundProperty);
+        if (fg_var.has<paint::Brush>()) {
+            content_part_->set_foreground(fg_var.get<paint::Brush>());
+        }
+    }
+
+    // 安装 ContentPresenter 到视觉子树（由 Control::set_inner_element 管理生命周期）
+    set_inner_element(std::move(presenter));
+
+    // 注册鼠标事件处理器
     add_handler(input::MouseDownEvent(), &Button::on_mouse_down_router, this);
     add_handler(input::MouseUpEvent(), &Button::on_mouse_up_router, this);
     add_handler(input::MouseEnterEvent(), &Button::on_mouse_enter_router, this);
     add_handler(input::MouseLeaveEvent(), &Button::on_mouse_leave_router, this);
+
+    // 同步到初始视觉状态（Normal）
+    update_visual_state();
 }
 
 Button::~Button()
@@ -409,7 +374,7 @@ math::Thickness Button::padding() const noexcept
 void Button::set_padding(math::Thickness padding)
 {
     padding_ = padding;
-    // 同步 DependencyProperty，使 bind_template 传播到模板树中的 ContentPresenter
+    // 同步 DependencyProperty（on_padding_changed 回调将自动传播到 ContentPresenter）
     set_value(PaddingProperty, core::Variant{ padding_ });
     invalidate_measure();
     invalidate_render();
@@ -457,10 +422,14 @@ void Button::set_border_color(paint::Brush brush)
 void Button::set_vsm_style(style::Style* style) noexcept
 {
     vsm_style_ = style;
-    // 如果模板已经构建（VSM 已创建），直接更新已有 VSM 的样式引用
+    style::Style& active = style ? *style : default_button_style();
+    // 更新已有 VSM 的样式引用（VSM 在构造函数中已创建，此时必然非 nullptr）
     if (vsm()) {
-        vsm()->set_style(style ? style : &default_button_style());
+        vsm()->set_style(&active);
     }
+    // 重新应用 P5 基线值（更换样式后 Normal 颜色可能变化）
+    active.apply(*this);
+    update_visual_state();
 }
 
 style::Style* Button::vsm_style() const noexcept
@@ -490,50 +459,18 @@ void Button::set_font_size(float size_px) noexcept
     }
 }
 
-void Button::on_apply_template() noexcept
-{
-    // 缓存模板子元素指针（名称与 build_fn 中 set_template_name 一致）
-    content_part_ = static_cast<ContentPresenter*>(find_template_child("content"));
 
+void Button::on_measure(math::Size available_size)
+{
+    // 同步字体属性到 ContentPresenter（幂等）
     if (content_part_ != nullptr) {
-        // 初始一次性同步前景色到 ContentPresenter
-        // （后续变更由 on_foreground_changed DP 回调自动传播）
-        const core::Variant& fg_var = get_value(ForegroundProperty);
-        if (fg_var.has<paint::Brush>()) {
-            content_part_->set_foreground(fg_var.get<paint::Brush>());
-        }
-        // 字体同步
         if (font_face_ != nullptr) {
             content_part_->set_font_face(font_face_);
         }
         content_part_->set_font_size(font_size_px_);
     }
-    // 模板安装完成后同步 VSM 到当前视觉状态
-    // 确保 VSM current_state_ 与按钮实际 visual_state_ 保持一致
-    update_visual_state();
-}
-
-void Button::on_measure(math::Size available_size)
-{
-    // 通过 Control::on_measure 自动构建模板（首次调用）并委托给模板根
+    // 委托给基类：Control::measure_override 将测量委托给 inner_element()（ContentPresenter）
     Control::on_measure(available_size);
-
-    // 模板已构建：同步字体属性到 ContentPresenter（幂等）
-    if (content_part_ != nullptr && font_face_ != nullptr) {
-        content_part_->set_font_face(font_face_);
-        content_part_->set_font_size(font_size_px_);
-        return;
-    }
-
-    // 无模板时的回退路径：按字符数估算宽度
-    if (!template_root()) {
-        const float text_w = static_cast<float>(text_.size()) * 14.0f * 0.55f;
-        const float text_h = 14.0f * 1.4f;
-        set_desired_size({
-            text_w + padding_.horizontal(),
-            text_h + padding_.vertical(),
-        });
-    }
 }
 
 void Button::on_render(paint::Canvas& canvas)
@@ -555,6 +492,24 @@ void Button::on_render(paint::Canvas& canvas)
     // MD3 Filled Button：完全圆角（胶囊形，radius = height / 2）
     const float radius = rect.height * 0.5f;
     canvas.fill_rounded_rect(math::RoundedRect{rect, radius}, fill);
+
+    // MD3 State Layer：当背景色由 set_background()（Local P50）直接指定时，
+    // VSM 颜色动画对该按钮无感知（has_local=true → from==to，颜色不变）。
+    // 改用半透明叠加层提供悬停/按下视觉反馈（符合 MD3 State Layer 规范）：
+    //   Hover   = On Primary 8%  白色叠加 → 颜色略亮
+    //   Pressed = On Primary 12% 白色叠加 → 颜色更亮（配合 Ripple 涟漪）
+    if (is_enabled_ && has_value(BackgroundProperty, ValuePriority::Local)) {
+        float state_alpha = 0.0f;
+        if (is_pressed_) {
+            state_alpha = 0.12f;
+        } else if (is_hovered_) {
+            state_alpha = 0.08f;
+        }
+        if (state_alpha > 0.0f) {
+            canvas.fill_rounded_rect(math::RoundedRect{rect, radius},
+                paint::Brush::solid(math::Color::White.with_alpha(state_alpha)));
+        }
+    }
 
     // 圆角边框（由 BorderColorProperty 驱动；默认透明则跳过）
     // 支持自定义模板通过 BorderColorProperty 添加圆角边框，无需额外 Border 元素
@@ -595,21 +550,7 @@ void Button::on_render(paint::Canvas& canvas)
         // 若 t >= 1 时 ripple_.active 已被 tick 设为 false，此处无需额外处理
     }
 
-    // 有模板根时，文字由 ContentPresenter 渲染，Button 自身不再绘制占位线
-    if (template_root()) {
-        return;
-    }
-
-    // 无模板时的回退路径：用居中横条表示文字区域
-    const core::Variant& fg_var = get_value(ForegroundProperty);
-    const paint::Brush base_fg = fg_var.has<paint::Brush>() ? fg_var.get<paint::Brush>() : paint::Brush::solid(math::Color::White);
-    const float line_w = rect.width - padding_.horizontal();
-    const float line_y = rect.y + rect.height * 0.5f - 1.0f;
-    if (line_w > 0.0f) {
-        canvas.fill_rect(
-            { rect.x + padding_.left, line_y, line_w, 2.0f },
-            base_fg);
-    }
+    // ContentPresenter 作为内部子元素由渲染管线自动渲染（无需 Button 显式调用）
 }
 
 UIElement* Button::hit_test(math::Point p)
@@ -629,15 +570,15 @@ UIElement* Button::hit_test(math::Point p)
     // 命中边界委托给模板根（WPF 风格）：
     // 模板根的 bounds_rect 即按钮的命中区域，返回 this 确保事件路由到 Button 自身。
     // 裁剪仅在用户显式调用 set_clip_rounded_rect() 时生效。
-    if (UIElement* tr = template_root()) {
+    if (UIElement* ie = inner_element()) {
         if (has_clip_rounded_rect()) {
             // 用户显式设置了圆角裁剪：圆角外角区域不触发命中
             return clip_rounded_rect().contains(local_p) ? this : nullptr;
         }
-        // 使用模板根的矩形边界判断命中
-        return tr->bounds_rect().contains(local_p) ? this : nullptr;
+        // 使用内部子元素的矩形边界判断命中
+        return ie->bounds_rect().contains(local_p) ? this : nullptr;
     }
-    // 无模板根：回退到自身矩形边界
+    // 无内部元素：回退到自身矩形边界
     return bounds_rect().contains(local_p) ? this : nullptr;
 }
 

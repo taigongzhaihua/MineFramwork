@@ -14,7 +14,6 @@ namespace mine::ui {
 Border::Border()
 {
     set_style_slot("DefaultBorder");
-    set_template_slot("DefaultBorderTemplate");
 }
 
 Border::~Border() = default;

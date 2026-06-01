@@ -1,133 +1,36 @@
 /**
  * @file Control.cpp
- * @brief Control 控件基类实现已迁移至 mine.ui.layout 模块。
- *
- * Control 现在继承 FrameworkElement（而非 UIElement），
- * 完整实现位于 src/mine/ui/layout/src/Control.cpp。
- * 此文件保留为空以维持构建兼容性。
- */
-
-/**
- * @file Control.cpp
  * @brief Control 控件基类实现。
  *
  * Control 位于 mine.ui.visual 模块，继承 FrameworkElement，
- * 从而使所有控件自动参与两遍布局协议（Margin、Width/Height、对齐方式）。
+ * 从而使所有控件自动参与两遗布局协议（Margin、Width/Height、对齐方式）。
  *
- * 任务 #12：ControlTemplate + TemplateRegistry 支持。
- * 添加 set_template_root / find_template_child / bind_template 实现。
+ * 架构说明：
+ *   - ControlTemplate / TemplateRegistry / bind_template / on_apply_template 已移除。
+ *   - 内部子元素（ContentPresenter 等）由具体控件（如 Button）在构造函数中直接创建并安装。
+ *   - 自定义外观请继承现有控件并重写 on_render()（类似 QWidget 风格）。
  */
 
 #include <mine/ui/visual/Control.h>
-#include <mine/ui/property/ValuePriority.h>
-#include <mine/containers/SmallVector.h>
 #include <mine/ui/style/VisualStateManager.h>
-#include <mine/ui/style/TemplateRegistry.h>
-#include <mine/ui/style/ControlTemplate.h>
 #include <mine/core/Memory.h>
 
 namespace mine::ui {
-
-// ============================================================================
-// 依赖属性注册
-// ============================================================================
-
-/**
- * @brief TemplateProperty 变更回调：清除旧模板根，触发重新测量（下次 measure 时重建视觉树）。
- */
-static void on_template_dp_changed(DependencyObject*         sender,
-                                   const DependencyProperty& /*prop*/,
-                                   const core::Variant&      /*old_v*/,
-                                   const core::Variant&      /*new_v*/) noexcept
-{
-    auto* ctrl = static_cast<Control*>(sender);
-    // 清除旧模板根：下次 measure 时会按新 TemplateProperty 值重建模板视觉树
-    ctrl->set_template_root(static_cast<UIElement*>(nullptr));
-    ctrl->invalidate_measure();
-}
-
-/// TemplateProperty —— 存储 `const style::ControlTemplate*`，默认空 Variant
-const DependencyProperty& Control::TemplateProperty =
-    register_property<Control>(
-        "Template",
-        core::Variant{},  // 默认空：回退到 template_slot_ 注册表查找
-        PropertyMetadata{
-            .affects_measure = true,
-            .changed         = &on_template_dp_changed,
-        });
 
 // ============================================================================
 // Control::Impl 私有实现结构体
 // ============================================================================
 
 struct Control::Impl {
-    /// 模板根元素（非拥有指针，生命周期由 owned_template_root_ 或外部管理）
-    UIElement* template_root_{nullptr};
+    /// 内部子元素（非拥有指针，生命周期由 owned_inner_element_ 或外部管理）
+    UIElement* inner_element_{nullptr};
 
-    /// 模板根元素的所有权（当通过 OwnedPtr 重载设置时有效，否则为 nullptr）
-    core::OwnedPtr<UIElement> owned_template_root_{nullptr};
-
-    /// 模板属性绑定记录（宿主 host_prop → 子元素 child_prop 单向同步）
-    struct TemplateBinding {
-        DependencyObject*         child;       ///< 模板子元素
-        const DependencyProperty* child_prop;  ///< 子元素目标属性
-        const DependencyProperty* host_prop;   ///< 宿主控件源属性
-    };
-    containers::SmallVector<TemplateBinding, 8> bindings_;
-
-    /// 属性变更订阅 token（0 表示尚未订阅；首次 bind_template 时创建）
-    uint32_t binding_sub_token_{0};
+    /// 内部子元素的所有权（当通过 OwnedPtr 重载设置时有效，否则为 nullptr）
+    core::OwnedPtr<UIElement> owned_inner_element_{nullptr};
 
     /// VisualStateManager 实例（堆分配，为 nullptr 时表示未安装）
     core::OwnedPtr<style::VisualStateManager> vsm_;
 };
-
-// ============================================================================
-// 文件内部辅助函数
-// ============================================================================
-
-namespace {
-
-/// 在以 node 为根的子树中按 template_name 深度优先搜索
-UIElement* find_child_by_name(UIElement& node, core::StringView name)
-{
-    // 检查当前节点
-    if (node.template_name() == name) {
-        return &node;
-    }
-    // 递归检查所有子节点
-    const uint32_t count = node.child_count();
-    for (uint32_t i = 0; i < count; ++i) {
-        Visual* v = node.child_at(i);
-        UIElement* child = v->as_element();
-        if (child) {
-            UIElement* found = find_child_by_name(*child, name);
-            if (found) return found;
-        }
-    }
-    return nullptr;
-}
-
-}  // namespace
-
-/// 属性变更订阅静态回调：遍历绑定列表，同步匹配的子元素属性
-void Control::on_host_prop_changed(DependencyObject* /*sender*/,
-                                   const DependencyProperty& prop,
-                                   const core::Variant&      /*old_v*/,
-                                   const core::Variant&      new_v,
-                                   void*                     user_data) noexcept
-{
-    // user_data = Control::Impl*（堆分配，地址永久稳定）
-    auto* impl = static_cast<Control::Impl*>(user_data);
-    for (auto& binding : impl->bindings_) {
-        if (binding.host_prop == &prop) {
-            // 以 TemplateBind(40) 优先级写入，低于 Local(50)，不覆盖本地值
-            binding.child->set_value(*binding.child_prop,
-                                     new_v,
-                                     ValuePriority::TemplateBind);
-        }
-    }
-}
 
 // ============================================================================
 // 生命周期
@@ -137,36 +40,7 @@ Control::Control()
     : cp_{ core::make_pimpl<Impl>() }
 {}
 
-Control::~Control()
-{
-    // 取消属性变更订阅，防止 Impl 析构后回调访问已释放内存
-    if (cp_ && cp_->binding_sub_token_ != 0) {
-        unsubscribe_property_changed(cp_->binding_sub_token_);
-        cp_->binding_sub_token_ = 0;
-    }
-}
-
-// ============================================================================
-// 控件模板（TemplateProperty 访问器）
-// ============================================================================
-
-void Control::set_control_template(const style::ControlTemplate* tmpl) noexcept
-{
-    // 写入 TemplateProperty Local(50) 槽。
-    // on_template_dp_changed 回调会清除 template_root_ 并 invalidate_measure()。
-    set_value(TemplateProperty,
-              core::Variant{ tmpl },
-              ValuePriority::Local);
-}
-
-const style::ControlTemplate* Control::control_template() const noexcept
-{
-    const core::Variant& v = get_value(TemplateProperty);
-    if (v.has<const style::ControlTemplate*>()) {
-        return v.get<const style::ControlTemplate*>();
-    }
-    return nullptr;
-}
+Control::~Control() = default;
 
 // ============================================================================
 // 样式槽位
@@ -180,16 +54,6 @@ void Control::set_style_slot(core::StringView slot)
 core::StringView Control::style_slot() const noexcept
 {
     return core::StringView{ style_slot_.data(), style_slot_.size() };
-}
-
-void Control::set_template_slot(core::StringView slot)
-{
-    template_slot_ = slot;
-}
-
-core::StringView Control::template_slot() const noexcept
-{
-    return core::StringView{ template_slot_.data(), template_slot_.size() };
 }
 
 // ============================================================================
@@ -245,70 +109,44 @@ void Control::on_visual_state_changed(ControlVisualState /*old_state*/,
 }
 
 // ============================================================================
-// 控件模板
+// 内部子元素管理（set_inner_element / inner_element）
 // ============================================================================
 
-void Control::set_template_root(UIElement* root) noexcept
+void Control::set_inner_element(UIElement* root) noexcept
 {
-    // 先移除旧模板根（如有）
-    if (cp_->template_root_) {
-        remove_child(cp_->template_root_);
+    // 先移除旧内部元素（如有）
+    if (cp_->inner_element_) {
+        remove_child(cp_->inner_element_);
     }
     // 清除旧的所有权（若有）
-    cp_->owned_template_root_.reset();
+    cp_->owned_inner_element_.reset();
 
-    cp_->template_root_ = root;
-    // 将新模板根加入视觉子树
+    cp_->inner_element_ = root;
+    // 将新内部元素加入视觉子树
     if (root) {
         add_child(root);
     }
 }
 
-void Control::set_template_root(core::OwnedPtr<UIElement> root) noexcept
+void Control::set_inner_element(core::OwnedPtr<UIElement> root) noexcept
 {
-    // 先移除旧模板根（如有）
-    if (cp_->template_root_) {
-        remove_child(cp_->template_root_);
+    // 先移除旧内部元素（如有）
+    if (cp_->inner_element_) {
+        remove_child(cp_->inner_element_);
     }
     // 转移所有权到 Impl（元素生命周期由 Control 管理）
-    cp_->owned_template_root_ = std::move(root);
-    cp_->template_root_ = cp_->owned_template_root_.get();
+    cp_->owned_inner_element_ = std::move(root);
+    cp_->inner_element_ = cp_->owned_inner_element_.get();
 
-    // 将新模板根加入视觉子树
-    if (cp_->template_root_) {
-        add_child(cp_->template_root_);
+    // 将新内部元素加入视觉子树
+    if (cp_->inner_element_) {
+        add_child(cp_->inner_element_);
     }
 }
 
-UIElement* Control::find_template_child(core::StringView name) const noexcept
+UIElement* Control::inner_element() const noexcept
 {
-    if (!cp_->template_root_) {
-        return nullptr;
-    }
-    return find_child_by_name(*cp_->template_root_, name);
-}
-
-void Control::bind_template(DependencyObject&         child,
-                            const DependencyProperty& child_prop,
-                            const DependencyProperty& host_prop) noexcept
-{
-    // 1. 立即同步当前宿主属性值到子元素（首次同步）
-    child.set_value(child_prop,
-                    get_value(host_prop),
-                    ValuePriority::TemplateBind);
-
-    // 2. 记录绑定（后续变更通过订阅回调传播）
-    cp_->bindings_.push_back(Control::Impl::TemplateBinding{
-        &child, &child_prop, &host_prop
-    });
-
-    // 3. 首次 bind_template 时订阅宿主控件的属性变更（仅订阅一次）
-    if (cp_->binding_sub_token_ == 0) {
-        cp_->binding_sub_token_ = subscribe_property_changed(
-            &on_host_prop_changed,
-            cp_.get()  // user_data = Impl*（堆分配，地址永久稳定）
-        );
-    }
+    return cp_->inner_element_;
 }
 
 // ============================================================================
@@ -332,61 +170,30 @@ const style::VisualStateManager* Control::vsm() const noexcept
 }
 
 // ============================================================================
-// 模板根访问器（protected，供子类在 measure_override/on_render 中使用）
-// ============================================================================
-
-UIElement* Control::template_root() const noexcept
-{
-    return cp_->template_root_;
-}
-
-// ============================================================================
-// Measure 覆盖：含自动模板构建逻辑
+// Measure 覆盖：委托给内部子元素
 // ============================================================================
 
 math::Size Control::measure_override(math::Size available)
 {
-    // 若模板根尚未构建，尝试获取并执行模板构建函数
-    if (!cp_->template_root_) {
-        // 阶段 1：优先检查 TemplateProperty DP（用户通过 set_control_template() 写入）
-        const style::ControlTemplate* tmpl = nullptr;
-        const core::Variant& tmpl_var = get_value(TemplateProperty);
-        if (tmpl_var.has<const style::ControlTemplate*>()) {
-            tmpl = tmpl_var.get<const style::ControlTemplate*>();
-        }
-
-        // 阶段 2：回退到 template_slot_ 注册表查找（向后兼容——Button 等店通过槽位名注册默认模板）
-        if (!tmpl && !template_slot_.empty()) {
-            const core::StringView slot{ template_slot_.data(), template_slot_.size() };
-            tmpl = style::TemplateRegistry::instance().find(slot);
-        }
-
-        if (tmpl && tmpl->build_fn_) {
-            // build_fn_ 内部会调用 set_template_root 将根元素加入视觉子树
-            tmpl->build_fn_(*this);
-            // 模板构建完成后通知控件：此时可安全调用 find_template_child()
-            on_apply_template();
-        }
+    // 若内部元素已安装，委托其 measure() 并返回其期望尺寸
+    if (cp_->inner_element_) {
+        cp_->inner_element_->measure(available);
+        return cp_->inner_element_->desired_size();
     }
-    // 若模板根已构建，测量模板根并返回其期望尺寸
-    if (cp_->template_root_) {
-        cp_->template_root_->measure(available);
-        return cp_->template_root_->desired_size();
-    }
-    // 无模板：返回零尺寸（叶子控件应覆盖 measure_override 提供内容尺寸）
+    // 无内部元素：返回零尺寸（叶子控件应覆盖 measure_override 提供内容尺寸）
     return {0.0f, 0.0f};
 }
 
 // ============================================================================
-// Arrange 覆盖：将模板根排列至内容区域
+// Arrange 覆盖：将内部子元素排列至内容区域
 // ============================================================================
 
 math::Size Control::arrange_override(math::Size final_size)
 {
-    if (cp_->template_root_) {
+    if (cp_->inner_element_) {
         // bounds_rect() 已在 FrameworkElement::on_arrange 中被设置为内容矩形
-        // 将该矩形传入模板根，确保 ContentPresenter 等拥有正确的 bounds_rect
-        cp_->template_root_->arrange(bounds_rect());
+        // 将该矩形传入内部元素，确保 ContentPresenter 等拥有正确的 bounds_rect
+        cp_->inner_element_->arrange(bounds_rect());
     }
     return final_size;
 }

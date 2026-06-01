@@ -180,14 +180,6 @@ protected:
     UIElement* hit_test(math::Point p) override;
     [[nodiscard]] ControlVisualState compute_visual_state() const override;
     /**
-     * @brief 模板构建完成钩子——缓存模板子元素指针。
-     *
-     * 调用 find_template_child("content") 并缓存到 content_part_，
-     * 同时将当前前景色/字体同步到 ContentPresenter（初始一次性同步）。
-     * 后续属性变更通过 on_foreground_changed 等 DP 回调自动传播。
-     */
-    void on_apply_template() noexcept override;
-    /**
      * @brief 视觉状态切换钩子——注册 AnimationClock 驱动 VSM 动画。
      *
      * 背景色过渡完全由 VSM Storyboard 管理，此钩子只负责将 anim_tick_callback

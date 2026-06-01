@@ -146,8 +146,6 @@ private:
     static void s_on_click_reset(void* sender, mine::ui::RoutedEventArgs& args, void* user_data);
     /** "退  出" 按钮点击 → 触发 closeRequested 信号（MML 声明式绑定，无需 method）。 */
     static void s_on_click_quit(void* sender, mine::ui::RoutedEventArgs& args, void* user_data);
-    /** 切换模板按钮点击 → 在 tmpl_green_ 和 tmpl_orange_ 之间切换。 */
-    static void s_on_switch_tmpl(void* sender, mine::ui::RoutedEventArgs& args, void* user_data);
     // ── 信号存储 ─────────────────────────────────────────────────────────────────
 
     std::function<void()> on_close_requested_;
@@ -179,16 +177,6 @@ private:
     mine::ui::TextBlock       style_info_;    ///< 演示说明文字
     mine::ui::Button          btn_styled_;    ///< Style 驱动的绿色按钮
     mine::ui::style::Style    demo_style_;    ///< 绿色主题 Style 对象
-
-    // ControlTemplate 演示区
-    mine::ui::TextBlock              tmpl_section_;      ///< 区域分隔标题
-    mine::ui::TextBlock              tmpl_info_;         ///< 演示说明文字
-    mine::ui::Button                 btn_tmpl_;          ///< 使用 ControlTemplate DP 的演示按鈕
-    mine::ui::Button                 btn_switch_tmpl_;   ///< 切换模板按鈕
-    mine::ui::style::ControlTemplate tmpl_green_;        ///< 绿色圆角模板（A）
-    mine::ui::style::ControlTemplate tmpl_orange_;       ///< 橙色矩形模板（B）
-    mine::ui::style::ControlTemplate tmpl_switch_;       ///< btn_switch_tmpl_ 深灰色模板（与 tmpl_green_/tmpl_orange_ 同路径）
-    bool                             tmpl_is_green_ = true; ///< 当前按鈕使用的是哪个模板
 };
 
 } // namespace app

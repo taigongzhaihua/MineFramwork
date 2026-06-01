@@ -5,7 +5,36 @@
 ## [Unreleased]
 
 ### Fixed
-- **mine.ui.animation / mine.ui.style：修复 VSM Disabled 状态颜色不生效 + Hovered/Pressed 始终显示默认紫色问题**：
+- **mine.ui.controls：`Button::on_render` 补充 MD3 State Layer 视觉反馈（Local 背景色按钮）**：
+  对通过 `set_background()` 写入 Local(P50) 背景色的按钮，VSM 颜色动画对 Local 无感知
+  （from≈to，颜色不变），悬停/按下状态无视觉反馈。
+  修复：`on_render` 检测到 `has_value(BackgroundProperty, ValuePriority::Local)` 时，
+  叠加半透明白色 State Layer（Hovered=8% / Pressed=12%），符合 MD3 State Layer 规范。
+  同时移除 `samples/02-controls-demo` 中不必要的 `set_border_color()` 调用。
+
+### Changed
+- **mine.ui.visual / mine.ui.style / mine.ui.controls：废除 ControlTemplate 设计，改为 QWidget 继承风格**：
+  移除 `ControlTemplate` / `TemplateRegistry` / `bind_template` / `on_apply_template` /
+  `find_template_child` / `set_template_slot` / `set_control_template` / `Control::TemplateProperty`
+  等全部模板相关 API；自定义控件外观改为继承已有控件并重写 `on_render()`。
+
+  **保留**：`Control::set_inner_element()`（原 `set_template_root`，内部子元素生命周期管理）、
+  Style + VSM 系统（完整保留）、Button 内部 ContentPresenter（直接在构造函数内联创建，无需 BuildFn）。
+
+  **主要变更文件**：
+  - `ControlTemplate.h/cpp` / `TemplateRegistry.h/cpp`：内容替换为废除说明注释
+  - `StyleAll.h`：移除 ControlTemplate / TemplateRegistry 头文件包含
+  - `UIElement.h/cpp`：移除 `set_template_name()` / `template_name()` API
+  - `Control.h/cpp`：移除所有模板相关成员和方法，新增 `set_inner_element()` protected 访问器
+  - `Button.h/cpp`：移除 `on_apply_template()`，构造函数直接内联 VSM 配置和 ContentPresenter 创建；
+    `on_foreground_changed` 改为直接访问 `content_part_`（不再调用 `find_template_child`）
+  - `Border.cpp` / `TextBlock.cpp`：移除构造函数中的 `set_template_slot()` 调用
+  - `TemplateBindingTest.cpp`：替换为废除说明注释
+  - `ControlsTest.cpp`：更新相关测试名称和注释，移除 `template_slot` 测试
+  - `DemoWindow.g.h/cpp`：移除 ControlTemplate 演示区（3 个 BuildFn + 2 个演示按钮 + 7 个成员字段）
+
+### Fixed
+- **mine.ui.controls：修复 Button 模板构建后 VSM current_state_ 未同步问题**：
 
   **问题一：Disabled 状态颜色不生效**
   Disabled 状态无动画（else 路径），仅以 StyleTrigger(P30) 写入禁用色，但 Local(P50)

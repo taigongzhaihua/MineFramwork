@@ -1,12 +1,11 @@
 /**
  * @file Control.h
- * @brief Control —— 具有样式属性和模板支持的控件基类。
+ * @brief Control —— 具有样式属性和视觉状态支持的控件基类。
  *
  * Control 在 FrameworkElement 基础上添加：
- *   - 样式/模板槽位（style_slot / template_slot）
+ *   - 样式槽位（style_slot）
  *   - 视觉状态机（VisualStateManager）
- *   - 控件模板根管理（set_template_root / find_template_child）
- *   - 模板属性绑定（bind_template）
+ *   - 内部子元素管理（set_inner_element / inner_element）
  *
  * 继承关系：
  *   DependencyObject (mine.ui.property)
@@ -15,6 +14,9 @@
  *               └─ FrameworkElement (mine.ui.visual)
  *                   └─ Control (mine.ui.visual)
  *                       └─ Button / TextBlock / ...（mine.ui.controls.*）
+ *
+ * 自定义控件外观：继承现有控件并重写 on_render() 即可，
+ * 无需 ControlTemplate / BuildFn 等额外机制（类似 QWidget 风格）。
  */
 
 #pragma once
@@ -25,7 +27,6 @@
 #include <mine/ui/visual/Api.h>
 #include <mine/ui/visual/FrameworkElement.h>
 #include <mine/ui/style/VisualStateManager.h>
-#include <mine/ui/style/ControlTemplate.h>
 #include <mine/core/Pimpl.h>
 #include <mine/core/StringView.h>
 #include <mine/containers/InlineString.h>
@@ -49,31 +50,15 @@ enum class ControlVisualState : uint8_t {
  *
  * 所有标准控件（Button、TextBlock 等）均继承自 Control。
  * Control 本身不添加任何渲染逻辑；具体控件在 on_render() 中实现自身外观。
- * 继承 FrameworkElement 后，所有控件自动参与两遍布局协议，
+ * 继承 FrameworkElement 后，所有控件自动参与两遗布局协议，
  * 支持 Margin、Width/Height 约束、HorizontalAlignment/VerticalAlignment 以及
  * Panel 容器（StackPanel、Grid）的子元素容纳。
+ *
+ * 自定义外观：继承此控件并重写 on_render() 实现自定义绘制逻辑，
+ * 无需 ControlTemplate / BuildFn 等额外机制（类似 QWidget 风格）。
  */
 class MINE_UI_VISUAL_API Control : public FrameworkElement {
 public:
-    // ── 依赖属性（DP）声明 ────────────────────────────────────────────────
-
-    /**
-     * @brief 控件模板 DP。
-     *
-     * 存储 `const style::ControlTemplate*` 指针。
-     * 默认为空（measure_override 回退到 template_slot_ 注册表查找）。
-     * 用户通过 set_control_template() 写入 Local(P2) 槽，变更时自动清除
-     * 旧模板根并触发 invalidate_measure()（下次 measure 时重建视觉树）。
-     *
-     * 用法：
-     * @code
-     *   ControlTemplate my_tmpl;
-     *   my_tmpl.build_fn_ = &my_build_fn;
-     *   btn.set_control_template(&my_tmpl);
-     * @endcode
-     */
-    static const DependencyProperty& TemplateProperty;
-
     Control();
     ~Control() override;
 
@@ -95,18 +80,6 @@ public:
     [[nodiscard]] core::StringView style_slot() const noexcept;
 
     /**
-     * @brief 设置模板槽位名（例如 "DefaultButtonTemplate"）。
-     *
-     * 当前仅存储槽位，不执行模板构建。
-     */
-    void set_template_slot(core::StringView slot);
-
-    /**
-     * @brief 返回模板槽位名。
-     */
-    [[nodiscard]] core::StringView template_slot() const noexcept;
-
-    /**
      * @brief 返回当前视觉状态。
      */
     [[nodiscard]] ControlVisualState visual_state() const noexcept;
@@ -116,107 +89,10 @@ public:
      */
     void update_visual_state();
 
-    // ── 控件模板（mine.ui.style 任务 #12）────────────────────────────────
+    // ── VisualStateManager ────────────────────────────────────────────────────
 
     /**
-     * @brief 设置控件模板（写入 TemplateProperty 的 Local 槽）。
-     *
-     * 若与当前模板不同，自动清除旧模板根并请求重新测量（下次 measure 时重建）。
-     * 传入 nullptr 时回退到 template_slot_ 注册表查找（默认行为）。
-     *
-     * @param tmpl 新模板指针（生命周期由调用方负责，Control 不拥有所有权）
-     */
-    void set_control_template(const style::ControlTemplate* tmpl) noexcept;
-
-    /**
-     * @brief 读取当前生效的控件模板（TemplateProperty 最高优先级值）。
-     *
-     * 若 TemplateProperty 为空，返回 nullptr（此时走 template_slot_ 路径）。
-     */
-    [[nodiscard]] const style::ControlTemplate* control_template() const noexcept;
-
-    /**
-     * @brief 设置模板根元素，将其加入控件的视觉子树（不拥有所有权）。
-     *
-     * 若此前已有模板根元素，则先将旧根从子树中移除。
-     * 通常在 ControlTemplate::BuildFn 内部调用：
-     * @code
-     *   auto& ctrl = static_cast<Control&>(target);
-     *   ctrl.set_template_root(&border_element);
-     * @endcode
-     *
-     * @param root 模板根元素指针（nullptr 表示清除模板根）
-     */
-    void set_template_root(UIElement* root) noexcept;
-
-    /**
-     * @brief 设置模板根元素并转移所有权（OwnedPtr<UIElement> 版本）。
-     *
-     * 同 `set_template_root(UIElement*)` 但接管元素的生命周期，
-     * 元素将在控件析构或模板根被替换时自动释放。
-     *
-     * @param root 已拥有所有权的模板根元素（nullptr 等价于清除模板根）
-     */
-    void set_template_root(core::OwnedPtr<UIElement> root) noexcept;
-
-    /**
-     * @brief 设置模板根元素并转移所有权（子类型重载，含类型擦除）。
-     *
-     * 接受 OwnedPtr<TElement>（TElement 为 UIElement 的子类），
-     * 内部将所有权提升为 OwnedPtr<UIElement> 后委托给基类重载。
-     * 适用于动态分配的 ContentPresenter 等具体控件作为模板根：
-     * @code
-     *   auto presenter = core::make_owned<ContentPresenter>();
-     *   ctrl.set_template_root(std::move(presenter));
-     * @endcode
-     *
-     * @tparam TElement UIElement 的子类型
-     * @param root 已拥有所有权的子类型模板根元素
-     */
-    template<typename TElement,
-             std::enable_if_t<std::is_base_of_v<UIElement, TElement> &&
-                              !std::is_same_v<UIElement, TElement>, int> = 0>
-    void set_template_root(core::OwnedPtr<TElement> root) noexcept
-    {
-        // 类型擦除：保留删除器，将裸指针提升为 UIElement*
-        auto del = root.get_deleter();
-        UIElement* raw = root.release();
-        // 构造 OwnedPtr<UIElement>（删除器仍指向正确的 TElement::~TElement）
-        set_template_root(core::OwnedPtr<UIElement>{ raw, del });
-    }
-
-    /**
-     * @brief 在模板子树中查找具有指定 template_name 的 UIElement。
-     *
-     * 从模板根元素开始深度优先搜索，返回第一个匹配的元素。
-     * 若模板根为空或未找到匹配元素，返回 nullptr。
-     *
-     * @param name 目标元素的模板名称（与 UIElement::set_template_name 对应）
-     * @return     匹配的 UIElement 指针；未找到则返回 nullptr
-     */
-    [[nodiscard]] UIElement* find_template_child(core::StringView name) const noexcept;
-
-    /**
-     * @brief 将模板内子元素绑定到宿主控件属性（TemplateBinding）。
-     *
-     * 建立单向同步绑定：宿主控件的 host_prop 变更时，
-     * 自动以 ValuePriority::TemplateBind 写入子元素的 child_prop。
-     * 调用时立即完成首次同步（当前宿主属性值 → 子元素属性）。
-     *
-     * 所有绑定共享一个属性变更订阅（内部去重），不会重复订阅。
-     *
-     * @param child      模板子元素（须为 DependencyObject 实例）
-     * @param child_prop 子元素上的目标属性
-     * @param host_prop  宿主控件（this）上的源属性
-     */
-    void bind_template(DependencyObject&         child,
-                       const DependencyProperty& child_prop,
-                       const DependencyProperty& host_prop) noexcept;
-
-    // ── VisualStateManager（mine.ui.style 任务 #13）────────────────────────
-
-    /**
-     * @brief 安装视觉状态管理器（由 ControlTemplate::BuildFn 调用）。
+     * @brief 安装视觉状态管理器。
      *
      * VSM 负责管理控件的视觉状态切换（Normal/Hovered/Pressed 等）。
      * 安装后可通过 vsm() 获取并调用 go_to_state() 驱动状态机。
@@ -237,22 +113,49 @@ public:
 
 protected:
     /**
-     * @brief 返回当前模板根元素指针（nullptr 表示尚未构建模板）。
+     * @brief 设置内部子元素（不拥有所有权）。
      *
-     * 子类可在 measure_override / on_render 中访问此值，判断是否走模板路径。
+     * 将 root 加入控件的视觉子树。若此前已有内部元素，先将旧元素从子树中移除。
+     * 供 Button 等控件在构造函数中直接安装 ContentPresenter 等内部实现元素。
+     *
+     * @param root 内部子元素指针（nullptr 表示清除）
      */
-    [[nodiscard]] UIElement* template_root() const noexcept;
+    void set_inner_element(UIElement* root) noexcept;
 
     /**
-     * @brief Measure 覆盖：含自动模板构建逻辑。
+     * @brief 设置内部子元素并转移所有权（OwnedPtr<UIElement> 版本）。
+     */
+    void set_inner_element(core::OwnedPtr<UIElement> root) noexcept;
+
+    /**
+     * @brief 设置内部子元素并转移所有权（子类型重载，含类型擦除）。
      *
-     * 若模板尚未构建（template_root_ == nullptr）且 template_slot_ 非空，
-     * 则自动从 TemplateRegistry 查找并调用 build_fn_。
-     * 构建完成后，将 available 传入模板根并返回其期望尺寸。
-     * 若无模板，返回零尺寸。
+     * 接受 OwnedPtr<TElement>（TElement 为 UIElement 的子类），
+     * 内部将所有权提升为 OwnedPtr<UIElement> 后委托给基类重载。
+     */
+    template<typename TElement,
+             std::enable_if_t<std::is_base_of_v<UIElement, TElement> &&
+                              !std::is_same_v<UIElement, TElement>, int> = 0>
+    void set_inner_element(core::OwnedPtr<TElement> root) noexcept
+    {
+        // 类型擦除：保留删除器，将裸指针提升为 UIElement*
+        auto del = root.get_deleter();
+        UIElement* raw = root.release();
+        set_inner_element(core::OwnedPtr<UIElement>{ raw, del });
+    }
+
+    /**
+     * @brief 返回当前内部子元素指针（nullptr 表示未安装）。
      *
-     * 注意：此处 available 已由 FrameworkElement::on_measure 减去 Margin
-     * 并应用 Width/Height/Min/Max 约束，返回值不含 Margin。
+     * 子类可在 measure_override / on_render 中访问此值。
+     */
+    [[nodiscard]] UIElement* inner_element() const noexcept;
+
+    /**
+     * @brief Measure 覆盖：将测量委托给内部子元素。
+     *
+     * 若内部元素已安装，委托其 measure() 并返回其期望尺寸；
+     * 否则返回零尺寸。
      *
      * @param available 经约束处理后的可用内容区域尺寸
      * @return 内容期望尺寸（不含 Margin）
@@ -260,34 +163,12 @@ protected:
     math::Size measure_override(math::Size available) override;
 
     /**
-     * @brief Arrange 覆盖：将模板根排列至内容区域。
-     *
-     * 被 FrameworkElement::on_arrange 调用，此时 bounds_rect() 已是经过
-     * Margin 和对齐处理的内容矩形，可直接用于模板根的 arrange() 调用。
+     * @brief Arrange 覆盖：将内部子元素排列至内容区域。
      *
      * @param final_size 分配给内容区域的最终尺寸（已减去 Margin）
      * @return 实际占用的内容尺寸
      */
     math::Size arrange_override(math::Size final_size) override;
-
-    /**
-     * @brief 模板构建完成后的钉子函数。
-     *
-     * 当 `measure_override()` 首次成功执行 `build_fn_(*this)` 并将模板根加入
-     * 视觉子树后，自动调用此虚函数。
-     *
-     * **子类应在此函数中完成以下工作（且仅在此处执行）：**
-     *   1. `find_template_child("name")` —— 根据模板名获取命名元素的指针并缓存到成员变量。
-     *   2. 对取得的元素做额外初天化配置（如设置动画初始参数、订阅元素事件）。
-     *
-     * **不应在此处执行的工作：**
-     *   - 直接操作 Storyboard（应在模板的 VSM 过渡配置中完成）
-     *   - 调用 `update_visual_state()`（此时布局尚未完成）
-     *   - 写入 DependencyProperty Local 层的值（应由样式层或用户代码控制）
-     *
-     * 默认实现为空操作（无模板的底层叶子控件无需覆写）。
-     */
-    virtual void on_apply_template() noexcept {}
 
     /**
      * @brief 由子类计算当前视觉状态（枚举）。
@@ -314,13 +195,6 @@ protected:
     virtual void on_visual_state_changed(ControlVisualState old_state,
                                          ControlVisualState new_state);
 
-    /// 属性变更静态回调（供 bind_template 内部使用）
-    static void on_host_prop_changed(DependencyObject*         sender,
-                                     const DependencyProperty& prop,
-                                     const core::Variant&      old_v,
-                                     const core::Variant&      new_v,
-                                     void*                     user_data) noexcept;
-
 private:
     /// 私有实现（Pimpl 惯用法，隐藏 style 依赖细节）
     struct Impl;
@@ -328,9 +202,6 @@ private:
 
     /// 样式槽位名（InlineString 避免堆分配）
     containers::InlineString style_slot_;
-
-    /// 模板槽位名
-    containers::InlineString template_slot_;
 
     /// 当前视觉状态（枚举，由 compute_visual_state 计算得出）
     ControlVisualState visual_state_{ ControlVisualState::Normal };
