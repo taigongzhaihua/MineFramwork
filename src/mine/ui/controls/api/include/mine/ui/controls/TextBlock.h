@@ -167,7 +167,7 @@ public:
     void set_font_face(void* font_face) noexcept;
 
 protected:
-    void on_measure(math::Size available_size) override;
+    math::Size measure_override(math::Size available) override;
     void on_render(paint::Canvas& canvas) override;
 
 private:

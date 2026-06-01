@@ -697,13 +697,15 @@ void TextBlock::build_lines(float max_content_width)
 }
 
 // ============================================================================
-// on_measure
+// measure_override
 // ============================================================================
 
-void TextBlock::on_measure(math::Size available_size)
+// available 已由 FrameworkElement::on_measure 减去了 Margin 并应用了 Width/Height 约束，
+// 此处只需再减去自身 padding 即可得到文字内容区可用宽度。
+math::Size TextBlock::measure_override(math::Size available)
 {
     // 计算内容区最大宽度（去掉水平 padding）
-    const float max_content_w = available_size.width - padding_.horizontal();
+    const float max_content_w = available.width - padding_.horizontal();
 
     if (font_face_ != nullptr) {
         auto* face = static_cast<text::FontFace*>(font_face_);
@@ -729,10 +731,11 @@ void TextBlock::on_measure(math::Size available_size)
         if (line.disp_width > max_w) max_w = line.disp_width;
     }
 
-    set_desired_size({
+    // 返回内容区期望尺寸（不含 Margin）；FrameworkElement::on_measure 会自动加回 Margin 并调用 set_desired_size
+    return {
         max_w  + padding_.horizontal(),
         total_h + padding_.vertical(),
-    });
+    };
 }
 
 // ============================================================================
