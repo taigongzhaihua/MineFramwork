@@ -15,6 +15,7 @@
 #include <mine/ui/property/PropertyMetadata.h>
 
 #include <algorithm>
+#include <cstdio>  // 调试用，验证 char_spacing_px_ 运行时值
 
 namespace mine::ui {
 

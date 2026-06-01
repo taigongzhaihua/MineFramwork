@@ -56,7 +56,7 @@ void DemoWindowBase::_configure()
     // 直接调用继承自 Window 的方法（无 win_. 前缀）
     // 值暂存于 Impl::pending_* 字段，首次 show() 时应用到原生窗口
     set_title("MineFramework - 控件交互演示");
-    set_size({ 800.0f, 1060.0f });
+    set_size({ 800.0f, 800.0f });
 }
 
 // ── _build：视觉树构建（对应 MML 中的嵌套元素声明）───────────────────────────
@@ -214,14 +214,13 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     if (font) { tb_section_.set_font_face(font); }
     body_panel_.add_child(&tb_section_);
 
-    // ── 8a. 自动换行（TextWrapping::Wrap）──────────────────────────────────────
-    tb_label_wrap_.set_text("\u81ea\u52a8\u6362\u884c  TextWrapping::Wrap");
+    // ── 8a. 自动换行（TextWrapping::Wrap）── ※ 暂时隐藏以保持演示区在可视范围内
+    tb_label_wrap_.set_text("自动换行  TextWrapping::Wrap");
     tb_label_wrap_.set_font_size(10.0f);
     tb_label_wrap_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
     tb_label_wrap_.set_background(paint::Brush::solid(math::Color::Transparent));
     tb_label_wrap_.set_padding(math::Thickness{ 16.0f, 8.0f, 16.0f, 2.0f });
     if (font) { tb_label_wrap_.set_font_face(font); }
-    body_panel_.add_child(&tb_label_wrap_);
 
     tb_wrap_.set_text(
         "MineFramework \u662f\u4e00\u4e2a\u9ad8\u6027\u80fd C++ UI \u6846\u67b6\uff0c"
@@ -239,16 +238,16 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tb_wrap_.set_margin(math::Thickness{ 16.0f, 0.0f, 16.0f, 0.0f });
     tb_wrap_.set_text_wrapping(ui::TextWrapping::Wrap);
     if (font) { tb_wrap_.set_font_face(font); }
-    body_panel_.add_child(&tb_wrap_);
+    // （暂时不加入 body_panel_，避免占用高度将字间距演示推出可视区域）
 
-    // ── 8b. 省略号裁剪（MaxLines=2 + CharacterEllipsis）──────────────────────
-    tb_label_ellipsis_.set_text("\u7701\u7565\u53f7\u88c1\u526a  TextTrimming::CharacterEllipsis  MaxLines=2");
+    // ── 8b. 省略号裁剪（MaxLines=2 + CharacterEllipsis）── ※ 暂时隐藏
+    tb_label_ellipsis_.set_text("省略号裁剪  TextTrimming::CharacterEllipsis  MaxLines=2");
     tb_label_ellipsis_.set_font_size(10.0f);
     tb_label_ellipsis_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
     tb_label_ellipsis_.set_background(paint::Brush::solid(math::Color::Transparent));
     tb_label_ellipsis_.set_padding(math::Thickness{ 16.0f, 8.0f, 16.0f, 2.0f });
     if (font) { tb_label_ellipsis_.set_font_face(font); }
-    body_panel_.add_child(&tb_label_ellipsis_);
+    // （暂时不加入 body_panel_）
 
     tb_ellipsis_.set_text(
         "\u7b2c\u4e00\u884c\uff1a\u8fd9\u662f\u4e00\u6bb5\u8d85\u957f\u7684\u6587\u5b57\uff0c"
@@ -267,7 +266,7 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tb_ellipsis_.set_text_trimming(ui::TextTrimming::CharacterEllipsis);
     tb_ellipsis_.set_max_lines(2);
     if (font) { tb_ellipsis_.set_font_face(font); }
-    body_panel_.add_child(&tb_ellipsis_);
+    // （暂时不加入 body_panel_）
 
     // ── 8c. 文字对齐（Left / Center / Right）──────────────────────────────────
     tb_label_align_.set_text("\u6587\u5b57\u5bf9\u9f50  TextAlignment::Left / Center / Right");
