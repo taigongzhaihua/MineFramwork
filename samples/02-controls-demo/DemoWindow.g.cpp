@@ -214,16 +214,16 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     if (font) { tb_section_.set_font_face(font); }
     body_panel_.add_child(&tb_section_);
 
-    // ── 8a-8e. TextBlock 演示横向总 Grid（2行×5列）──────────────────────────────
-    // Row 0（auto）：各演示标签行；Row 1（*）：各演示内容区
-    // Col 0:换行 | Col 1:省略号 | Col 2:对齐 | Col 3:字间距 | Col 4:行距
-    tb_demos_grid_.add_row(ui::RowDefinition{ ui::GridLength::auto_() });
-    tb_demos_grid_.add_row(ui::RowDefinition{ ui::GridLength::star() });
-    for (int i = 0; i < 5; ++i)
-        tb_demos_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
-    tb_demos_grid_.set_margin(math::Thickness{ 16.0f, 0.0f, 16.0f, 0.0f });
+    // ── Grid 1：自动换行 & 省略号（2行×2列）──────────────────────────────────────
+    // Row 0（auto）：标签行；Row 1（*）：内容行
+    // 在 StackPanel 无限高度下，Row 1 通过 star_unit 策略按内容最小等比分配
+    tb_grid1_.add_row(ui::RowDefinition{ ui::GridLength::auto_() });
+    tb_grid1_.add_row(ui::RowDefinition{ ui::GridLength::star() });
+    tb_grid1_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
+    tb_grid1_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
+    tb_grid1_.set_margin(math::Thickness{ 16.0f, 8.0f, 16.0f, 0.0f });
 
-    // ── 8a. 自动换行（Col 0）────────────────────────────────────────────────────
+    // 8a. 自动换行（Col 0）
     tb_label_wrap_.set_text("自动换行  Wrap");
     tb_label_wrap_.set_font_size(10.0f);
     tb_label_wrap_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
@@ -232,7 +232,7 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     if (font) { tb_label_wrap_.set_font_face(font); }
     ui::Grid::set_row(tb_label_wrap_, 0);
     ui::Grid::set_column(tb_label_wrap_, 0);
-    tb_demos_grid_.add_child(&tb_label_wrap_);
+    tb_grid1_.add_child(&tb_label_wrap_);
 
     tb_wrap_.set_text(
         "MineFramework \u662f\u4e00\u4e2a\u9ad8\u6027\u80fd C++ UI \u6846\u67b6\uff0c"
@@ -246,9 +246,9 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     if (font) { tb_wrap_.set_font_face(font); }
     ui::Grid::set_row(tb_wrap_, 1);
     ui::Grid::set_column(tb_wrap_, 0);
-    tb_demos_grid_.add_child(&tb_wrap_);
+    tb_grid1_.add_child(&tb_wrap_);
 
-    // ── 8b. 省略号裁剪（Col 1）──────────────────────────────────────────────────
+    // 8b. 省略号裁剪（Col 1）
     tb_label_ellipsis_.set_text("省略号  MaxLines=2");
     tb_label_ellipsis_.set_font_size(10.0f);
     tb_label_ellipsis_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
@@ -257,7 +257,7 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     if (font) { tb_label_ellipsis_.set_font_face(font); }
     ui::Grid::set_row(tb_label_ellipsis_, 0);
     ui::Grid::set_column(tb_label_ellipsis_, 1);
-    tb_demos_grid_.add_child(&tb_label_ellipsis_);
+    tb_grid1_.add_child(&tb_label_ellipsis_);
 
     tb_ellipsis_.set_text(
         "\u7b2c\u4e00\u884c\uff1a\u8fd9\u662f\u4e00\u6bb5\u8d85\u957f\u7684\u6587\u5b57\uff0c"
@@ -276,9 +276,20 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     if (font) { tb_ellipsis_.set_font_face(font); }
     ui::Grid::set_row(tb_ellipsis_, 1);
     ui::Grid::set_column(tb_ellipsis_, 1);
-    tb_demos_grid_.add_child(&tb_ellipsis_);
+    tb_grid1_.add_child(&tb_ellipsis_);
 
-    // ── 8c. 文字对齐 Left / Center / Right（Col 2）──────────────────────────────
+    body_panel_.add_child(&tb_grid1_);
+
+    // ── Grid 2：文字对齐 L/C/R（2行×3列，标签跨3列）─────────────────────────────
+    // Row 0（auto）：标签（colspan=3）；Row 1（*）：三列内容
+    tb_align_grid_.add_row(ui::RowDefinition{ ui::GridLength::auto_() });
+    tb_align_grid_.add_row(ui::RowDefinition{ ui::GridLength::star() });
+    tb_align_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
+    tb_align_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
+    tb_align_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
+    tb_align_grid_.set_margin(math::Thickness{ 16.0f, 8.0f, 16.0f, 0.0f });
+
+    // 8c. 对齐标签（Row 0，跨3列）
     tb_label_align_.set_text("\u5bf9\u9f50  L / C / R");
     tb_label_align_.set_font_size(10.0f);
     tb_label_align_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
@@ -286,14 +297,11 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tb_label_align_.set_padding(math::Thickness{ 4.0f, 8.0f, 4.0f, 2.0f });
     if (font) { tb_label_align_.set_font_face(font); }
     ui::Grid::set_row(tb_label_align_, 0);
-    ui::Grid::set_column(tb_label_align_, 2);
-    tb_demos_grid_.add_child(&tb_label_align_);
+    ui::Grid::set_column(tb_label_align_, 0);
+    ui::Grid::set_column_span(tb_label_align_, 3);
+    tb_align_grid_.add_child(&tb_label_align_);
 
-    // 三列等宽子 Grid
-    tb_align_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
-    tb_align_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
-    tb_align_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
-
+    // 8c. 三列内容（Row 1）
     tb_align_left_.set_text("\u5de6\u5bf9\u9f50\nLeft");
     tb_align_left_.set_font_size(12.0f);
     tb_align_left_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
@@ -301,6 +309,7 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tb_align_left_.set_padding(math::Thickness{ 6.0f, 6.0f, 6.0f, 6.0f });
     tb_align_left_.set_text_alignment(ui::TextAlignment::Left);
     if (font) { tb_align_left_.set_font_face(font); }
+    ui::Grid::set_row(tb_align_left_, 1);
     ui::Grid::set_column(tb_align_left_, 0);
     tb_align_grid_.add_child(&tb_align_left_);
 
@@ -311,6 +320,7 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tb_align_center_.set_padding(math::Thickness{ 6.0f, 6.0f, 6.0f, 6.0f });
     tb_align_center_.set_text_alignment(ui::TextAlignment::Center);
     if (font) { tb_align_center_.set_font_face(font); }
+    ui::Grid::set_row(tb_align_center_, 1);
     ui::Grid::set_column(tb_align_center_, 1);
     tb_align_grid_.add_child(&tb_align_center_);
 
@@ -321,14 +331,22 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tb_align_right_.set_padding(math::Thickness{ 6.0f, 6.0f, 6.0f, 6.0f });
     tb_align_right_.set_text_alignment(ui::TextAlignment::Right);
     if (font) { tb_align_right_.set_font_face(font); }
+    ui::Grid::set_row(tb_align_right_, 1);
     ui::Grid::set_column(tb_align_right_, 2);
     tb_align_grid_.add_child(&tb_align_right_);
 
-    ui::Grid::set_row(tb_align_grid_, 1);
-    ui::Grid::set_column(tb_align_grid_, 2);
-    tb_demos_grid_.add_child(&tb_align_grid_);
+    body_panel_.add_child(&tb_align_grid_);
 
-    // ── 8d. 字符间距对比 0 / 6 / 12px（Col 3）──────────────────────────────────
+    // ── Grid 3：字符间距 & 行距（2行×2列）────────────────────────────────────────
+    // Row 0（auto）：各自标签；Row 1（*）：各自子 Grid 内容
+    // Col 0（3*）：字间距区域（3个子格，稍宽）；Col 1（2*）：行距区域（2个子格）
+    tb_grid3_.add_row(ui::RowDefinition{ ui::GridLength::auto_() });
+    tb_grid3_.add_row(ui::RowDefinition{ ui::GridLength::star() });
+    tb_grid3_.add_column(ui::ColumnDefinition{ ui::GridLength::star(3.0f) });
+    tb_grid3_.add_column(ui::ColumnDefinition{ ui::GridLength::star(2.0f) });
+    tb_grid3_.set_margin(math::Thickness{ 16.0f, 8.0f, 16.0f, 0.0f });
+
+    // 8d. 字符间距标签（Row 0，Col 0）
     tb_label_spacing_.set_text("\u5b57\u7b26\u95f4\u8ddd  0 / 6 / 12px");
     tb_label_spacing_.set_font_size(10.0f);
     tb_label_spacing_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
@@ -336,10 +354,21 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tb_label_spacing_.set_padding(math::Thickness{ 4.0f, 8.0f, 4.0f, 2.0f });
     if (font) { tb_label_spacing_.set_font_face(font); }
     ui::Grid::set_row(tb_label_spacing_, 0);
-    ui::Grid::set_column(tb_label_spacing_, 3);
-    tb_demos_grid_.add_child(&tb_label_spacing_);
+    ui::Grid::set_column(tb_label_spacing_, 0);
+    tb_grid3_.add_child(&tb_label_spacing_);
 
-    // 三列等宽子 Grid（仅字符间距不同）
+    // 8e. 行距标签（Row 0，Col 1）
+    tb_label_lineh_.set_text("\u884c\u8ddd  \u9ed8\u8ba4 vs 28px");
+    tb_label_lineh_.set_font_size(10.0f);
+    tb_label_lineh_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
+    tb_label_lineh_.set_background(paint::Brush::solid(math::Color::Transparent));
+    tb_label_lineh_.set_padding(math::Thickness{ 4.0f, 8.0f, 4.0f, 2.0f });
+    if (font) { tb_label_lineh_.set_font_face(font); }
+    ui::Grid::set_row(tb_label_lineh_, 0);
+    ui::Grid::set_column(tb_label_lineh_, 1);
+    tb_grid3_.add_child(&tb_label_lineh_);
+
+    // 8d. 字间距子 Grid（1行×3列：0px / 6px / 12px），放入 Grid3 Row 1 Col 0
     tb_spacing_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
     tb_spacing_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
     tb_spacing_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
@@ -378,21 +407,10 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tb_spacing_grid_.add_child(&tb_spacing_wide_);
 
     ui::Grid::set_row(tb_spacing_grid_, 1);
-    ui::Grid::set_column(tb_spacing_grid_, 3);
-    tb_demos_grid_.add_child(&tb_spacing_grid_);
+    ui::Grid::set_column(tb_spacing_grid_, 0);
+    tb_grid3_.add_child(&tb_spacing_grid_);
 
-    // ── 8e. 行高对比（Col 4）────────────────────────────────────────────────────
-    tb_label_lineh_.set_text("\u884c\u8ddd  \u9ed8\u8ba4 vs 28px");
-    tb_label_lineh_.set_font_size(10.0f);
-    tb_label_lineh_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
-    tb_label_lineh_.set_background(paint::Brush::solid(math::Color::Transparent));
-    tb_label_lineh_.set_padding(math::Thickness{ 4.0f, 8.0f, 4.0f, 2.0f });
-    if (font) { tb_label_lineh_.set_font_face(font); }
-    ui::Grid::set_row(tb_label_lineh_, 0);
-    ui::Grid::set_column(tb_label_lineh_, 4);
-    tb_demos_grid_.add_child(&tb_label_lineh_);
-
-    // 两列等宽子 Grid（仅行高不同）
+    // 8e. 行距子 Grid（1行×2列：默认行高 / 28px），放入 Grid3 Row 1 Col 1
     tb_lineh_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
     tb_lineh_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
 
@@ -419,10 +437,10 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tb_lineh_grid_.add_child(&tb_lineh_);
 
     ui::Grid::set_row(tb_lineh_grid_, 1);
-    ui::Grid::set_column(tb_lineh_grid_, 4);
-    tb_demos_grid_.add_child(&tb_lineh_grid_);
+    ui::Grid::set_column(tb_lineh_grid_, 1);
+    tb_grid3_.add_child(&tb_lineh_grid_);
 
-    body_panel_.add_child(&tb_demos_grid_);
+    body_panel_.add_child(&tb_grid3_);
 
     // ── 9. 将根布局挂载到窗口 ────────────────────────────────────────────────
     // 直接调用继承自 Window 的 set_content()（无 win_. 前缀）
