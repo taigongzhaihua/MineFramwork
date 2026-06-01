@@ -4077,9 +4077,9 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
                         continue;
                     }
 
-                    // 步进（包括宽度为 0 的空白字形）
+                    // 步进（包括宽度为 0 的空白字形；空白字形同样叠加字符间距）
                     if (entry->atlas_w == 0) {
-                        pen_x += static_cast<float>(entry->advance_x);
+                        pen_x += static_cast<float>(entry->advance_x) + run.character_spacing;
                         continue;
                     }
 

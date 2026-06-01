@@ -330,35 +330,36 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tb_spacing_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
     tb_spacing_grid_.set_margin(math::Thickness{ 16.0f, 0.0f, 16.0f, 0.0f });
 
-    tb_spacing_norm_.set_text("字间距 0px\n文字排列紧凑");
+    // 三列使用完全相同的文字，仅字符间距不同，差异即为纯间距效果
+    const char* const kSpacingText =
+        "汉字排版演示\n0123456789";
+
+    tb_spacing_norm_.set_text(kSpacingText);
     tb_spacing_norm_.set_font_size(14.0f);
     tb_spacing_norm_.set_foreground(paint::Brush::solid_rgb(0x212121));
     tb_spacing_norm_.set_background(paint::Brush::solid_rgb(0xE3F2FD));
     tb_spacing_norm_.set_padding(math::Thickness{ 10.0f, 10.0f, 10.0f, 10.0f });
     tb_spacing_norm_.set_character_spacing(0.0f);
-    tb_spacing_norm_.set_text_wrapping(ui::TextWrapping::Wrap);
     if (font) { tb_spacing_norm_.set_font_face(font); }
     ui::Grid::set_column(tb_spacing_norm_, 0);
     tb_spacing_grid_.add_child(&tb_spacing_norm_);
 
-    tb_spacing_2px_.set_text("字间距 2px\n文字略宽松");
+    tb_spacing_2px_.set_text(kSpacingText);
     tb_spacing_2px_.set_font_size(14.0f);
     tb_spacing_2px_.set_foreground(paint::Brush::solid_rgb(0x212121));
     tb_spacing_2px_.set_background(paint::Brush::solid_rgb(0xE8F5E9));
     tb_spacing_2px_.set_padding(math::Thickness{ 10.0f, 10.0f, 10.0f, 10.0f });
     tb_spacing_2px_.set_character_spacing(2.0f);
-    tb_spacing_2px_.set_text_wrapping(ui::TextWrapping::Wrap);
     if (font) { tb_spacing_2px_.set_font_face(font); }
     ui::Grid::set_column(tb_spacing_2px_, 1);
     tb_spacing_grid_.add_child(&tb_spacing_2px_);
 
-    tb_spacing_wide_.set_text("字间距 4px\n文字更宽松");
+    tb_spacing_wide_.set_text(kSpacingText);
     tb_spacing_wide_.set_font_size(14.0f);
     tb_spacing_wide_.set_foreground(paint::Brush::solid_rgb(0x212121));
     tb_spacing_wide_.set_background(paint::Brush::solid_rgb(0xFCE4EC));
     tb_spacing_wide_.set_padding(math::Thickness{ 10.0f, 10.0f, 10.0f, 10.0f });
     tb_spacing_wide_.set_character_spacing(4.0f);
-    tb_spacing_wide_.set_text_wrapping(ui::TextWrapping::Wrap);
     if (font) { tb_spacing_wide_.set_font_face(font); }
     ui::Grid::set_column(tb_spacing_wide_, 2);
     tb_spacing_grid_.add_child(&tb_spacing_wide_);
@@ -378,7 +379,11 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tb_lineh_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
     tb_lineh_grid_.set_margin(math::Thickness{ 16.0f, 0.0f, 16.0f, 0.0f });
 
-    tb_lineh_default_.set_text("默认行距\n第一行文字\n第二行文字\n第三行文字");
+    // 两列使用完全相同的文字，仅行距不同
+    const char* const kLineHText =
+        "第一行文字\n第二行文字\n第三行文字\n第四行文字";
+
+    tb_lineh_default_.set_text(kLineHText);
     tb_lineh_default_.set_font_size(13.0f);
     tb_lineh_default_.set_foreground(paint::Brush::solid_rgb(0x212121));
     tb_lineh_default_.set_background(paint::Brush::solid_rgb(0xECEFF1));
@@ -387,7 +392,7 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     ui::Grid::set_column(tb_lineh_default_, 0);
     tb_lineh_grid_.add_child(&tb_lineh_default_);
 
-    tb_lineh_.set_text("行距 28px\n第一行文字\n第二行文字\n第三行文字");
+    tb_lineh_.set_text(kLineHText);
     tb_lineh_.set_font_size(13.0f);
     tb_lineh_.set_foreground(paint::Brush::solid_rgb(0x212121));
     tb_lineh_.set_background(paint::Brush::solid_rgb(0xF3E5F5));
