@@ -26,16 +26,16 @@ namespace anim  = mine::ui::animation;
 
 // ── ControlTemplate BuildFn（文件作用域，供 tmpl_green_ / tmpl_orange_ 使用）──────────────────
 
-/// 绿色圆角模板：Border（深绿 + 圆角边框）> ContentPresenter（"content" Part）
+/// 绿色圆角模板：ContentPresenter（"content" Part）直接作为模板根
+/// 背景由 Button::on_render 通过 BackgroundProperty DP 绘制（VSM 驱动颜色过渡）
+/// 圆角边框由 Button::on_render 通过 BorderColorProperty DP 绘制（与背景同形）
 static void s_build_green_template(mine::ui::DependencyObject& target)
 {
     auto& btn     = static_cast<ui::Button&>(target);
-    auto  root    = core::make_owned<ui::Border>();
     auto  content = core::make_owned<ui::ContentPresenter>();
 
-    // 给元素打 Part 名称标签（on_apply_template 中通过 find_template_child 查找）
-    root->set_template_name("root");
-    content->set_template_name("content");  // 与 Button 的 Part 契约一致
+    // "content" Part 名称与 Button::on_apply_template 中 find_template_child 一致
+    content->set_template_name("content");
 
     // TemplateBind：宿主 Content/Padding 属性自动同步到 ContentPresenter
     btn.bind_template(*content,
@@ -45,35 +45,31 @@ static void s_build_green_template(mine::ui::DependencyObject& target)
                       ui::ContentPresenter::PaddingProperty,
                       ui::Button::PaddingProperty);
 
-    // 根容器外观（绿色圆角）
-    root->set_background(paint::Brush::solid_rgb(0x1B5E20));
-    root->set_border_color(paint::Brush::solid_rgb(0x4CAF50));
-    root->set_border_thickness(math::Thickness::uniform(2.0f));
-
-    // 将 ContentPresenter 所有权转移给 Border（Border 持有子元素）
-    root->set_child(std::move(content));
-
     // 安装 VSM（绿色状态机）
+    // 背景色和边框色均通过 Button::BackgroundProperty / BorderColorProperty 驱动
+    // Button::on_render 负责绘制圆角背景和圆角边框，与 VSM 动画完全兼容
     static style::Style s_green_style = []() {
         style::Style s;
         s.set_name("GreenTemplate_Style")
          .set_target_type(core::TypeId::of<ui::Button>())
          .add_setter({ &ui::Button::BackgroundProperty,
-                       core::Variant{ paint::Brush::solid_rgb(0x1B5E20) } })
+                       core::Variant{ paint::Brush::solid_rgb(0x1B5E20) } })  // 深绿 Normal(P5)
          .add_setter({ &ui::Button::ForegroundProperty,
-                       core::Variant{ paint::Brush::solid_rgb(0xFFFFFF) } });
+                       core::Variant{ paint::Brush::solid_rgb(0xFFFFFF) } })  // 白色文字
+         .add_setter({ &ui::Button::BorderColorProperty,
+                       core::Variant{ paint::Brush::solid_rgb(0x4CAF50) } }); // 亮绿边框(P5)
         {
             style::VisualStateSetters vs;
             vs.state_name = "Hovered";
             vs.setters.push_back({ &ui::Button::BackgroundProperty,
-                core::Variant{ paint::Brush::solid_rgb(0x2E7D32) } });
+                core::Variant{ paint::Brush::solid_rgb(0x2E7D32) } });  // 悬停：略亮绿
             s.add_state_setters(std::move(vs));
         }
         {
             style::VisualStateSetters vs;
             vs.state_name = "Pressed";
             vs.setters.push_back({ &ui::Button::BackgroundProperty,
-                core::Variant{ paint::Brush::solid_rgb(0x388E3C) } });
+                core::Variant{ paint::Brush::solid_rgb(0x388E3C) } });  // 按下：更亮绿
             s.add_state_setters(std::move(vs));
         }
         return s;
@@ -101,19 +97,19 @@ static void s_build_green_template(mine::ui::DependencyObject& target)
     });
     vsm.set_style(&s_green_style);
     btn.set_visual_state_manager(std::move(vsm));
-    s_green_style.apply(btn);  // 写入 P5 基线値
+    s_green_style.apply(btn);  // 写入 P5 基线値（含 BorderColorProperty）
 
-    btn.set_template_root(std::move(root));
+    btn.set_template_root(std::move(content));
 }
 
-/// 橙色矩形模板：Border（深橙 + 矩形边框）> ContentPresenter（"content" Part）
+/// 橙色圆角模板：ContentPresenter（"content" Part）直接作为模板根
+/// 背景由 Button::on_render 通过 BackgroundProperty DP 绘制（VSM 驱动颜色过渡）
+/// 圆角边框由 Button::on_render 通过 BorderColorProperty DP 绘制（与背景同形）
 static void s_build_orange_template(mine::ui::DependencyObject& target)
 {
     auto& btn     = static_cast<ui::Button&>(target);
-    auto  root    = core::make_owned<ui::Border>();
     auto  content = core::make_owned<ui::ContentPresenter>();
 
-    root->set_template_name("root");
     content->set_template_name("content");
 
     btn.bind_template(*content,
@@ -123,32 +119,28 @@ static void s_build_orange_template(mine::ui::DependencyObject& target)
                       ui::ContentPresenter::PaddingProperty,
                       ui::Button::PaddingProperty);
 
-    root->set_background(paint::Brush::solid_rgb(0xBF360C));
-    root->set_border_color(paint::Brush::solid_rgb(0xFF7043));
-    root->set_border_thickness(math::Thickness::uniform(2.0f));
-
-    root->set_child(std::move(content));
-
     static style::Style s_orange_style = []() {
         style::Style s;
         s.set_name("OrangeTemplate_Style")
          .set_target_type(core::TypeId::of<ui::Button>())
          .add_setter({ &ui::Button::BackgroundProperty,
-                       core::Variant{ paint::Brush::solid_rgb(0xBF360C) } })
+                       core::Variant{ paint::Brush::solid_rgb(0xBF360C) } })  // 深橙 Normal(P5)
          .add_setter({ &ui::Button::ForegroundProperty,
-                       core::Variant{ paint::Brush::solid_rgb(0xFFFFFF) } });
+                       core::Variant{ paint::Brush::solid_rgb(0xFFFFFF) } })  // 白色文字
+         .add_setter({ &ui::Button::BorderColorProperty,
+                       core::Variant{ paint::Brush::solid_rgb(0xFF7043) } }); // 亮橙边框(P5)
         {
             style::VisualStateSetters vs;
             vs.state_name = "Hovered";
             vs.setters.push_back({ &ui::Button::BackgroundProperty,
-                core::Variant{ paint::Brush::solid_rgb(0xE64A19) } });
+                core::Variant{ paint::Brush::solid_rgb(0xE64A19) } });  // 悬停：略亮橙
             s.add_state_setters(std::move(vs));
         }
         {
             style::VisualStateSetters vs;
             vs.state_name = "Pressed";
             vs.setters.push_back({ &ui::Button::BackgroundProperty,
-                core::Variant{ paint::Brush::solid_rgb(0xFF5722) } });
+                core::Variant{ paint::Brush::solid_rgb(0xFF5722) } });  // 按下：更亮橙
             s.add_state_setters(std::move(vs));
         }
         return s;
@@ -178,7 +170,7 @@ static void s_build_orange_template(mine::ui::DependencyObject& target)
     btn.set_visual_state_manager(std::move(vsm));
     s_orange_style.apply(btn);
 
-    btn.set_template_root(std::move(root));
+    btn.set_template_root(std::move(content));
 }
 
 namespace app {

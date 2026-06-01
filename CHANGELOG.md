@@ -4,8 +4,31 @@
 
 ## [Unreleased]
 
-### Added
-- **mine.core：`OwnedPtr<T>` 新增协变转换构造函数和赋值运算符**：
+### Fixed
+- **mine.ui.controls：修复 Button 默认模板 Hovered/Pressed 颜色对比度过低（VSM 状态变化不可见）**：
+  原 Hovered（#735BAC）与 Normal（#6750A4）亮度差仅约 5%，Pressed（#7A65AF）差距更小，
+  用户在屏幕上几乎无法感知颜色变化。
+  修复：Hovered 调整为 #8876C0（较 Normal 亮约 20%），Pressed 调整为 #5743A0（较 Normal 暗约 15%），
+  确保状态切换视觉反馈清晰可见。
+
+- **mine.ui.controls：`Button::on_render` 新增 `BorderColorProperty` 驱动的圆角边框绘制**：
+  `BorderColorProperty` DP 已存在且有 `set_border_color()` 访问器，但 `on_render` 从未读取该属性，
+  导致所有颜色设置无渲染效果。
+  修复：在背景圆角矩形之后、Ripple 涟漪之前读取 `BorderColorProperty`；
+  若画刷非透明则调用 `Canvas::stroke_rounded_rect` 用 `Pen{width=2}` 绘制与背景同形的圆角边框；
+  默认画刷透明，不影响现有按钮外观；`set_border_color()` 写 Local(P2)，也可通过 Style P5 层驱动。
+
+- **samples/02-controls-demo：修复绿色/橙色自定义模板 VSM 悬停/按下状态不可见问题**：
+  两个模板均以 `ui::Border` 为模板根，`Border::on_render` 使用 `set_background()` 写入的不透明纯色
+  填充整个控件区域，完全遮住了 `Button::on_render` 中由 VSM 驱动的 `BackgroundProperty` 圆角背景；
+  悬停/按下动画存在但永远不可见，Ripple 涟漪同理被遮盖。
+  修复：将两个模板改为直接以 `ContentPresenter` 为模板根（与默认模板结构一致）：
+  - 移除 `core::make_owned<ui::Border>()`，`root->set_background/border_color/border_thickness/set_child` 等调用全部删除；
+  - `s_green_style` / `s_orange_style` 新增 `BorderColorProperty` setter，
+    由 `Button::on_render` 通过新增的圆角边框绘制逻辑完整展示；
+  - VSM 背景动画（#1B5E20 → #2E7D32 / #388E3C，#BF360C → #E64A19 / #FF5722）现在完全可见。
+
+
   实现了注释中声明但代码中缺失的隐式协变转换能力（`OwnedPtr<Derived>` → `OwnedPtr<Base>`）；
   要求 `Derived*` 可隐式转换为 `T*`（`std::is_convertible_v<U*, T*>`），转移所有权和删除器；
   为 `BuildFn` 中 `OwnedPtr<ContentPresenter>` 向 `OwnedPtr<UIElement>` 的安全转型提供语言支持。

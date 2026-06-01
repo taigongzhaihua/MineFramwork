@@ -127,14 +127,14 @@ static style::Style& default_button_style()
         style::VisualStateSetters hovered;
         hovered.state_name = "Hovered";
         hovered.setters.push_back({ &Button::BackgroundProperty,
-            core::Variant{ Brush::solid(Color{0.452f, 0.369f, 0.672f, 1.0f}) } });  // ≈ #735BAC
+            core::Variant{ Brush::solid_rgb(0x8876C0) } });  // 悬停：较 Normal 亮约 20%，明显变亮
         s.add_state_setters(std::move(hovered));
 
         // ── P4 StyleTrigger：Pressed 状态终值 ───────────────────────────────────
         style::VisualStateSetters pressed;
         pressed.state_name = "Pressed";
         pressed.setters.push_back({ &Button::BackgroundProperty,
-            core::Variant{ Brush::solid(Color{0.476f, 0.396f, 0.686f, 1.0f}) } });  // ≈ #7A65AF
+            core::Variant{ Brush::solid_rgb(0x5743A0) } });  // 按下：较 Normal 暗约 15%，明显变暗
         s.add_state_setters(std::move(pressed));
 
         // ── P4 StyleTrigger：Disabled 状态终值（无动画——直接跳变） ─────────────────
@@ -552,6 +552,18 @@ void Button::on_render(paint::Canvas& canvas)
     // MD3 Filled Button：完全圆角（胶囊形，radius = height / 2）
     const float radius = rect.height * 0.5f;
     canvas.fill_rounded_rect(math::RoundedRect{rect, radius}, fill);
+
+    // 圆角边框（由 BorderColorProperty 驱动；默认透明则跳过）
+    // 支持自定义模板通过 BorderColorProperty 添加圆角边框，无需额外 Border 元素
+    const core::Variant& bc_var = get_value(BorderColorProperty);
+    const paint::Brush border_fill = bc_var.has<paint::Brush>()
+        ? bc_var.get<paint::Brush>()
+        : paint::Brush::solid(math::Color::Transparent);
+    if (!border_fill.is_transparent()) {
+        paint::Pen pen;
+        pen.width = 2.0f;
+        canvas.stroke_rounded_rect(math::RoundedRect{rect, radius}, border_fill, pen);
+    }
 
     // MD3 Ripple 涟漪动画：在背景之上、文字之下绘制涟漪圆
     // elapsed_ms 由 AnimationClock 驱动的 anim_tick_callback 每帧累加
