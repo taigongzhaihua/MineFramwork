@@ -401,14 +401,42 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     btn_tmpl_.add_handler(ui::Button::ClickEvent(), &DemoWindowBase::s_on_click_count, this);
     body_panel_.add_child(&btn_tmpl_);
 
-    // btn_switch_tmpl_：切换模板按钮（本身使用默认模板，不影响演示）
+    // btn_switch_tmpl_：切换模板按钮（本身使用默认模板，演示 StyleSetter+VSM 路径）
+    //
+    // 注意：此前用 set_background(Local P50) 设置深灰色，导致 Local 优先级 > StyleTrigger，
+    // VSM 状态颜色被遮盖，Hover/Pressed 颜色始终无效。
+    // 修复：改用 switch_style_（StyleSetter P20 + StateSetters P30），确保 VSM 可正常驱动颜色。
+    switch_style_
+        .set_name("SwitchButtonStyle")
+        .set_target_type(core::TypeId::of<ui::Button>())
+        .add_setter({ &ui::Button::BackgroundProperty,
+                      core::Variant{ paint::Brush::solid_rgb(0x37474F) } })   // 深蓝灰 Normal(P20)
+        .add_setter({ &ui::Button::ForegroundProperty,
+                      core::Variant{ paint::Brush::solid_rgb(0xFFFFFF) } })   // 白色文字(P20)
+        .add_setter({ &ui::Button::PaddingProperty,
+                      core::Variant{ math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f } } });
+
+    // P30 StyleTrigger：Hovered 状态终値（略亮蓝灰）
+    {
+        style::VisualStateSetters vs;
+        vs.state_name = "Hovered";
+        vs.setters.push_back({ &ui::Button::BackgroundProperty,
+            core::Variant{ paint::Brush::solid_rgb(0x546E7A) } });
+        switch_style_.add_state_setters(std::move(vs));
+    }
+    // P30 StyleTrigger：Pressed 状态终値（极深蓝灰）
+    {
+        style::VisualStateSetters vs;
+        vs.state_name = "Pressed";
+        vs.setters.push_back({ &ui::Button::BackgroundProperty,
+            core::Variant{ paint::Brush::solid_rgb(0x263238) } });
+        switch_style_.add_state_setters(std::move(vs));
+    }
+
     btn_switch_tmpl_.set_text("切换模板（绿色 \u2194 橙色）");
-    btn_switch_tmpl_.set_padding(math::Thickness{ 12.0f, 8.0f, 12.0f, 8.0f });
-    btn_switch_tmpl_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
-    btn_switch_tmpl_.set_background(paint::Brush::solid_rgb(0x37474F));
-    btn_switch_tmpl_.set_border_color(paint::Brush::solid_rgb(0x263238));
     if (font) { btn_switch_tmpl_.set_font_face(font); }
     btn_switch_tmpl_.set_margin(math::Thickness{ 16.0f, 8.0f, 16.0f, 16.0f });
+    btn_switch_tmpl_.set_vsm_style(&switch_style_);   // 用样式驱动颜色，避免 Local 遮盖 VSM 状态色
     btn_switch_tmpl_.add_handler(ui::Button::ClickEvent(), &DemoWindowBase::s_on_switch_tmpl, this);
     body_panel_.add_child(&btn_switch_tmpl_);
 

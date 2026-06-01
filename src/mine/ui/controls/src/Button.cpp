@@ -508,6 +508,9 @@ void Button::on_apply_template() noexcept
         }
         content_part_->set_font_size(font_size_px_);
     }
+    // 模板安装完成后同步 VSM 到当前视觉状态
+    // 确保 VSM current_state_ 与按钮实际 visual_state_ 保持一致
+    update_visual_state();
 }
 
 void Button::on_measure(math::Size available_size)
@@ -773,7 +776,8 @@ bool Button::anim_tick_callback(void* user_data, float dt) noexcept
     // go_to_state 已写入 StyleTrigger(P4) 终値并创建 Storyboard；
     // affects_render=true → tick 内部写入 P1 时自动触发 invalidate_render
     if (auto* v = self->vsm()) {
-        if (v->tick_animations(dt)) {
+        const bool vsm_active = v->tick_animations(dt);
+        if (vsm_active) {
             any_active = true;
         }
     }

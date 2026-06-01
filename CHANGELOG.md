@@ -5,6 +5,24 @@
 ## [Unreleased]
 
 ### Fixed
+- **mine.ui.controls：修复 Button 模板构建后 VSM current_state_ 未同步问题**：
+  `on_apply_template()` 完成后 VSM 已挂载，但 `current_state_` 仍为空字符串，
+  导致首次 `go_to_state("Normal")` 因"已是当前状态"幂等检查提前返回，
+  状态机从未写入 P30 StyleSetter 基线、动画路径无法正常建立。
+  修复：在 `Button::on_apply_template()` 末尾调用 `update_visual_state()`，
+  强制 VSM 同步当前逻辑状态（`is_hovered_`、`is_pressed_` 等），
+  确保 `current_state_` 与按钮实际状态对齐。
+
+- **samples/02-controls-demo：修复 btn_switch_tmpl_ 颜色状态切换（Hover/Pressed）不可见问题**：
+  原代码调用 `set_background(Brush::solid_rgb(0x37474F))` 写入 Local(P50)，
+  `Storyboard::resolve_and_begin()` 调用 `get_value()` 取当前最高优先级值作为动画终止值（to），
+  Local(P50) > StyleTrigger(P30)，导致 `to` 取到 Local 灰色而非 Hovered 颜色，from == to，
+  Storyboard 在运行但颜色始终不变。
+  修复：移除 `set_background` / `set_foreground` / `set_border_color` 的 Local 设置，
+  新增 `switch_style_`（StyleSetter P20 + Hovered/Pressed StateSetters P30），
+  通过 `btn_switch_tmpl_.set_vsm_style(&switch_style_)` 以 Style 层驱动颜色，
+  确保 VSM 状态颜色（#37474F → #546E7A/Hovered，#263238/Pressed）完整生效。
+
 - **mine.ui.controls：修复 Button 默认模板 Hovered/Pressed 颜色对比度过低（VSM 状态变化不可见）**：
   原 Hovered（#735BAC）与 Normal（#6750A4）亮度差仅约 5%，Pressed（#7A65AF）差距更小，
   用户在屏幕上几乎无法感知颜色变化。

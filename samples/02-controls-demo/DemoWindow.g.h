@@ -188,6 +188,7 @@ private:
     mine::ui::style::ControlTemplate tmpl_green_;        ///< 绿色圆角模板（A）
     mine::ui::style::ControlTemplate tmpl_orange_;       ///< 橙色矩形模板（B）
     bool                             tmpl_is_green_ = true; ///< 当前按鈕使用的是哪个模板
+    mine::ui::style::Style           switch_style_;      ///< btn_switch_tmpl_ 深灰色主题样式（避免 Local P50 遮盖 VSM 状态色）
 };
 
 } // namespace app
