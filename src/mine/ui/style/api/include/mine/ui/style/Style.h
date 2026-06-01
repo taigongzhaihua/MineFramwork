@@ -100,6 +100,28 @@ public:
      */
     void clear_all_state_values(ui::DependencyObject& target) const;
 
+    /**
+     * @brief 将指定视觉状态的 setter 以 Animation(P60) 优先级写入目标元素。
+     *
+     * 用于无动画的即时状态切换（如 Disabled）：Animation(P60) 高于 Local(P50)，
+     * 可覆盖用户通过 set_xxx() 设置的本地值，确保禁用外观正确呈现。
+     *
+     * @param target     目标 DependencyObject
+     * @param state_name 视觉状态名（如 "Disabled"）
+     */
+    void apply_state_animation(ui::DependencyObject& target, core::StringView state_name) const;
+
+    /**
+     * @brief 清除指定视觉状态曾以 Animation(P60) 写入的所有属性槽。
+     *
+     * 在 go_to_state 时清理上一个即时状态留下的 P60 值，
+     * 确保属性恢复到 Local(P50) 或更低优先级的生效值。
+     *
+     * @param target     目标 DependencyObject
+     * @param state_name 即时状态名（如 "Disabled"）
+     */
+    void clear_state_animation(ui::DependencyObject& target, core::StringView state_name) const;
+
     // ── 构建器接口（程序化构造；mmlc 路径不使用此接口）─────────────────────
 
     /// 设置样式名称

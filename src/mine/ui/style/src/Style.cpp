@@ -96,6 +96,48 @@ void Style::clear_all_state_values(ui::DependencyObject& target) const {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// apply_state_animation
+// ─────────────────────────────────────────────────────────────────────────────
+
+void Style::apply_state_animation(ui::DependencyObject& target, core::StringView state_name) const {
+    // 以 Animation(P60) 写入状态 setter，覆盖 Local(P50)（用于 Disabled 等即时状态）
+    for (const auto& state : state_setters_) {
+        if (state.state_name == state_name) {
+            for (const auto& setter : state.setters) {
+                if (!setter.property || !setter.res_key.empty()) {
+                    continue;
+                }
+                target.set_value(*setter.property, setter.value, ValuePriority::Animation);
+            }
+            return;
+        }
+    }
+    // 状态不存在或无 setter：空操作
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// clear_state_animation
+// ─────────────────────────────────────────────────────────────────────────────
+
+void Style::clear_state_animation(ui::DependencyObject& target, core::StringView state_name) const {
+    // 清除该状态曾以 P60 写入的所有属性槽，使属性退回到 Local(P50) 或更低层
+    for (const auto& state : state_setters_) {
+        if (state.state_name == state_name) {
+            for (const auto& setter : state.setters) {
+                if (!setter.property) {
+                    continue;
+                }
+                if (target.has_value(*setter.property, ValuePriority::Animation)) {
+                    target.clear_value(*setter.property, ValuePriority::Animation);
+                }
+            }
+            return;
+        }
+    }
+    // 状态不存在：空操作
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 构建器接口
 // ─────────────────────────────────────────────────────────────────────────────
 

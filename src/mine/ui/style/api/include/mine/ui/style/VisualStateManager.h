@@ -251,6 +251,13 @@ private:
     /// 当前状态名（初始为空；go_to_state 成功后更新）
     containers::InlineString current_state_;
 
+    /// 最近一次通过即时路径（无动画）以 Animation(P60) 写入的状态名。
+    /// 用于下次 go_to_state 时清理该状态遗留的 P60 槽：
+    ///   - Disabled → Normal（动画路径）：先读 P60 作为 from，再清 Disabled 的 P60
+    ///   - Disabled → Disabled（同状态，被过滤）：无需清理
+    ///   - 任意 → 任意（即时路径）：先清上一 instant P60，再写新 instant P60
+    containers::InlineString instant_p60_state_;
+
     /// 当前活跃的 Storyboard 列表（go_to_state 创建，tick_animations 推进，完成后移除）
     /// 使用 OwnedPtr 因 Storyboard 含 SmallVector，为 move-only 类型
     containers::SmallVector<core::OwnedPtr<animation::Storyboard>, 4> active_storyboards_;

@@ -5,6 +5,29 @@
 ## [Unreleased]
 
 ### Fixed
+- **mine.ui.animation / mine.ui.style：修复 VSM Disabled 状态颜色不生效 + Hovered/Pressed 始终显示默认紫色问题**：
+
+  **问题一：Disabled 状态颜色不生效**
+  Disabled 状态无动画（else 路径），仅以 StyleTrigger(P30) 写入禁用色，但 Local(P50)
+  优先级更高，导致用户通过 `set_background()` 设置的颜色遮盖了禁用灰。
+  修复：else 路径追加 `Style::apply_state_animation()`，以 Animation(P60) 写入禁用色，
+  P60 高于 Local P50，可正确覆盖。VSM 新增 `instant_p60_state_` 字段跟踪上次即时写入的
+  状态名，下次 `go_to_state` 时先通过 `Style::clear_state_animation()` 清除残留 P60，
+  再写入新状态（动画路径在 `capture_from_values()` 之后清除，确保 from 仍能读到禁用色）。
+
+  **问题二：Hovered/Pressed 始终显示默认紫色（而非按钮自身颜色的变体）**
+  `resolve_and_begin()` 在有 StyleTrigger 值时会设置 `retain_p60=true` 并以 P60 覆盖
+  Local P50，导致有 `set_background()` 自定义颜色的按钮在 Hover/Press 时强制切换到
+  默认样式的紫色（该配色仅对默认紫色按钮有意义，与用户自定义颜色不兼容）。
+  修复：`resolve_and_begin()` 新增 `has_local` 检查。当目标属性存在 Local(P50) 覆盖时，
+  `to = get_value()`（Local 色），`retain_p60=false`，动画对 Local 按钮无感知（from≈to），
+  Hover/Press 不改变用户设置的颜色（符合 "显式本地值优先于样式" 语义）。
+  有 Local 的按钮 Disabled→Normal 时仍能看到从禁用灰渐变回自身颜色的平滑动画。
+
+  **新增 Style API：**
+  - `apply_state_animation(target, state_name)`：以 Animation(P60) 写入状态 setter
+  - `clear_state_animation(target, state_name)`：清除该状态曾写入的 P60 槽
+
 - **mine.ui.animation / mine.ui.style：修复 VSM 颜色状态切换与 Local(P50) 属性共存时的失效问题**：
 
   **根本原因**：`VisualStateManager::go_to_state` 在 `capture_from_values()` 之前已执行

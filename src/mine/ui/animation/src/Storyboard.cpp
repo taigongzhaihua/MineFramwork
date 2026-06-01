@@ -199,10 +199,20 @@ void Storyboard::resolve_and_begin() noexcept
         //   - 无 StyleTrigger 值（如 Normal 回退状态）：从最高优先级（含 Local P50）
         //     读终值；完成后 stop() 清除 P60，由 Local P50 接管（无颜色跳变）
         if (!anim.to_is_resolved) {
-            if (anim.target->has_value(*anim.prop, ValuePriority::StyleTrigger)) {
+            // 若目标属性存在 Local(P50) 覆盖（用户 set_xxx() 设置），
+            // 则不应用 StyleTrigger 色方案（该方案基于样式 Normal 色推导，与用户自定义色不兼容）。
+            // 动画终值保持 Local 色：对 Hovered/Pressed 动画无感知（from==to，色不变），
+            // 对 Disabled→Normal 呈现从禁用灰渐变回 Local 色的平滑动画。
+            const bool has_local = anim.target->has_value(*anim.prop, ValuePriority::Local);
+            if (!has_local && anim.target->has_value(*anim.prop, ValuePriority::StyleTrigger)) {
+                // 无 Local 覆盖，有 StyleTrigger 目标值（Hovered/Pressed 等）：
+                //   to = P30 精确值，retain_p60=true 保持 P60 覆盖 StyleSetter
                 anim.to         = anim.target->get_value(*anim.prop, ValuePriority::StyleTrigger);
                 anim.retain_p60 = true;
             } else {
+                // 有 Local 覆盖（用户 set_xxx()）或无 StyleTrigger 目标（Normal 等）：
+                //   to = 最高优先级值（含 Local），retain_p60=false
+                //   完成后 stop() 清除 P60，Local P50 接管（颜色恢复用户设置值，无跳变）
                 anim.to         = anim.target->get_value(*anim.prop);
                 anim.retain_p60 = false;
             }

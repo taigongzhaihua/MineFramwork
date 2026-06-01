@@ -157,6 +157,15 @@ bool VisualStateManager::go_to_state(core::StringView state_name,
         }
         active_storyboards_.clear();
 
+        // 清除上一个即时状态（如 Disabled）遗留的 Animation(P60) 槽。
+        // 必须在 capture_from_values 之后执行（已将 P60 作为 from 采样）。
+        if (!instant_p60_state_.empty() && style_ && owner_) {
+            style_->clear_state_animation(
+                *owner_,
+                core::StringView{instant_p60_state_.data(), instant_p60_state_.size()});
+            instant_p60_state_ = containers::InlineString{};
+        }
+
         // 显式清除新 SB 受管属性的残留 P60
         // （retain_p60=true 的完成 SB 已不在 active_storyboards_，P60 未被清）
         sb->stop();
@@ -177,10 +186,25 @@ bool VisualStateManager::go_to_state(core::StringView state_name,
         }
         active_storyboards_.clear();
 
+        // 清除上一个即时状态（如 Disabled）遗留的 Animation(P60) 槽
+        if (!instant_p60_state_.empty() && style_ && owner_) {
+            style_->clear_state_animation(
+                *owner_,
+                core::StringView{instant_p60_state_.data(), instant_p60_state_.size()});
+            instant_p60_state_ = containers::InlineString{};
+        }
+
         if (style_ && owner_) {
             // 先清除旧状态 StyleTrigger 残留，再应用新状态
             style_->clear_all_state_values(*owner_);
             style_->apply_state(*owner_, state_name);
+            // 即时状态以 Animation(P60) 写入，覆盖 Local(P50)
+            // （如 Disabled 的灰色必须覆盖用户 set_background() 设置的颜色）
+            style_->apply_state_animation(*owner_, state_name);
+            // 记录本次即时写入的状态名，供下次 go_to_state 清理
+            instant_p60_state_ = containers::InlineString{state_name.data(), state_name.size()};
+        } else {
+            instant_p60_state_ = containers::InlineString{};
         }
     }
 
