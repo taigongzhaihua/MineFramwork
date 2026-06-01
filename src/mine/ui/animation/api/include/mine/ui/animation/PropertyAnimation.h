@@ -68,6 +68,15 @@ struct PropertyAnimation {
 
     /// true = 此单个属性动画已播放完毕
     bool complete{false};
+
+    /// 动画完成后是否保持 Animation(P60) 槽不清除。
+    ///
+    /// true：目标状态有明确的 StyleTrigger(P30) 终值，P60 需保持以覆盖 Local(P50)；
+    ///        go_to_state 切换到新状态时才通过 stop() 清除。
+    /// false：目标状态无 StyleTrigger 值（如 Normal 回退到 Local 层），动画完成后
+    ///        stop() 清除 P60，由 Local 优先级接管（无颜色跳变）。
+    /// 由 Storyboard::resolve_and_begin() 根据 has_value(StyleTrigger) 自动决定。
+    bool retain_p60{false};
 };
 
 }  // namespace mine::ui::animation

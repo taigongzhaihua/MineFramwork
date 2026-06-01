@@ -138,8 +138,21 @@ public:
      * @brief 停止所有动画并清除 Animation 优先级。
      *
      * 调用后所有被驱动属性的值退回到 StyleTrigger 层（或更低优先级）。
+     * 在 go_to_state 的状态切换时使用，强制清除所有受管属性的 P60。
      */
     void stop() noexcept;
+
+    /**
+     * @brief 仅停止（清除 P60）retain_p60 为 false 的属性动画。
+     *
+     * 动画播放完毕时由 VisualStateManager::tick_animations 调用：
+     *   - retain_p60=true 的属性（有 StyleTrigger 终值）：P60 保持，覆盖 Local P50；
+     *   - retain_p60=false 的属性（回退到 Local 或更低层）：P60 清除，Local 接管。
+     *
+     * 这样可实现：Normal/Default 状态动画结束后属性恢复到用户 set_xxx() 设置的颜色，
+     * Hovered/Pressed 等状态动画结束后保持目标颜色（即使 Local P50 存在）。
+     */
+    void stop_not_retained() noexcept;
 
     // ── 状态查询 ──────────────────────────────────────────────────────────────
 

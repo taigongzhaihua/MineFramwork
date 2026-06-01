@@ -5,6 +5,40 @@
 ## [Unreleased]
 
 ### Fixed
+- **mine.ui.animation / mine.ui.style：修复 VSM 颜色状态切换与 Local(P50) 属性共存时的失效问题**：
+
+  **根本原因**：`VisualStateManager::go_to_state` 在 `capture_from_values()` 之前已执行
+  `stop_all`（清除 Animation P60），导致 from 值读取的是 Local P50（用户 `set_background()` 颜色）
+  而非当前可见颜色；同时 `resolve_and_begin()` 的 to 值也被 Local P50 遮盖，
+  最终 from == to（均为 Local 色），动画存在但颜色始终不变。
+
+  **修复一：`capture_from_values()` 时序修正**
+  将 `capture_from_values()` 移到 `stop_all` 之前执行，此时旧的 Animation(P60)（由上一个
+  retain_p60=true 完成的 Storyboard 保持）仍然存在，from 读到真实可见颜色。
+  另外在旧 SB stop_all 之后，对新 SB 受管属性显式调用 `stop()`，清除残留的 P60
+  （因为 retain_p60=true 的完成 SB 已从 active_storyboards_ 移除，stop_all 无法覆盖）。
+
+  **修复二：`retain_p60` 机制**
+  `PropertyAnimation` 新增 `retain_p60` 字段，由 `resolve_and_begin()` 根据目标属性在
+  StyleTrigger(P30) 层是否有值自动决定：
+  - **有 StyleTrigger 值**（Hovered / Pressed 等明确状态颜色）：`to = P30`，`retain_p60 = true`。
+    动画完成时调用 `stop_not_retained()` **不清 P60**，保持 P60 覆盖 Local P50，
+    始终显示目标颜色，直到下次 `go_to_state` 的 `stop()` 才清除。
+  - **无 StyleTrigger 值**（Normal / Default 等回退状态）：`to = get_value()`（含 Local P50），
+    `retain_p60 = false`。动画完成时 `stop_not_retained()` 清除 P60，
+    Local P50 接管（颜色无跳变地恢复为用户 `set_background()` 值）。
+
+  **修复三：首次切换跳过动画**
+  `current_state_` 为空（控件刚应用模板）时首次 `go_to_state` 直接跳变，不建立 Storyboard，
+  避免产生不必要的空动画（from == to）并留下永不 tick 的 active Storyboard。
+
+  **Storyboard 新增 API：**
+  - `stop_not_retained()`：仅清除 `retain_p60=false` 属性的 P60
+  - `stop()` 语义保持不变：强制清除所有受管属性的 P60（用于状态切换中断）
+
+  **DependencyObject 新增 API：**
+  - `get_value(prop, max_priority)`：读取 priority ≤ max_priority 中最高优先级的值
+
 - **mine.ui.controls：修复 Button 模板构建后 VSM current_state_ 未同步问题**：
   `on_apply_template()` 完成后 VSM 已挂载，但 `current_state_` 仍为空字符串，
   导致首次 `go_to_state("Normal")` 因"已是当前状态"幂等检查提前返回，

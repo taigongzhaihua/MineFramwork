@@ -106,6 +106,26 @@ struct DependencyObject::Impl {
         return best;
     }
 
+    /// 查找 priority <= max_priority 的槽中优先级最高的槽（用于动画 to 值解析）
+    [[nodiscard]] const ValueSlot* find_effective_at_or_below(
+        const DependencyProperty& prop,
+        ValuePriority             max_priority) const noexcept {
+        const ValueSlot* best = nullptr;
+        for (const ValueSlot& s : slots) {
+            if (s.prop != &prop) {
+                continue;
+            }
+            if (static_cast<uint8_t>(s.priority) > static_cast<uint8_t>(max_priority)) {
+                continue;  // 超出优先级上限，跳过
+            }
+            if (best == nullptr
+                || static_cast<uint8_t>(s.priority) > static_cast<uint8_t>(best->priority)) {
+                best = &s;
+            }
+        }
+        return best;
+    }
+
     /**
      * @brief 查找属性 prop 在指定优先级的槽。
      * @return 指向槽的指针，若不存在则返回 nullptr
@@ -151,6 +171,18 @@ const core::Variant& DependencyObject::get_value(
         return slot->value;
     }
     // 无有效槽：返回属性默认值（引用指向 DependencyProperty 内部，生命周期稳定）
+    return prop.default_value();
+}
+
+const core::Variant& DependencyObject::get_value(
+    const DependencyProperty& prop,
+    ValuePriority             max_priority) const noexcept {
+    // 找到优先级 <= max_priority 中最高的有效槽，返回其值
+    const Impl::ValueSlot* slot = p_->find_effective_at_or_below(prop, max_priority);
+    if (slot != nullptr) {
+        return slot->value;
+    }
+    // 无满足条件的有效槽：返回属性默认值
     return prop.default_value();
 }
 

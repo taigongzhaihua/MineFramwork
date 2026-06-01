@@ -82,6 +82,22 @@ public:
     [[nodiscard]] const core::Variant& get_value(const DependencyProperty& prop) const noexcept;
 
     /**
+     * @brief 读取属性在指定优先级上限及以下的生效值。
+     *
+     * 返回所有 priority <= max_priority 的槽中优先级最高的值；
+     * 若无满足条件的有效槽，则返回属性的默认值。
+     *
+     * 此方法主要供动画系统在 StyleTrigger 写入后读取动画终止值时使用，
+     * 避免被 Local(P50) 等更高优先级的值遮盖。
+     *
+     * @param prop         要读取的属性描述符
+     * @param max_priority 允许读取的最高优先级（含）
+     * @return             满足优先级限制的生效属性值
+     */
+    [[nodiscard]] const core::Variant& get_value(const DependencyProperty& prop,
+                                                  ValuePriority max_priority) const noexcept;
+
+    /**
      * @brief 在指定优先级写入属性值。
      *
      * 若此优先级的槽已存在，则更新其值；否则创建新槽。

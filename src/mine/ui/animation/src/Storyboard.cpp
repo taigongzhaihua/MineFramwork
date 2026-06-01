@@ -193,9 +193,19 @@ void Storyboard::resolve_and_begin() noexcept
             anim.from_is_resolved = true;
         }
 
-        // 解析未确定的终止值
+        // 解析未确定的终止值：根据目标属性是否有 StyleTrigger(P30) 层值决定策略
+        //   - 有 StyleTrigger 值（如 Hovered/Pressed 状态）：从 P30 读终值，避免被
+        //     Local(P50) 遮盖；完成后保持 P60 覆盖 Local，直到下次 go_to_state 才清除
+        //   - 无 StyleTrigger 值（如 Normal 回退状态）：从最高优先级（含 Local P50）
+        //     读终值；完成后 stop() 清除 P60，由 Local P50 接管（无颜色跳变）
         if (!anim.to_is_resolved) {
-            anim.to             = anim.target->get_value(*anim.prop);
+            if (anim.target->has_value(*anim.prop, ValuePriority::StyleTrigger)) {
+                anim.to         = anim.target->get_value(*anim.prop, ValuePriority::StyleTrigger);
+                anim.retain_p60 = true;
+            } else {
+                anim.to         = anim.target->get_value(*anim.prop);
+                anim.retain_p60 = false;
+            }
             anim.to_is_resolved = true;
         }
 
@@ -251,10 +261,23 @@ bool Storyboard::tick(float dt) noexcept
 
 void Storyboard::stop() noexcept
 {
-    // 清除所有 Animation 优先级槽
-    // 属性值将退回到 StyleTrigger 层（或更低优先级）
+    // 清除所有受管属性的 Animation(P60) 槽（强制，不看 retain_p60）
+    // 用于 go_to_state 切换状态时强制中断动画并清除旧 P60 残留
     for (PropertyAnimation& anim : animations_) {
         if (anim.target && anim.prop) {
+            anim.target->clear_value(*anim.prop, ValuePriority::Animation);
+        }
+    }
+}
+
+void Storyboard::stop_not_retained() noexcept
+{
+    // 只清除 retain_p60=false 的属性的 P60，保留 retain_p60=true 的
+    // 用于动画完成时（tick_animations done=true）选择性地释放 P60：
+    //   - Normal 等无 StyleTrigger 终值的状态：清 P60，Local P50 接管（颜色恢复用户设置值）
+    //   - Hovered 等有 StyleTrigger 终值的状态：保持 P60，继续覆盖 Local P50
+    for (PropertyAnimation& anim : animations_) {
+        if (anim.target && anim.prop && !anim.retain_p60) {
             anim.target->clear_value(*anim.prop, ValuePriority::Animation);
         }
     }

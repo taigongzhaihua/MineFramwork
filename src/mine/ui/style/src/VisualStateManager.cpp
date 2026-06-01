@@ -95,15 +95,9 @@ bool VisualStateManager::go_to_state(core::StringView state_name,
         return false;
     }
 
-    // 3. 停止并清理当前所有活跃 Storyboard（中断未完成的动画）
-    for (auto& sb : active_storyboards_) {
-        if (sb) {
-            sb->stop();
-        }
-    }
-    active_storyboards_.clear();
-
-    // 4. 查找匹配的过渡记录（呈先精确 from 匹配，再匹配通配 "*"）
+    // 3. 查找匹配的过渡记录（先精确 from 匹配，再匹配通配 "*"）
+    // 注意：stop_all 延迟到各路径内部执行，
+    // 确保 capture_from_values() 能在 P60 被清除之前读到当前可见颜色
     const VisualStateTransition* matched_tr = nullptr;
     if (use_transitions) {
         const core::StringView cur_state_sv{current_state_.data(), current_state_.size()};
@@ -133,17 +127,39 @@ bool VisualStateManager::go_to_state(core::StringView state_name,
         }
     }
 
-    if (matched_tr) {
+    // 首次切换（current_state_ 为空，即控件刚应用模板）不播放动画：
+    // 初始状态没有"来自"某个旧状态的视觉过渡意义，直接跳变即可
+    const bool first_transition = current_state_.empty();
+
+    if (matched_tr && !first_transition) {
         // 带动画的过渡路径：
         //   a. 创建 Storyboard 并调用 configure 注册要驱动的属性
-        //   b. capture_from_values：在 StyleTrigger 写入前采样起始值
-        //   c. clear_all_state_values：清除旧状态的 StyleTrigger 残留值
-        //   d. apply_state：将新状态的 StyleTrigger 写入宿主属性
-        //   e. resolve_and_begin：解析终止值（正确读取新状态值），以 Animation 优先级写入起始值
-        //   f. 加入 active_storyboards_
+        //   b. capture_from_values：先于 stop_all 采样起始值，此时旧的 Animation(P60)
+        //      可能仍存在（来自上一个 retain_p60=true 的完成 Storyboard），
+        //      需要读到实际可见颜色作为 from，而非被 stop_all 清除后的 Local 色
+        //   c. stop_all：清除 active_storyboards_ 里的旧 Storyboard
+        //   d. 对新 SB 调用 stop()：显式清除受管属性的残留 P60
+        //      （旧的 retain_p60=true Storyboard 完成后已从 active_storyboards_ 移除，
+        //       其 P60 未被清；需通过新 SB 的受管属性集合来清除）
+        //   e. clear_all_state_values：清除旧状态的 StyleTrigger 残留值
+        //   f. apply_state：将新状态的 StyleTrigger 写入宿主属性
+        //   g. resolve_and_begin：解析终止值
+        //      - 若有 StyleTrigger 值：to = P30 值，retain_p60 = true（完成后保持 P60）
+        //      - 否则：to = 最高优先级值（含 Local），retain_p60 = false（完成后 stop）
+        //   h. 加入 active_storyboards_
         auto sb = core::make_owned<animation::Storyboard>();
         matched_tr->configure(*sb);        // 注册动画目标和参数
-        sb->capture_from_values();         // 采样起始值（StyleTrigger 清除前）
+
+        sb->capture_from_values();         // 先采样起始值（P60 还在，读当前可见颜色）
+
+        for (auto& old_sb : active_storyboards_) {
+            if (old_sb) { old_sb->stop(); }
+        }
+        active_storyboards_.clear();
+
+        // 显式清除新 SB 受管属性的残留 P60
+        // （retain_p60=true 的完成 SB 已不在 active_storyboards_，P60 未被清）
+        sb->stop();
 
         if (style_ && owner_) {
             // 先清除所有状态曾写入的 StyleTrigger 槽，防止旧状态颜色残留
@@ -155,7 +171,12 @@ bool VisualStateManager::go_to_state(core::StringView state_name,
         sb->resolve_and_begin();           // 解析终止值，写入 Animation=from
         active_storyboards_.push_back(std::move(sb));
     } else {
-        // 无动画的过渡路径：直接应用新状态的 StyleTrigger（立即跳变）
+        // 无动画的过渡路径（首次切换 或 无匹配过渡）：直接应用新状态的 StyleTrigger（立即跳变）
+        for (auto& old_sb : active_storyboards_) {
+            if (old_sb) { old_sb->stop(); }
+        }
+        active_storyboards_.clear();
+
         if (style_ && owner_) {
             // 先清除旧状态 StyleTrigger 残留，再应用新状态
             style_->clear_all_state_values(*owner_);
@@ -188,7 +209,10 @@ bool VisualStateManager::tick_animations(float dt) noexcept
 
         const bool done = sb->tick(dt);
         if (done) {
-            sb->stop(); // 清除 Animation 优先级，属性退回到 StyleTrigger 层
+            // 选择性清除 P60：
+            //   - retain_p60=false 的属性（Normal 等）：清 P60，Local P50 接管（颜色恢复用户设置值）
+            //   - retain_p60=true 的属性（Hovered 等）：保持 P60，覆盖 Local P50 显示目标颜色
+            sb->stop_not_retained();
             // active_storyboards_[read] 将在后续覆盖或 pop_back 时由 OwnedPtr 析构
         } else {
             // 未完成：前移到 write 位置（跳过已完成的槽）
