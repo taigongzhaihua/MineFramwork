@@ -99,8 +99,12 @@ UIElement* UIElement::hit_test(math::Point p)
     }
 
     // 若有裁剪区域且点在裁剪外，直接返回 nullptr
-    // 圆角矩形裁剪优先：外角区域命中视为未命中（整棵子树也不可见）
-    if (has_clip_rounded_rect()) {
+    // 四角独立圆角裁剪优先判断
+    if (has_clip_complex_rounded_rect()) {
+        if (!clip_complex_rounded_rect().contains(local_p)) {
+            return nullptr;
+        }
+    } else if (has_clip_rounded_rect()) {
         if (!clip_rounded_rect().contains(local_p)) {
             return nullptr;
         }
@@ -156,8 +160,11 @@ void UIElement::on_arrange(math::Rect /*final_rect*/)
 
 bool UIElement::hit_test_local(math::Point p) const
 {
-    // 优先使用圆角矩形裁剪形状：裁剪形状即控件自身的视觉边界
-    // 外角区域（在包围盒内但在圆角外）不属于控件的命中区域
+    // 四角独立圆角裁剪优先
+    if (has_clip_complex_rounded_rect()) {
+        return clip_complex_rounded_rect().contains(p);
+    }
+    // 统一圆角裁剪其次
     if (has_clip_rounded_rect()) {
         return clip_rounded_rect().contains(p);
     }

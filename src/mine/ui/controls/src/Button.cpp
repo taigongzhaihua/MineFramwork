@@ -9,6 +9,8 @@
 #include <mine/paint/Canvas.h>
 #include <mine/paint/Brush.h>
 #include <mine/math/RoundedRect.h>
+#include <mine/math/ComplexRoundedRect.h>
+#include <mine/math/CornerRadii.h>
 #include <mine/math/Color.h>
 #include <mine/ui/event/EventManager.h>
 #include <mine/ui/event/ICommand.h>
@@ -91,6 +93,18 @@ const DependencyProperty& Button::CommandParameterProperty =
         "CommandParameter",
         core::Variant{},
         PropertyMetadata{});
+
+// Button::CornerRadiusProperty — 圆角半径（CornerRadii，默认全 -1.0f = 自动胶囊）
+// 各角 rx < 0 表示应用 height/2（MD3 Filled Button 规范），非负数为用户指定的固定圆角。
+const DependencyProperty& Button::CornerRadiusProperty =
+    register_property<Button>(
+        "CornerRadius",
+        core::Variant{ math::CornerRadii::uniform(-1.0f) },  // 默认：自动胶囊（height / 2）
+        PropertyMetadata{
+            .affects_arrange = true,
+            .affects_render  = true,
+            // 圆角变化需重新设置 clip_complex_rounded_rect
+        });
 
 // ============================================================================
 // 默认样式（第三层：样式层）
@@ -419,6 +433,39 @@ void Button::set_border_color(paint::Brush brush)
     set_value(BorderColorProperty, core::Variant{brush}, ValuePriority::Local);
 }
 
+math::CornerRadii Button::corner_radii() const noexcept
+{
+    const core::Variant& v = get_value(CornerRadiusProperty);
+    return v.has<math::CornerRadii>() ? v.get<math::CornerRadii>() : math::CornerRadii::uniform(-1.0f);
+}
+
+void Button::set_corner_radii(math::CornerRadii radii)
+{
+    set_value(CornerRadiusProperty, core::Variant{ radii }, ValuePriority::Local);
+}
+
+void Button::set_corner_radius(float radius)
+{
+    // 快捷方法：四角相同的圆角
+    set_corner_radii(math::CornerRadii::uniform(radius));
+}
+
+math::CornerRadii Button::compute_radii(float height) const noexcept
+{
+    const math::CornerRadii radii = corner_radii();
+    // 各角独立解析：rx < 0 则该角使用自动胶囊（height / 2）
+    const float auto_r = height * 0.5f;
+    auto resolve = [auto_r](math::Vec2 v) -> math::Vec2 {
+        return { v.x < 0.0f ? auto_r : v.x, v.y < 0.0f ? auto_r : v.y };
+    };
+    return {
+        resolve(radii.top_left),
+        resolve(radii.top_right),
+        resolve(radii.bottom_right),
+        resolve(radii.bottom_left),
+    };
+}
+
 void Button::set_vsm_style(style::Style* style) noexcept
 {
     vsm_style_ = style;
@@ -489,9 +536,10 @@ void Button::on_render(paint::Canvas& canvas)
         ? bg_var.get<paint::Brush>()
         : paint::Brush::solid_rgb(0x6750A4);  // 回退：MD3 Primary
 
-    // MD3 Filled Button：完全圆角（胶囊形，radius = height / 2）
-    const float radius = rect.height * 0.5f;
-    canvas.fill_rounded_rect(math::RoundedRect{rect, radius}, fill);
+    // MD3 Filled Button 圆角：默认胶囊形（radius = height / 2），可通过 CornerRadiusProperty 自定义（四角独立）
+    const math::CornerRadii radii = compute_radii(rect.height);
+    const math::ComplexRoundedRect crr{ rect, radii };
+    canvas.fill_complex_rounded_rect(crr, fill);
 
     // MD3 State Layer：当背景色由 set_background()（Local P50）直接指定时，
     // VSM 颜色动画对该按钮无感知（has_local=true → from==to，颜色不变）。
@@ -506,7 +554,7 @@ void Button::on_render(paint::Canvas& canvas)
             state_alpha = 0.08f;
         }
         if (state_alpha > 0.0f) {
-            canvas.fill_rounded_rect(math::RoundedRect{rect, radius},
+            canvas.fill_complex_rounded_rect(crr,
                 paint::Brush::solid(math::Color::White.with_alpha(state_alpha)));
         }
     }
@@ -520,7 +568,7 @@ void Button::on_render(paint::Canvas& canvas)
     if (!border_fill.is_transparent()) {
         paint::Pen pen;
         pen.width = 2.0f;
-        canvas.stroke_rounded_rect(math::RoundedRect{rect, radius}, border_fill, pen);
+        canvas.stroke_complex_rounded_rect(crr, border_fill, pen);
     }
 
     // MD3 Ripple 涟漪动画：在背景之上、文字之下绘制涟漪圆
@@ -540,9 +588,9 @@ void Button::on_render(paint::Canvas& canvas)
                 rect.x + ripple_.center_x,
                 rect.y + ripple_.center_y,
             };
-            // 裁剪到按钮胶囊边界，防止涟漪溢出
+            // 裁剪到按钮圆角边界，防止润漪溢出
             canvas.save();
-            canvas.clip_rounded_rect(math::RoundedRect{rect, radius});
+            canvas.clip_complex_rounded_rect(crr);
             canvas.fill_circle(center, ripple_r,
                 paint::Brush::solid(math::Color::White.with_alpha(alpha)));
             canvas.restore();
@@ -560,11 +608,11 @@ void Button::on_arrange(math::Rect final_rect)
     // 若跳过此调用，inner_element 的 bounds_rect 将保持零矩形，文字不可见
     FrameworkElement::on_arrange(final_rect);
 
-    // 设置胶囊形裁剪（MD3 规范：corner_radius = height / 2），统一驱动：
-    //   1. 渲染裁剪：子元素（ContentPresenter 等）不会溢出胶囊边界
+    // 设置四角独立圆角裁剪（由 CornerRadiusProperty 驱动），统一驱动：
+    //   1. 渲染裁剪：子元素（ContentPresenter 等）不会溢出边界
     //   2. 命中测试边界：hit_test_local() 自动使用此形状，无需覆写 hit_test()
-    const float radius = final_rect.height * 0.5f;
-    set_clip_rounded_rect(math::RoundedRect{final_rect, radius});
+    const math::CornerRadii radii = compute_radii(final_rect.height);
+    set_clip_complex_rounded_rect(math::ComplexRoundedRect{ final_rect, radii });
 }
 
 ControlVisualState Button::compute_visual_state() const

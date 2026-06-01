@@ -41,9 +41,10 @@ struct HandlerEntry {
 struct Visual::Impl {
     /// 裁剪类型枚举（矩形裁剪与圆角矩形裁剪互斥）
     enum class ClipKind : uint8_t {
-        None,        ///< 无裁剪
-        Rect,        ///< 矩形裁剪（clip_rect_）
-        RoundedRect, ///< 圆角矩形裁剪（clip_rounded_rect_）
+        None,               ///< 无裁剪
+        Rect,               ///< 矩形裁剪（clip_rect_）
+        RoundedRect,        ///< 统一圆角裁剪（clip_rounded_rect_）
+        ComplexRoundedRect, ///< 四角独立圆角裁剪（clip_complex_rounded_rect_）
     };
 
     /// 父节点（非拥有，原始指针）
@@ -63,6 +64,9 @@ struct Visual::Impl {
 
     /// 圆角矩形裁剪区域（仅 clip_kind_ == RoundedRect 时有效）
     math::RoundedRect clip_rounded_rect_{};
+
+    /// 四角独立圆角裁剪区域（仅 clip_kind_ == ComplexRoundedRect 时有效）
+    math::ComplexRoundedRect clip_complex_rounded_rect_{};
 
     /// 渲染脏标志：新建时为 true，render_to_canvas 后清为 false
     bool is_render_dirty_ = true;
@@ -282,6 +286,35 @@ void Visual::clear_clip_rounded_rect()
 }
 
 // ============================================================================
+// 四角独立圆角裁剪
+// ============================================================================
+
+bool Visual::has_clip_complex_rounded_rect() const noexcept
+{
+    return p_->clip_kind_ == Impl::ClipKind::ComplexRoundedRect;
+}
+
+math::ComplexRoundedRect Visual::clip_complex_rounded_rect() const noexcept
+{
+    return p_->clip_complex_rounded_rect_;
+}
+
+void Visual::set_clip_complex_rounded_rect(math::ComplexRoundedRect rrect)
+{
+    p_->clip_kind_                   = Impl::ClipKind::ComplexRoundedRect;
+    p_->clip_complex_rounded_rect_   = rrect;
+    invalidate_render();
+}
+
+void Visual::clear_clip_complex_rounded_rect()
+{
+    if (p_->clip_kind_ == Impl::ClipKind::ComplexRoundedRect) {
+        p_->clip_kind_ = Impl::ClipKind::None;
+        invalidate_render();
+    }
+}
+
+// ============================================================================
 // 快捷属性访问器（依赖属性）
 // ============================================================================
 
@@ -348,7 +381,9 @@ void Visual::render_to_canvas(paint::Canvas& canvas)
     canvas.transform(p_->transform_);
 
     // 应用裁剪（圆角矩形裁剪与矩形裁剪互斥）
-    if (p_->clip_kind_ == Impl::ClipKind::RoundedRect) {
+    if (p_->clip_kind_ == Impl::ClipKind::ComplexRoundedRect) {
+        canvas.clip_complex_rounded_rect(p_->clip_complex_rounded_rect_);
+    } else if (p_->clip_kind_ == Impl::ClipKind::RoundedRect) {
         canvas.clip_rounded_rect(p_->clip_rounded_rect_);
     } else if (p_->clip_kind_ == Impl::ClipKind::Rect) {
         canvas.clip_rect(p_->clip_rect_);

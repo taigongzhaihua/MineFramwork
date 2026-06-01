@@ -26,6 +26,7 @@
 #include <mine/paint/Brush.h>
 #include <mine/math/Color.h>
 #include <mine/math/Thickness.h>
+#include <mine/math/CornerRadii.h>
 #include <mine/core/Memory.h>
 
 namespace mine::paint { class Canvas; }
@@ -111,6 +112,17 @@ public:
      */
     static const DependencyProperty& CommandParameterProperty;
 
+    /**
+     * @brief 圆角半径属性（CornerRadii，四角独立）。
+     *
+     * 取值规则：
+     *   - 各角 rx/ry 均为负数（默认 CornerRadii::uniform(-1)）：自动胶囊形，r = height / 2。
+     *   - 各角 rx/ry 均为非负数：用户指定的固定圆角（可四角各异）。
+     *
+     * 影响：渲染背景/边框圆角、Ripple 裁剪区域、Visual 级命中测试边界。
+     */
+    static const DependencyProperty& CornerRadiusProperty;
+
     // ── 生命周期 ───────────────────────────────────────────────────────────
 
     Button();
@@ -162,6 +174,24 @@ public:
     [[nodiscard]] paint::Brush border_color() const noexcept;
     /// 写入 BorderColorProperty Local 槽
     void set_border_color(paint::Brush brush);
+
+    /**
+     * @brief 读取 CornerRadiusProperty 当前生效值。
+     * @return 各角圆角半径（rx < 0 表示自动胶囊）。
+     */
+    [[nodiscard]] math::CornerRadii corner_radii() const noexcept;
+
+    /**
+     * @brief 设置四角独立圆角（写入 Local 槽）。
+     * @param radii 四角圆角半径，各角 rx < 0 时该角使用自动胶囊。
+     */
+    void set_corner_radii(math::CornerRadii radii);
+
+    /**
+     * @brief 设置四角相同的圆角（快捷方法）。
+     * @param radius 负数恢复自动胶囊（-1.0f），非负数为固定半径。
+     */
+    void set_corner_radius(float radius);
 
     /**
      * @brief 设置文字渲染字体（同步传播到 ContentPresenter）。
@@ -227,6 +257,15 @@ private:
      * 重新查询 can_execute() 并调用 set_enabled() 同步按钮禁用状态。
      */
     static void on_can_execute_changed(ICommand* sender, void* user_data) noexcept;
+
+    // ── 辅助函数 ────────────────────────────────────────────────────────────
+
+    /**
+     * @brief 根据 CornerRadiusProperty 和当前高度计算实际渲染的 CornerRadii。
+     * @param height 按钮当前高度（bounds_rect().height）
+     * @return 完全解析后的四角半径（所有角 >= 0）
+     */
+    [[nodiscard]] math::CornerRadii compute_radii(float height) const noexcept;
 
     // ── 动画 tick 回调（注册到 AnimationClock）────────────────────────────
 

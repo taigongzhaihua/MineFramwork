@@ -31,6 +31,7 @@
 #include <mine/math/Transform2D.h>
 #include <mine/math/Rect.h>
 #include <mine/math/RoundedRect.h>
+#include <mine/math/ComplexRoundedRect.h>
 #include <mine/ui/property/DependencyObject.h>
 #include <mine/ui/event/IRoutedEventTarget.h>
 #include <mine/ui/event/RoutedEvent.h>
@@ -194,6 +195,33 @@ public:
      * 仅当当前裁剪类型为圆角矩形时生效；不影响矩形裁剪。
      */
     void clear_clip_rounded_rect();
+
+    // ── 四角独立圆角裁剪 ───────────────────────────────────────────────
+
+    /**
+     * @brief 设置四角独立圆角裁剪区域并触发渲染失效。
+     *
+     * 与矩形裁剪和统一圆角裁剪互斥：调用此方法会替换已有任意其他裁剪。
+     * 同时作为 UIElement 命中测试的默认边界形状。
+     *
+     * @param rrect 四角独立圆角矩形区域（局部坐标系）
+     */
+    void set_clip_complex_rounded_rect(math::ComplexRoundedRect rrect);
+
+    /**
+     * @brief 返回当前是否有四角独立圆角裁剪区域。
+     */
+    [[nodiscard]] bool has_clip_complex_rounded_rect() const noexcept;
+
+    /**
+     * @brief 返回四角独立圆角裁剪区域（仅 has_clip_complex_rounded_rect() == true 时有效）。
+     */
+    [[nodiscard]] math::ComplexRoundedRect clip_complex_rounded_rect() const noexcept;
+
+    /**
+     * @brief 清除四角独立圆角裁剪区域并触发渲染失效。
+     */
+    void clear_clip_complex_rounded_rect();
 
     // ── 快捷属性访问器（依赖属性）────────────────────────────────────────
 
