@@ -36,6 +36,16 @@
   存储在 `DisplayList` 中，渲染器读取时叠加到字间距。
 
 ### Fixed
+- **samples/02-controls-demo：增大字符间距演示对比值（0 → 0/6/12px）**：
+  原演示使用 0/2/4px 间距，在 14px 字号下视觉差异过于细微（2px 约占字宽 14%）。
+  调整为 0/6/12px 后，第三列文字整体宽度比第一列宽 60px（+71%），差异一目了然；
+  同步更新标签文字为"CharacterSpacing: 0px / 6px / 12px"。
+
+- **mine.paint：修复 `RhiRenderer` 空格字形未叠加 `character_spacing` 的问题**：
+  空格（`atlas_w == 0`）分支仅步进 `advance_x`，未追加 `run.character_spacing`，
+  导致含空格的文字行字间距视觉不一致。
+  修复：在空格分支同样执行 `pen_x += advance_x + run.character_spacing`。
+
 - **mine.ui.property：修复 `DependencyObject` 全局防递归标志误拦截跨属性写入**：
 
   原实现使用全局 `bool is_notifying` 标志阻断通知回调期间的所有 `set_value` 调用，

@@ -317,7 +317,7 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     body_panel_.add_child(&tb_align_grid_);
 
     // ── 8d. 字符间距对比（CharacterSpacing 0 / 2 / 4 px 三列等宽）────────────
-    tb_label_spacing_.set_text("字符间距  CharacterSpacing: 0px / 2px / 4px");
+    tb_label_spacing_.set_text("字符间距  CharacterSpacing: 0px / 6px / 12px");
     tb_label_spacing_.set_font_size(10.0f);
     tb_label_spacing_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
     tb_label_spacing_.set_background(paint::Brush::solid(math::Color::Transparent));
@@ -339,7 +339,7 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tb_spacing_norm_.set_foreground(paint::Brush::solid_rgb(0x212121));
     tb_spacing_norm_.set_background(paint::Brush::solid_rgb(0xE3F2FD));
     tb_spacing_norm_.set_padding(math::Thickness{ 10.0f, 10.0f, 10.0f, 10.0f });
-    tb_spacing_norm_.set_character_spacing(0.0f);
+    tb_spacing_norm_.set_character_spacing(0.0f);   // 基准：无额外间距
     if (font) { tb_spacing_norm_.set_font_face(font); }
     ui::Grid::set_column(tb_spacing_norm_, 0);
     tb_spacing_grid_.add_child(&tb_spacing_norm_);
@@ -349,7 +349,7 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tb_spacing_2px_.set_foreground(paint::Brush::solid_rgb(0x212121));
     tb_spacing_2px_.set_background(paint::Brush::solid_rgb(0xE8F5E9));
     tb_spacing_2px_.set_padding(math::Thickness{ 10.0f, 10.0f, 10.0f, 10.0f });
-    tb_spacing_2px_.set_character_spacing(2.0f);
+    tb_spacing_2px_.set_character_spacing(6.0f);
     if (font) { tb_spacing_2px_.set_font_face(font); }
     ui::Grid::set_column(tb_spacing_2px_, 1);
     tb_spacing_grid_.add_child(&tb_spacing_2px_);
@@ -359,7 +359,7 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tb_spacing_wide_.set_foreground(paint::Brush::solid_rgb(0x212121));
     tb_spacing_wide_.set_background(paint::Brush::solid_rgb(0xFCE4EC));
     tb_spacing_wide_.set_padding(math::Thickness{ 10.0f, 10.0f, 10.0f, 10.0f });
-    tb_spacing_wide_.set_character_spacing(4.0f);
+    tb_spacing_wide_.set_character_spacing(12.0f);
     if (font) { tb_spacing_wide_.set_font_face(font); }
     ui::Grid::set_column(tb_spacing_wide_, 2);
     tb_spacing_grid_.add_child(&tb_spacing_wide_);
