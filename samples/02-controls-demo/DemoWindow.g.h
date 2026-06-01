@@ -180,6 +180,7 @@ private:
 
     // TextBlock 功能演示区
     mine::ui::TextBlock       tb_section_;         ///< 区域分隔标题
+    mine::ui::Grid            tb_demos_grid_;      ///< 8a-8e 所有演示横向合并（2行×5列）
     // 自动换行
     mine::ui::TextBlock       tb_label_wrap_;      ///< "自动换行" 标签
     mine::ui::TextBlock       tb_wrap_;            ///< Wrap 模式演示
