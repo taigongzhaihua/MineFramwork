@@ -77,6 +77,25 @@ void Style::apply_state(ui::DependencyObject& target, core::StringView state_nam
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// clear_all_state_values
+// ─────────────────────────────────────────────────────────────────────────────
+
+void Style::clear_all_state_values(ui::DependencyObject& target) const {
+    // 遍历所有状态的 setter，对每个属性清除 StyleTrigger(30) 槽。
+    // 使用 has_value 先检查槽是否存在，避免触发无意义的属性变更通知。
+    for (const auto& state : state_setters_) {
+        for (const auto& setter : state.setters) {
+            if (!setter.property) {
+                continue;
+            }
+            if (target.has_value(*setter.property, ValuePriority::StyleTrigger)) {
+                target.clear_value(*setter.property, ValuePriority::StyleTrigger);
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 构建器接口
 // ─────────────────────────────────────────────────────────────────────────────
 

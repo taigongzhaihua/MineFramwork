@@ -136,15 +136,18 @@ bool VisualStateManager::go_to_state(core::StringView state_name,
         // 带动画的过渡路径：
         //   a. 创建 Storyboard 并调用 configure 注册要驱动的属性
         //   b. capture_from_values：在 StyleTrigger 写入前采样起始值
-        //   c. apply_state：将新状态的 StyleTrigger 写入宿主属性
-        //   d. resolve_and_begin：解析终止值，以 Animation 优先级写入起始值
-        //   e. 加入 active_storyboards_
+        //   c. clear_all_state_values：清除旧状态的 StyleTrigger 残留值
+        //   d. apply_state：将新状态的 StyleTrigger 写入宿主属性
+        //   e. resolve_and_begin：解析终止值（正确读取新状态值），以 Animation 优先级写入起始值
+        //   f. 加入 active_storyboards_
         auto sb = core::make_owned<animation::Storyboard>();
         matched_tr->configure(*sb);        // 注册动画目标和参数
-        sb->capture_from_values();         // 采样起始值（StyleTrigger 写入前）
+        sb->capture_from_values();         // 采样起始值（StyleTrigger 清除前）
 
-        // 应用新状态的 StyleTrigger
         if (style_ && owner_) {
+            // 先清除所有状态曾写入的 StyleTrigger 槽，防止旧状态颜色残留
+            style_->clear_all_state_values(*owner_);
+            // 再写入新状态的 StyleTrigger 值（若新状态无 setter 则属性回退到 StyleSetter 基线）
             style_->apply_state(*owner_, state_name);
         }
 
@@ -153,6 +156,8 @@ bool VisualStateManager::go_to_state(core::StringView state_name,
     } else {
         // 无动画的过渡路径：直接应用新状态的 StyleTrigger（立即跳变）
         if (style_ && owner_) {
+            // 先清除旧状态 StyleTrigger 残留，再应用新状态
+            style_->clear_all_state_values(*owner_);
             style_->apply_state(*owner_, state_name);
         }
     }

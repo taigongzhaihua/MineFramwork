@@ -90,6 +90,16 @@ public:
      */
     void apply_state(ui::DependencyObject& target, core::StringView state_name) const;
 
+    /**
+     * @brief 清除此样式所有状态 setter 曾写入的 StyleTrigger(30) 槽。
+     *
+     * 在 go_to_state 切换状态前调用，确保旧状态的 StyleTrigger 值不残留，
+     * 使得过渡到无 setter 的状态（如 Normal）时属性能正确回退到 StyleSetter(20)。
+     *
+     * @param target 目标 DependencyObject
+     */
+    void clear_all_state_values(ui::DependencyObject& target) const;
+
     // ── 构建器接口（程序化构造；mmlc 路径不使用此接口）─────────────────────
 
     /// 设置样式名称
