@@ -14,6 +14,7 @@
 #include <mine/ui/controls/TextBlock.h>
 #include <mine/ui/controls/Button.h>
 #include <mine/ui/controls/Border.h>
+#include <mine/ui/controls/TextBox.h>
 
 // 复用 mine.ui.layout 提供的容器布局控件。
 #include <mine/ui/layout/StackPanel.h>

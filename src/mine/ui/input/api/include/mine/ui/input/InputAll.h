@@ -11,5 +11,6 @@
 #include <mine/ui/input/ModifierKeys.h>
 #include <mine/ui/input/MouseButton.h>
 #include <mine/ui/input/MouseEventArgs.h>
+#include <mine/ui/input/TextInputEventArgs.h>
 #include <mine/ui/input/InputEvents.h>
 #include <mine/ui/input/InputRouter.h>

@@ -1,0 +1,281 @@
+/**
+ * @file TextBox.h
+ * @brief TextBox —— 单行文本输入控件。
+ *
+ * 实现规范（MD3 Filled Text Field 风格）：
+ *   - Normal / Hovered / Focused / Disabled 四种视觉状态
+ *   - 边框颜色过渡动画（VSM Storyboard 驱动，120ms EaseInOut）
+ *   - 键盘光标定位：Left / Right / Home / End
+ *   - 字符删除：Backspace（删光标前）/ Delete（删光标后）
+ *   - 字符插入：TextInputEvent 派发的 UTF-32 码点转为 UTF-8 插入缓冲
+ *   - 光标闪烁：AnimationClock 驱动，500ms 周期（仅获焦时可见）
+ *   - 占位文字（PlaceholderProperty）：无文本时显示，颜色较淡
+ *
+ * 焦点管理：
+ *   TextBox 在构造函数中调用 set_focusable(true)。
+ *   InputRouter::dispatch_mouse_event 在 MouseDown 命中可聚焦元素时
+ *   自动调用 set_keyboard_focus()，无需 TextBox 显式引用 Window。
+ */
+
+#pragma once
+
+#include <mine/ui/controls/Api.h>
+#include <mine/ui/visual/Control.h>
+#include <mine/ui/event/RoutedEvent.h>
+#include <mine/ui/property/DependencyProperty.h>
+#include <mine/containers/InlineString.h>
+#include <mine/paint/Brush.h>
+#include <mine/math/Thickness.h>
+#include <mine/core/StringView.h>
+
+namespace mine::paint { class Canvas; }
+namespace mine::ui::input { class MouseEventArgs; class KeyEventArgs; class TextInputEventArgs; }
+
+namespace mine::ui {
+
+/**
+ * @brief 单行文本输入控件（MD3 Filled Text Field 风格）。
+ *
+ * 直接继承 Control（而非 ContentControl），TextBox 自行管理文字缓冲。
+ * 所有可视属性均通过 DependencyProperty 管理（单一真相源）。
+ * 光标闪烁和边框过渡均由 AnimationClock 统一驱动。
+ */
+class MINE_UI_CONTROLS_API TextBox : public Control {
+public:
+    // ── 路由事件 ───────────────────────────────────────────────────────────
+
+    /**
+     * @brief 文本内容变更事件（Bubble 策略）。
+     *
+     * 在用户插入/删除字符后派发。EventArgs 为基类 RoutedEventArgs，
+     * 调用方通过 text() 读取最新内容。
+     */
+    static const RoutedEvent& TextChangedEvent();
+
+    // ── 依赖属性 ───────────────────────────────────────────────────────────
+
+    /**
+     * @brief 文本内容属性（InlineString）。
+     *
+     * 与 text_buf_ 缓存双向同步。直接通过 set_text() 或 DependencyProperty
+     * 系统写入均可。
+     */
+    static const DependencyProperty& TextProperty;
+
+    /**
+     * @brief 占位文字属性（InlineString）。
+     *
+     * 当 TextProperty 为空时显示，颜色由 PlaceholderForegroundProperty 控制。
+     */
+    static const DependencyProperty& PlaceholderProperty;
+
+    /**
+     * @brief 只读模式属性（bool，默认 false）。
+     *
+     * true 时禁止字符输入和退格/删除操作；光标仍可见但不闪烁，
+     * 不禁用选择（当前阶段无文本选择功能，留作后续扩展）。
+     */
+    static const DependencyProperty& IsReadOnlyProperty;
+
+    /**
+     * @brief 背景画刷属性（Variant 存储 paint::Brush）。
+     *
+     * 默认：MD3 Surface #FFFBFE。
+     */
+    static const DependencyProperty& BackgroundProperty;
+
+    /**
+     * @brief 文字前景画刷（MD3 On Surface #1C1B1F）。
+     */
+    static const DependencyProperty& ForegroundProperty;
+
+    /**
+     * @brief 边框颜色属性（MD3 Outline #79747E）。
+     *
+     * VSM Storyboard 在状态切换时通过 Animation(P1) 对此属性插值：
+     *   Normal   : #79747E
+     *   Hovered  : #1C1B1F
+     *   Focused  : #6750A4（MD3 Primary，边框加粗至 2px）
+     *   Disabled : Transparent
+     */
+    static const DependencyProperty& BorderColorProperty;
+
+    /**
+     * @brief 占位文字颜色属性（MD3 On Surface Variant #49454F）。
+     */
+    static const DependencyProperty& PlaceholderForegroundProperty;
+
+    /**
+     * @brief 内边距属性（Thickness，默认 {16, 8, 16, 8}）。
+     */
+    static const DependencyProperty& PaddingProperty;
+
+    /**
+     * @brief 圆角半径属性（float，默认 4.0f）。
+     */
+    static const DependencyProperty& CornerRadiusProperty;
+
+    // ── 生命周期 ───────────────────────────────────────────────────────────
+
+    TextBox();
+    ~TextBox() override;
+
+    TextBox(const TextBox&)            = delete;
+    TextBox& operator=(const TextBox&) = delete;
+    TextBox(TextBox&&)                 = default;
+    TextBox& operator=(TextBox&&)      = default;
+
+    // ── 属性访问 ───────────────────────────────────────────────────────────
+
+    /**
+     * @brief 读取当前文字内容（UTF-8）。
+     */
+    [[nodiscard]] core::StringView text() const noexcept;
+
+    /**
+     * @brief 设置文字内容并将光标移到末尾。
+     */
+    void set_text(core::StringView text);
+
+    /**
+     * @brief 读取占位文字（UTF-8）。
+     */
+    [[nodiscard]] core::StringView placeholder() const noexcept;
+
+    /**
+     * @brief 设置占位文字。
+     */
+    void set_placeholder(core::StringView placeholder);
+
+    /**
+     * @brief 读取只读标志。
+     */
+    [[nodiscard]] bool is_read_only() const noexcept;
+
+    /**
+     * @brief 设置只读模式。
+     */
+    void set_read_only(bool read_only) noexcept;
+
+    /**
+     * @brief 是否启用（影响 Disabled 视觉状态）。
+     */
+    [[nodiscard]] bool is_enabled() const noexcept;
+
+    /**
+     * @brief 设置启用/禁用状态。
+     */
+    void set_enabled(bool enabled) noexcept;
+
+    /**
+     * @brief 设置渲染字体（void* 指向 text::FontFace*）。
+     */
+    void set_font_face(void* font_face) noexcept;
+
+    /**
+     * @brief 设置字号（逻辑像素，默认 14.0f）。
+     */
+    void set_font_size(float size_px) noexcept;
+
+protected:
+    // ── 布局 ──────────────────────────────────────────────────────────────
+
+    [[nodiscard]] math::Size measure_override(math::Size available) override;
+    void on_render(paint::Canvas& canvas) override;
+    void on_arrange(math::Rect final_rect) override;
+
+    // ── 视觉状态 ──────────────────────────────────────────────────────────
+
+    [[nodiscard]] ControlVisualState compute_visual_state() const override;
+    void on_visual_state_changed(ControlVisualState old_state,
+                                 ControlVisualState new_state) override;
+
+private:
+    // ── 事件处理路由静态方法 ──────────────────────────────────────────────
+
+    static void on_mouse_enter_router(void*, RoutedEventArgs&, void* ud);
+    static void on_mouse_leave_router(void*, RoutedEventArgs&, void* ud);
+    static void on_mouse_down_router (void*, RoutedEventArgs&, void* ud);
+    static void on_key_down_router   (void*, RoutedEventArgs&, void* ud);
+    static void on_text_input_router (void*, RoutedEventArgs&, void* ud);
+    static void on_got_focus_router  (void*, RoutedEventArgs&, void* ud);
+    static void on_lost_focus_router (void*, RoutedEventArgs&, void* ud);
+
+    // ── 实际事件处理逻辑 ──────────────────────────────────────────────────
+
+    void on_mouse_enter();
+    void on_mouse_leave();
+    void on_mouse_down(input::MouseEventArgs& args);
+    void on_key_down  (input::KeyEventArgs& args);
+    void on_text_input(input::TextInputEventArgs& args);
+
+    // ── 光标闪烁 AnimationClock 回调 ─────────────────────────────────────
+
+    /**
+     * @brief AnimationClock tick 回调（静态方法）。
+     *
+     * 每帧累加 dt 计时，每 500ms 翻转 cursor_visible_，并调用 invalidate_render。
+     * 当 is_focused_ == false 时返回 false，AnimationClock 自动注销。
+     *
+     * @param handle 指向 TextBox 实例的 void*
+     * @param dt     距上一帧的时间（秒）
+     * @return true  继续接收 tick；false 注销
+     */
+    static bool anim_tick_callback(void* handle, float dt) noexcept;
+
+    // ── UTF-8 辅助方法 ────────────────────────────────────────────────────
+
+    /**
+     * @brief 在 cursor_pos_ 处插入 UTF-32 字符（转 UTF-8 写入 text_buf_）。
+     */
+    void insert_char(uint32_t char_utf32);
+
+    /**
+     * @brief 删除光标前一个 UTF-8 字符（Backspace 行为）。
+     */
+    void delete_char_before();
+
+    /**
+     * @brief 删除光标后一个 UTF-8 字符（Delete 行为）。
+     */
+    void delete_char_after();
+
+    /**
+     * @brief 光标向左移动一个 UTF-8 字符（Left 键）。
+     */
+    void move_cursor_left();
+
+    /**
+     * @brief 光标向右移动一个 UTF-8 字符（Right 键）。
+     */
+    void move_cursor_right();
+
+    /**
+     * @brief 计算字体行高（有字体则用 FontFace::line_height，否则估算）。
+     */
+    [[nodiscard]] float effective_line_height() const noexcept;
+
+    /**
+     * @brief 测量 UTF-8 字符串片段的渲染宽度。
+     */
+    [[nodiscard]] float measure_text_width(const char* utf8, uint32_t len) const noexcept;
+
+    // ── 私有字段 ──────────────────────────────────────────────────────────
+
+    containers::InlineString text_buf_;         ///< 实际文字内容缓冲（UTF-8）
+    containers::InlineString placeholder_buf_;  ///< 占位文字缓冲（UTF-8）
+
+    bool  is_read_only_ = false;  ///< 只读模式
+    bool  is_hovered_   = false;  ///< 鼠标悬停状态
+    bool  is_focused_   = false;  ///< 键盘焦点状态
+    bool  is_enabled_   = true;   ///< 启用/禁用状态
+
+    uint32_t cursor_pos_       = 0;      ///< 光标字节偏移（在 text_buf_ 中）
+    bool     cursor_visible_   = true;   ///< 光标当前是否可见（闪烁控制）
+    float    cursor_blink_accum_ = 0.0f; ///< 光标闪烁累计时间（秒）
+
+    void*  font_face_   = nullptr;  ///< 字体（text::FontFace*，可为 nullptr）
+    float  font_size_px_ = 14.0f;  ///< 字号（逻辑像素）
+};
+
+} // namespace mine::ui

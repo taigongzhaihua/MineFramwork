@@ -137,6 +137,22 @@ public:
      */
     [[nodiscard]] bool is_hit_transparent() const noexcept;
 
+    // ── 键盘焦点 ─────────────────────────────────────────────────────────
+
+    /**
+     * @brief 设置可聚焦标志。
+     *
+     * 为 true 时，InputRouter 在 MouseDown 命中此元素后会自动将其设为键盘焦点，
+     * 后续键盘输入（KeyDown/KeyUp/TextInput）将发往此元素。
+     * 默认为 false（不可聚焦，不参与焦点切换）。
+     */
+    void set_focusable(bool focusable) noexcept;
+
+    /**
+     * @brief 返回可聚焦标志（默认 false）。
+     */
+    [[nodiscard]] bool is_focusable() const noexcept;
+
 protected:
     // ── 布局虚方法（由 mine.ui.layout 覆盖）─────────────────────────────
 

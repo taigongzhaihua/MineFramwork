@@ -5,7 +5,46 @@
 ## [Unreleased]
 
 ### Added / Changed
-- **mine.ui.controls：完善 TextBlock 多行排版支持**：
+- **mine.ui.controls：实现 TextBox 单行文本输入控件（MD3 Filled Text Field 风格）**：
+
+  新增 `TextBox` 控件（继承 `Control`），支持以下特性：
+
+  依赖属性：
+  - `TextProperty`（`InlineString`）、`PlaceholderProperty`（`InlineString`）
+  - `IsReadOnlyProperty`（`bool`）
+  - `BackgroundProperty`、`ForegroundProperty`、`BorderColorProperty`、`PlaceholderForegroundProperty`（`Brush`）
+  - `PaddingProperty`（`Thickness`）、`CornerRadiusProperty`（`float`）
+
+  路由事件：`TextChangedEvent`（Bubble 策略，文本内容变更时派发）
+
+  视觉状态（VSM 三层架构）：Normal / Hovered / Focused / Disabled，
+  边框颜色过渡动画（80–120ms QuadEaseOut）。
+
+  键盘交互：Left / Right / Home / End 光标定位；Backspace / Delete 删除字符；
+  TextInputEvent 派发的 UTF-32 码点转为 UTF-8 插入到光标位置。
+
+  光标闪烁：AnimationClock 驱动，500ms 半周期，仅 Focused 时可见。
+
+  占位文字：TextProperty 为空时显示，使用 PlaceholderForegroundProperty 颜色。
+
+- **mine.ui.input：新增 TextInputEvent（Bubble 策略）**：
+  InputRouter 在收到 WindowEventKind::Char 时将 UTF-32 码点包装为
+  `TextInputEventArgs` 并向键盘焦点元素派发，控件通过 `char_utf32()` 读取输入字符。
+
+- **mine.ui.input：新增 GotFocusEvent / LostFocusEvent（Direct 策略）**：
+  `InputRouter::set_keyboard_focus` 在切换焦点时：
+  - 向旧焦点元素派发 `LostFocusEvent`；
+  - 向新焦点元素派发 `GotFocusEvent`。
+  控件订阅这两个事件更新内部 `is_focused_` 状态。
+
+- **mine.ui.visual：UIElement 新增 `is_focusable` / `set_focusable` 接口**：
+  InputRouter::dispatch_mouse_event 在 MouseDown 时检查目标元素的
+  `is_focusable()` 标志，自动调用 `set_keyboard_focus(target)` 或清空焦点。
+
+- **mine.ui.window：Window::Impl::on_window_event 转发 Char 事件至 InputRouter**：
+  确保平台字符输入消息经由 InputRouter 派发到 TextInputEvent。
+
+
 
   新增以下 DependencyProperty 及对应成员 API：
   - `TextWrappingProperty`（`TextWrapping`：NoWrap / Wrap / WrapAtWord）

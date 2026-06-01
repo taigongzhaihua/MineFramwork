@@ -90,5 +90,24 @@ const RoutedEvent& MouseLeaveEvent() {
         register_event<UIElement>("MouseLeave", RoutingStrategy::Direct);
     return ev;
 }
+const RoutedEvent& TextInputEvent() {
+    // Bubble 策略：字符输入事件从键盘焦点元素向根部冒泡，允许父元素拦截字符输入
+    static const RoutedEvent& ev =
+        register_event<UIElement>("TextInput", RoutingStrategy::Bubble);
+    return ev;
+}
 
+const RoutedEvent& GotFocusEvent() {
+    // Direct 策略：仅在新焦点元素上触发，不冲泡
+    static const RoutedEvent& ev =
+        register_event<UIElement>("GotFocus", RoutingStrategy::Direct);
+    return ev;
+}
+
+const RoutedEvent& LostFocusEvent() {
+    // Direct 策略：仅在旧焦点元素上触发，不冲泡
+    static const RoutedEvent& ev =
+        register_event<UIElement>("LostFocus", RoutingStrategy::Direct);
+    return ev;
+}
 } // namespace mine::ui::input

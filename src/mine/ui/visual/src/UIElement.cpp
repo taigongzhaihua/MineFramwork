@@ -35,6 +35,9 @@ struct UIElement::Impl {
     /// 命中穿透标志：true 时此元素在命中测试子树遍历中被跳过（等价 Qt WA_TransparentForMouseEvents）
     bool is_hit_transparent_ = false;
 
+    /// 可聚焦标志：true 时 InputRouter 在 MouseDown 命中该元素后自动将其设为键盘焦点
+    bool is_focusable_ = false;
+
 };
 
 // ============================================================================
@@ -184,6 +187,16 @@ void UIElement::set_hit_transparent(bool transparent) noexcept
 bool UIElement::is_hit_transparent() const noexcept
 {
     return p_->is_hit_transparent_;
+}
+
+void UIElement::set_focusable(bool focusable) noexcept
+{
+    p_->is_focusable_ = focusable;
+}
+
+bool UIElement::is_focusable() const noexcept
+{
+    return p_->is_focusable_;
 }
 
 // ============================================================================

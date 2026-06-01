@@ -51,4 +51,16 @@ MINE_UI_INPUT_API const RoutedEvent& MouseEnterEvent();
 /// 鼠标离开元素（直接策略；由 InputRouter 在悬停目标切换时合成派发）
 MINE_UI_INPUT_API const RoutedEvent& MouseLeaveEvent();
 
+// ── 字符输入事件 ─────────────────────────────────────────────────────────────────────────────────────
+
+/// 字符输入（冲泡策略；由 InputRouter 收到平台 WindowEventKind::Char 时向键盘焦点派发）
+MINE_UI_INPUT_API const RoutedEvent& TextInputEvent();
+
+// ── 焦点事件 ─────────────────────────────────────────────────────────────────────────────────────
+
+/// 获得键盘焦点（直接策略；由 InputRouter::set_keyboard_focus 向新焦点元素派发）
+MINE_UI_INPUT_API const RoutedEvent& GotFocusEvent();
+/// 失去键盘焦点（直接策略；由 InputRouter::set_keyboard_focus 向旧焦点元素派发）
+MINE_UI_INPUT_API const RoutedEvent& LostFocusEvent();
+
 } // namespace mine::ui::input

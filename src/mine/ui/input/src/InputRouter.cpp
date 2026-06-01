@@ -19,12 +19,14 @@
 
 #include <mine/platform/WindowEvent.h>
 #include <mine/ui/event/EventManager.h>
+#include <mine/ui/event/RoutedEventArgs.h>
 #include <mine/ui/input/InputEvents.h>
 #include <mine/ui/input/Key.h>
 #include <mine/ui/input/KeyEventArgs.h>
 #include <mine/ui/input/ModifierKeys.h>
 #include <mine/ui/input/MouseButton.h>
 #include <mine/ui/input/MouseEventArgs.h>
+#include <mine/ui/input/TextInputEventArgs.h>
 #include <mine/ui/visual/UIElement.h>
 #include <mine/math/Point.h>
 
@@ -55,7 +57,20 @@ UIElement* InputRouter::root() const noexcept {
 }
 
 void InputRouter::set_keyboard_focus(UIElement* element) noexcept {
+    if (keyboard_focus_ == element) {
+        return;
+    }
+    // 向旧焦点元素派发 LostFocusEvent
+    if (keyboard_focus_) {
+        RoutedEventArgs lost_args{ LostFocusEvent() };
+        EventManager::raise(*keyboard_focus_, lost_args);
+    }
     keyboard_focus_ = element;
+    // 向新焦点元素派发 GotFocusEvent
+    if (keyboard_focus_) {
+        RoutedEventArgs got_args{ GotFocusEvent() };
+        EventManager::raise(*keyboard_focus_, got_args);
+    }
 }
 
 UIElement* InputRouter::keyboard_focus() const noexcept {
@@ -78,6 +93,9 @@ void InputRouter::on_window_event(platform::WindowEvent& event) {
     case Kind::MouseUp:
     case Kind::MouseWheel:
         dispatch_mouse_event(event);
+        break;
+    case Kind::Char:
+        dispatch_char_event(event);
         break;
     default:
         // 非输入事件（窗口大小、焦点等）忽略
@@ -155,6 +173,13 @@ void InputRouter::dispatch_mouse_event(const platform::WindowEvent& we) {
     switch (we.kind) {
     case Kind::MouseDown: {
         const MouseButton btn = static_cast<MouseButton>(we.mouse_button);
+        // MouseDown 时：若命中元素可聚焦，自动将其设为键盘焦点
+        if (target->is_focusable()) {
+            set_keyboard_focus(target);
+        } else {
+            // 命中非可聚焦元素时，清除键盘焦点（支持点击空白区域失焦）
+            set_keyboard_focus(nullptr);
+        }
         MouseEventArgs preview{ PreviewMouseDownEvent(), btn, pos, mods };
         EventManager::raise(*target, preview);
         if (!preview.handled()) {
@@ -187,6 +212,19 @@ void InputRouter::dispatch_mouse_event(const platform::WindowEvent& we) {
     default:
         break;
     }
+}
+
+void InputRouter::dispatch_char_event(const platform::WindowEvent& we) {
+    // 字符输入派发到键盘焦点；无焦点时退化到根节点
+    UIElement* target = keyboard_focus_;
+    if (!target && root_) {
+        target = root_->as_element();
+    }
+    if (!target) {
+        return;
+    }
+    TextInputEventArgs args{ TextInputEvent(), we.char_utf32 };
+    EventManager::raise(*target, args);
 }
 
 } // namespace mine::ui::input
