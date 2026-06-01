@@ -175,7 +175,9 @@ bool FontFace::rasterize(uint32_t codepoint, GlyphBitmap& out) {
     const FT_UInt glyph_index = FT_Get_Char_Index(face, static_cast<FT_ULong>(codepoint));
 
     // 加载字形（仅加载字形槽，不渲染）
-    FT_Error err = FT_Load_Glyph(face, glyph_index, FT_LOAD_DEFAULT);
+    // FT_LOAD_FORCE_AUTOHINT：强制使用 FreeType 内置自动 hinting，
+    // 对小字号比字体内嵌 TrueType Bytecode Interpreter 效果更稳定
+    FT_Error err = FT_Load_Glyph(face, glyph_index, FT_LOAD_FORCE_AUTOHINT);
     if (err != 0) {
         FT_LOG("FT_Load_Glyph 失败");
         return false;

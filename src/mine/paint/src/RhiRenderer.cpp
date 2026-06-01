@@ -4084,8 +4084,9 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
                     }
 
                     // 字形顶点左上角屏幕坐标（Y 向下，bearing_y 为基线上方，故减去）
-                    const float gx = pen_x + static_cast<float>(entry->bearing_x);
-                    const float gy = pen_y - static_cast<float>(entry->bearing_y);
+                    // roundf 对齐到整像素：消除亚像素偏移导致的 GPU 采样模糊（小字号尤明显）
+                    const float gx = std::roundf(pen_x + static_cast<float>(entry->bearing_x));
+                    const float gy = std::roundf(pen_y - static_cast<float>(entry->bearing_y));
                     const float gw = static_cast<float>(entry->atlas_w);
                     const float gh = static_cast<float>(entry->atlas_h);
 
