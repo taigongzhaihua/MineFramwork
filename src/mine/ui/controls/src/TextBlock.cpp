@@ -780,7 +780,10 @@ void TextBlock::on_render(paint::Canvas& canvas)
         ? std::min(cached_lines_.size(), static_cast<size_t>(max_lines_))
         : cached_lines_.size();
 
-    // ── 逐行渲染 ──────────────────────────────────────────────────────────
+    // ── 逐行渲染（裁剪到背景矩形，防止文字溢出）─────────────────────────
+    canvas.save();
+    canvas.clip_rect(rect);
+
     for (size_t i = 0u; i < max_visible; ++i) {
         const TextLine& line       = cached_lines_[i];
         const float     baseline_y = content_top
@@ -819,6 +822,8 @@ void TextBlock::on_render(paint::Canvas& canvas)
                 0.0f);
         }
     }
+
+    canvas.restore();
 }
 
-} // namespace mine::ui
+} // namespace mine::ui
