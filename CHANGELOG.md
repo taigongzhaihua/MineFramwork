@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+### Fixed
+- **mine.ui.property：修复 `DependencyObject` 全局防递归标志误拦截跨属性写入**：
+
+  原实现使用全局 `bool is_notifying` 标志阻断通知回调期间的所有 `set_value` 调用，
+  导致在某个属性的 `changed` 回调内写入**其他属性**也被静默忽略，典型表现为：
+  Button 绑定到初始 `can_execute = false` 的命令时，`on_command_changed` 回调调用
+  `set_enabled(false)` → `update_visual_state()` → VSM `apply_state("Disabled")` →
+  `set_value(BackgroundProperty, ...)` / `set_value(ForegroundProperty, ...)` 全部被
+  `is_notifying = true` 拦截，导致 Disabled 外观始终未能应用。
+
+  **修复**：将 `bool is_notifying` 替换为
+  `containers::SmallVector<const DependencyProperty*, 4> notifying_props`，
+  仅阻断**同一属性**的递归写入（防止无限循环），允许回调内写入任意其他属性。
+  `set_value` / `clear_value` 均同步更新。
+
 ### Changed
 - **mine.ui.visual / mine.ui.controls：Qt Widget 风格渲染/命中/裁剪架构重设计**：
 

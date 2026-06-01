@@ -17,7 +17,7 @@
  *     2. invalidate_measure/arrange/render()（根据 PropertyMetadata）
  *     3. PropertyMetadata.changed 回调
  *     4. 所有外部订阅者回调
- *   使用 is_notifying_ 标志防止递归触发。
+ *   使用 notifying_props 集合防止同属性递归触发（允许回调内写入其他属性）。
  */
 
 #include <mine/ui/property/DependencyObject.h>
@@ -69,8 +69,9 @@ struct DependencyObject::Impl {
     /// 下一个订阅 token（从 1 递增，0 保留为"无效"）
     uint32_t next_sub_id = 1u;
 
-    /// 防递归标志：通知回调期间为 true，期间再次调用 set_value() 将被忽略
-    bool is_notifying = false;
+    /// 正在发出通知的属性集合（防同属性递归：回调期间再次写入同一属性将被忽略；
+    /// 允许回调内写入其他属性，避免误拦截跨属性的级联更新）
+    containers::SmallVector<const DependencyProperty*, 4> notifying_props;
 
     // ── 辅助：查找生效槽（优先级最高的匹配槽）────────────────────────────
 
@@ -191,9 +192,9 @@ const core::Variant& DependencyObject::get_value(
 void DependencyObject::set_value(const DependencyProperty& prop,
                                  core::Variant             value,
                                  ValuePriority             priority) {
-    // 防递归：通知回调期间再次设置同属性会被忽略
-    if (p_->is_notifying) {
-        return;
+    // 防同属性递归：若该属性当前正在发出通知，则忽略本次写入
+    for (const auto* p : p_->notifying_props) {
+        if (p == &prop) { return; }
     }
 
     // 记录变更前的生效槽（用于判断生效值是否真正改变）
@@ -233,8 +234,8 @@ void DependencyObject::set_value(const DependencyProperty& prop,
                                        : prop.default_value();
     const core::Variant& new_val = new_effective->value;
 
-    // 设置防递归标志
-    p_->is_notifying = true;
+    // 标记该属性正在通知中（防同属性递归）
+    p_->notifying_props.push_back(&prop);
 
     // 1. 虚方法通知（子类可覆盖）
     on_property_changed(prop, old_val, new_val);
@@ -256,21 +257,22 @@ void DependencyObject::set_value(const DependencyProperty& prop,
         meta.changed(this, prop, old_val, new_val);
     }
 
-    // 4. 外部订阅者回调（遍历快照，避免回调内取消订阅导致迭代器失效）
-    // 这里直接遍历（不做快照），因为 is_notifying 标志会阻止递归写操作
+    // 4. 外部订阅者回调
     for (const Impl::Subscription& sub : p_->subs) {
         sub.callback(this, prop, old_val, new_val, sub.user_data);
     }
 
-    p_->is_notifying = false;
+    // 通知完成，从追踪集合中移除
+    p_->notifying_props.pop_back();
 }
 
 // ── clear_value ──────────────────────────────────────────────────────────────
 
 void DependencyObject::clear_value(const DependencyProperty& prop,
                                    ValuePriority             priority) {
-    if (p_->is_notifying) {
-        return;
+    // 防同属性递归：若该属性当前正在发出通知，则忽略本次清除
+    for (const auto* p : p_->notifying_props) {
+        if (p == &prop) { return; }
     }
 
     // 查找待清除的槽
@@ -308,7 +310,7 @@ void DependencyObject::clear_value(const DependencyProperty& prop,
                                        ? new_effective->value
                                        : prop.default_value();
 
-    p_->is_notifying = true;
+    p_->notifying_props.push_back(&prop);
 
     on_property_changed(prop, old_val, new_val);
 
@@ -329,7 +331,7 @@ void DependencyObject::clear_value(const DependencyProperty& prop,
         sub.callback(this, prop, old_val, new_val, sub.user_data);
     }
 
-    p_->is_notifying = false;
+    p_->notifying_props.pop_back();
 }
 
 // ── has_value ─────────────────────────────────────────────────────────────────
