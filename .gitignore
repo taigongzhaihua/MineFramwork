@@ -19,3 +19,5 @@
 *.opendb
 Logs/
 artifacts/
+debug_output.txt
+build_output.txt
