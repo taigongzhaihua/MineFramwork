@@ -553,33 +553,15 @@ void Button::on_render(paint::Canvas& canvas)
     // ContentPresenter 作为内部子元素由渲染管线自动渲染（无需 Button 显式调用）
 }
 
-UIElement* Button::hit_test(math::Point p)
+void Button::on_arrange(math::Rect final_rect)
 {
-    // Button 始终作为其整个视觉区域的命中目标，不递归模板子元素（ContentPresenter 等）。
-    // 这确保 MouseEnter / MouseLeave（Direct 路由，不冒泡）始终派发给 Button 本身，
-    // 而非内部的 ContentPresenter，从而使 Hover 颜色过渡和视觉状态正确触发。
-    if (visibility() == Visibility::Collapsed) {
-        return nullptr;
-    }
-    // 将输入点逆变换到本节点局部坐标系（与 UIElement::hit_test 基实现保持一致）
-    math::Point local_p = p;
-    const auto inv = render_transform().inverted();
-    if (inv) {
-        local_p = inv.value().apply(p);
-    }
-    // 命中边界委托给模板根（WPF 风格）：
-    // 模板根的 bounds_rect 即按钮的命中区域，返回 this 确保事件路由到 Button 自身。
-    // 裁剪仅在用户显式调用 set_clip_rounded_rect() 时生效。
-    if (UIElement* ie = inner_element()) {
-        if (has_clip_rounded_rect()) {
-            // 用户显式设置了圆角裁剪：圆角外角区域不触发命中
-            return clip_rounded_rect().contains(local_p) ? this : nullptr;
-        }
-        // 使用内部子元素的矩形边界判断命中
-        return ie->bounds_rect().contains(local_p) ? this : nullptr;
-    }
-    // 无内部元素：回退到自身矩形边界
-    return bounds_rect().contains(local_p) ? this : nullptr;
+    // 将控件形状（胶囊形，MD3 Filled Button 规范：corner_radius = height / 2）
+    // 作为 Visual 级别裁剪区域，统一驱动：
+    //   1. 渲染裁剪：子元素（ContentPresenter 等）不会溢出胶囊边界
+    //   2. 命中测试边界：hit_test_local() 自动使用此形状，无需覆写 hit_test()
+    // 等价于 Qt setMask(QRegion) 对渲染与命中测试的统一作用。
+    const float radius = final_rect.height * 0.5f;
+    set_clip_rounded_rect(math::RoundedRect{final_rect, radius});
 }
 
 ControlVisualState Button::compute_visual_state() const

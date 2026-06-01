@@ -32,6 +32,9 @@ struct UIElement::Impl {
     /// 排列失效标志
     bool arrange_dirty_ = true;
 
+    /// 命中穿透标志：true 时此元素在命中测试子树遍历中被跳过（等价 Qt WA_TransparentForMouseEvents）
+    bool is_hit_transparent_ = false;
+
 };
 
 // ============================================================================
@@ -117,6 +120,11 @@ UIElement* UIElement::hit_test(math::Point p)
         if (child_elem == nullptr) {
             continue;
         }
+        // 命中穿透元素（如 ContentPresenter 等内部实现子元素）在遍历中跳过，
+        // 确保事件派发给控件本身而非其内部结构（等价 Qt WA_TransparentForMouseEvents）
+        if (child_elem->is_hit_transparent()) {
+            continue;
+        }
         UIElement* hit = child_elem->hit_test(local_p);
         if (hit != nullptr) {
             return hit;
@@ -155,6 +163,20 @@ bool UIElement::hit_test_local(math::Point p) const
     }
     // 回退到轴对齐包围盒
     return p_->bounds_rect_.contains(p);
+}
+
+// ============================================================================
+// 命中穿透
+// ============================================================================
+
+void UIElement::set_hit_transparent(bool transparent) noexcept
+{
+    p_->is_hit_transparent_ = transparent;
+}
+
+bool UIElement::is_hit_transparent() const noexcept
+{
+    return p_->is_hit_transparent_;
 }
 
 // ============================================================================

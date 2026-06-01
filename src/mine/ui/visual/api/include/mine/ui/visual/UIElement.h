@@ -103,14 +103,39 @@ public:
     /**
      * @brief 在指定屏幕坐标处进行命中测试，返回最顶层命中的 UIElement。
      *
-     * 声明为 virtual，允许控件子类（如 Button）覆盖以控制命中测试语义。
-     * 例如：Button 覆盖此方法以屏蔽模板子元素的命中，确保 Direct 路由事件
-     * （MouseEnter / MouseLeave）始终派发给控件本身而非内部的 ContentPresenter。
+     * 默认实现：
+     *   1. 若 Visibility == Collapsed，返回 nullptr
+     *   2. 将输入点逆变换到本节点局部坐标系
+     *   3. 若有裁剪区域且点在裁剪外，返回 nullptr
+     *   4. 逆序遍历子节点，跳过命中穿透（is_hit_transparent）的子节点，
+     *      首个命中子节点立即返回
+     *   5. 子节点均未命中时，调用 hit_test_local() 判断本节点自身
+     *
+     * 控件通常不需要覆盖此方法：通过 set_hit_transparent() 标记内部实现子元素，
+     * 并在 on_arrange() 中调用 set_clip_rounded_rect() 定义控件形状，
+     * 即可使基类实现正确完成命中测试。
      *
      * @param p 屏幕坐标系中的测试点（相对于父节点坐标系）
      * @return  命中的最内层 UIElement 指针；若无命中则返回 nullptr
      */
     virtual UIElement* hit_test(math::Point p);
+
+    /**
+     * @brief 设置命中穿透标志（等价 Qt WA_TransparentForMouseEvents）。
+     *
+     * 设为 true 后，此元素在 hit_test 遍历子树时被跳过，不会作为命中目标；
+     * 但仍参与正常渲染。适用于 Control 内部的 ContentPresenter 等实现细节元素，
+     * 确保鼠标事件始终派发给控件本身而非内部元素。
+     *
+     * Control::set_inner_element() 会自动为内部元素设置此标志，
+     * 通常不需要手动调用。
+     */
+    void set_hit_transparent(bool transparent) noexcept;
+
+    /**
+     * @brief 返回命中穿透标志（true 表示此元素对命中测试不可见）。
+     */
+    [[nodiscard]] bool is_hit_transparent() const noexcept;
 
 protected:
     // ── 布局虚方法（由 mine.ui.layout 覆盖）─────────────────────────────

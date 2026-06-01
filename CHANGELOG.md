@@ -4,6 +4,32 @@
 
 ## [Unreleased]
 
+### Changed
+- **mine.ui.visual / mine.ui.controls：Qt Widget 风格渲染/命中/裁剪架构重设计**：
+
+  废除 ControlTemplate 后，控件的绘制、命中、裁剪边界架构参照 Qt Widget 原则重新统一：
+
+  **核心变更：`UIElement::set_hit_transparent(bool)`（等价 Qt `WA_TransparentForMouseEvents`）**
+  - `UIElement` 新增 `set_hit_transparent(bool)` / `is_hit_transparent()` 公共 API
+  - `UIElement::hit_test()` 遍历子节点时自动跳过命中穿透元素，无需控件逐一覆写 `hit_test()`
+  - `Control::set_inner_element()` 自动将内部实现元素（ContentPresenter 等）标记为命中穿透，
+    确保鼠标事件始终派发给控件本身
+
+  **"控件形状"统一（等价 Qt `setMask(QRegion)`）**
+  - `Button::on_arrange()` 新增：每次布局后自动以 Visual 级别 `set_clip_rounded_rect()` 设置胶囊形状
+    （MD3 规范：`corner_radius = height / 2`），统一驱动：
+    1. **渲染裁剪**：ContentPresenter 等子元素不会溢出胶囊边界（canvas save/restore 保证）
+    2. **命中测试边界**：`UIElement::hit_test_local()` 自动使用圆角矩形形状判断
+  - 删除 `Button::hit_test()` 覆写（约 30 行冗余逻辑）
+
+  **架构对应关系**（Qt → MineFramework）：
+  | Qt | MineFramework |
+  |----|---------------|
+  | `WA_TransparentForMouseEvents` | `UIElement::set_hit_transparent(true)` |
+  | `setMask(QRegion)` | `set_clip_rounded_rect()` in `on_arrange()` |
+  | `WA_ClipChildren` | canvas save/restore 隐式保证（已有） |
+  | `paintEvent()` + clip to rect | `on_render()` + Visual 级 clip_rounded_rect |
+
 ### Fixed
 - **mine.ui.controls：`Button::on_render` 补充 MD3 State Layer 视觉反馈（Local 背景色按钮）**：
   对通过 `set_background()` 写入 Local(P50) 背景色的按钮，VSM 颜色动画对 Local 无感知

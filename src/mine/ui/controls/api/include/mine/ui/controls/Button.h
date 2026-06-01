@@ -177,7 +177,7 @@ public:
 protected:
     void on_measure(math::Size available_size) override;
     void on_render(paint::Canvas& canvas) override;
-    UIElement* hit_test(math::Point p) override;
+    void on_arrange(math::Rect final_rect) override;
     [[nodiscard]] ControlVisualState compute_visual_state() const override;
     /**
      * @brief 视觉状态切换钩子——注册 AnimationClock 驱动 VSM 动画。

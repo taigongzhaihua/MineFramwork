@@ -122,8 +122,11 @@ void Control::set_inner_element(UIElement* root) noexcept
     cp_->owned_inner_element_.reset();
 
     cp_->inner_element_ = root;
-    // 将新内部元素加入视觉子树
+    // 将新内部元素加入视觉子树，并标记为命中穿透：
+    // 内部实现元素（ContentPresenter 等）不应作为命中目标，
+    // 确保鼠标事件派发给控件本身（等价 Qt WA_TransparentForMouseEvents）
     if (root) {
+        root->set_hit_transparent(true);
         add_child(root);
     }
 }
@@ -138,8 +141,11 @@ void Control::set_inner_element(core::OwnedPtr<UIElement> root) noexcept
     cp_->owned_inner_element_ = std::move(root);
     cp_->inner_element_ = cp_->owned_inner_element_.get();
 
-    // 将新内部元素加入视觉子树
+    // 将新内部元素加入视觉子树，并标记为命中穿透：
+    // 内部实现元素（ContentPresenter 等）不应作为命中目标，
+    // 确保鼠标事件派发给控件本身（等价 Qt WA_TransparentForMouseEvents）
     if (cp_->inner_element_) {
+        cp_->inner_element_->set_hit_transparent(true);
         add_child(cp_->inner_element_);
     }
 }
