@@ -1,3 +1,0 @@
-[ 13%]: <mine.ui.controls> compiling.debug src\mine\ui\controls\src\Border.cpp
-error: 
-  > in src\mine\ui\controls\src\Border.cpp
