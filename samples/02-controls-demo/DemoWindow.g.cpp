@@ -449,8 +449,25 @@ tb_lineh_grid_.set_margin(math::Thickness{ 16.0f, 8.0f, 16.0f, 0.0f });
     // 普通输入框（带 Placeholder）
     textbox_input_.set_placeholder("请在此输入文字…");
     textbox_input_.set_margin(math::Thickness{ 16.0f, 0.0f, 16.0f, 0.0f });
+    textbox_input_.set_text_wrapping(ui::TextWrapping::Wrap);  // 允许输入长文本时自动换行
     if (font) { textbox_input_.set_font_face(font); }
     body_panel_.add_child(&textbox_input_);
+
+    // 多行输入框标签
+    textbox_label_multi_.set_text("多行输入框（AcceptsReturn = true，支持 Enter 换行和 Up/Down 导航）");
+    textbox_label_multi_.set_font_size(10.0f);
+    textbox_label_multi_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
+    textbox_label_multi_.set_background(paint::Brush::solid(math::Color::Transparent));
+    textbox_label_multi_.set_padding(math::Thickness{ 4.0f, 8.0f, 4.0f, 2.0f });
+    if (font) { textbox_label_multi_.set_font_face(font); }
+    body_panel_.add_child(&textbox_label_multi_);
+
+    // 多行输入框（启用多行模式）
+    textbox_multiline_.set_placeholder("支持多行输入：按 Enter 键换行，Up/Down 导航…");
+    textbox_multiline_.set_accepts_return(true);  // 关键：启用多行模式
+    textbox_multiline_.set_margin(math::Thickness{ 16.0f, 0.0f, 16.0f, 0.0f });
+    if (font) { textbox_multiline_.set_font_face(font); }
+    body_panel_.add_child(&textbox_multiline_);
 
     // 只读输入框标签
     textbox_label_ro_.set_text("只读模式（IsReadOnly = true）");

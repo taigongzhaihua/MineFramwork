@@ -59,6 +59,14 @@ public:
     /// 宏自动注册 getter：get_property("hint_text") → Variant{hint_text()}
     MINE_OBSERVABLE(mine::containers::InlineString, hint_text, "点击下方按钮改变计数")
 
+    /// 用户输入文字（TextBox 双向绑定演示）
+    /// 宏自动注册 getter：get_property("input_text") → Variant{input_text()}
+    MINE_OBSERVABLE(mine::containers::InlineString, input_text, "")
+
+    /// 输入文字回显（绑定到 echo_label TextBlock::TextProperty）
+    /// 用于展示双向绑定效果：TextBox 输入 → ViewModel → 回显标签
+    MINE_OBSERVABLE(mine::containers::InlineString, echo_text, "（输入文字将实时回显在这里）")
+
     // ── 命令（MINE_COMMAND 宏自动注册 getter，支持 set_binding(Button::CommandProperty, "cmd_name")）
 
     /**

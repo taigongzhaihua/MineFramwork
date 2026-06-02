@@ -210,6 +210,8 @@ private:
     mine::ui::TextBlock       textbox_hint_;         ///< 操作提示说明
     mine::ui::TextBlock       textbox_label_input_;  ///< "普通输入框" 标签
     mine::ui::TextBox         textbox_input_;        ///< 普通输入框（带 Placeholder）
+    mine::ui::TextBlock       textbox_label_multi_;  ///< "多行输入框" 标签
+    mine::ui::TextBox         textbox_multiline_;    ///< 多行输入框（AcceptsReturn = true）
     mine::ui::TextBlock       textbox_label_ro_;     ///< "只读模式" 标签
     mine::ui::TextBox         textbox_readonly_;     ///< 只读输入框
 };

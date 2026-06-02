@@ -34,6 +34,7 @@
 #include <mine/ui/layout/LayoutAll.h>
 #include <mine/ui/controls/TextBlock.h>
 #include <mine/ui/controls/Button.h>
+#include <mine/ui/controls/TextBox.h>
 #include <mine/ui/event/RoutedEventArgs.h>
 #include <mine/text/FontFace.h>
 #include <mine/math/Thickness.h>
@@ -92,6 +93,12 @@ private:
     mine::ui::TextBlock  header_label_;     ///< 标题栏文字
     mine::ui::TextBlock  count_label_;      ///< 主计数显示（绑定 count_text）
     mine::ui::TextBlock  hint_label_;       ///< 提示说明（绑定 hint_text）
+
+    // ── TextBox 双向绑定演示区 ─────────────────────────────────────────────
+    mine::ui::TextBlock  input_prompt_;     ///< TextBox 提示标签
+    mine::ui::TextBox    input_box_;        ///< 输入框（双向绑定 input_text）
+    mine::ui::TextBlock  echo_label_;       ///< 回显标签（绑定 echo_text）
+
     mine::ui::StackPanel btn_row_;          ///< 按钮行（水平排列）
     mine::ui::Button     btn_inc_;          ///< [+1] 按钮 → Command 绑定 increment_cmd
     mine::ui::Button     btn_dec_;          ///< [-1] 按钮 → Command 绑定 decrement_cmd
@@ -127,6 +134,15 @@ private:
     /** [退出] 按钮点击：触发 on_close_requested_ 信号。 */
     static void s_on_click_quit(void* sender, mine::ui::RoutedEventArgs& args,
                                 void* user_data);
+
+    /**
+     * @brief TextBox 文本变更事件：手动实现双向绑定的反向路径。
+     *
+     * 虽然框架 TwoWay 绑定为 M2 预留，但通过监听 TextChangedEvent
+     * 并手动调用 vm_.set_input_text() 可实现双向同步效果。
+     */
+    static void s_on_input_text_changed(void* sender, mine::ui::RoutedEventArgs& args,
+                                        void* user_data);
 };
 
 } // namespace app

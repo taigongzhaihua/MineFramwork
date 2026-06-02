@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### Added
+- **sample.01-mvvm-binding：新增 TextBox 双向绑定演示**：
+
+  在 CounterViewModel 中新增 `input_text`（输入文字）和 `echo_text`（回显文字）两个可观察属性，
+  CounterWindow 中新增 TextBox 控件和回显标签：
+  - TextBox.TextProperty 单向绑定到 `vm_.input_text`（ViewModel → View）
+  - TextBox.TextChangedEvent 手动回写到 `vm_.set_input_text()`（View → ViewModel）
+  - 回显标签 TextBlock 绑定到 `vm_.echo_text`，展示完整双向绑定效果
+
+  虽然框架 TwoWay 绑定为 M2 预留，但通过 OneWay + 手动监听 TextChangedEvent
+  实现双向同步，演示了 MVVM 模式下的双向数据流。
+
 ### Fixed
 - **mine.ui.controls：修复 TextBox 两项交互问题**：
 

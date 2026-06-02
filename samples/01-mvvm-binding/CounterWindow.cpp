@@ -110,6 +110,38 @@ void CounterWindow::build_(mine::text::FontFace* font)
     if (font) { hint_label_.set_font_face(font); }
     body_panel_.add_child(&hint_label_);
 
+    // ── TextBox 双向绑定演示区 ─────────────────────────────────────────────────
+
+    // 提示标签
+    input_prompt_.set_text("【TextBox 双向绑定演示】在下方输入文字：");
+    input_prompt_.set_font_size(14.0f);
+    input_prompt_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
+    input_prompt_.set_background(paint::Brush::solid_rgb(0x37474F));  // 深蓝灰色
+    input_prompt_.set_padding(math::Thickness{ 20.0f, 12.0f, 20.0f, 8.0f });
+    input_prompt_.set_margin(math::Thickness{ 0.0f, 12.0f, 0.0f, 0.0f });
+    if (font) { input_prompt_.set_font_face(font); }
+    body_panel_.add_child(&input_prompt_);
+
+    // TextBox 输入框（双向绑定到 vm_.input_text）
+    // 注意：不调用 set_text()，由绑定首次求值（TemplateBind）写入初始文字
+    input_box_.set_placeholder("在此输入任意文字（中英文均可）");
+    input_box_.set_font_size(16.0f);
+    input_box_.set_margin(math::Thickness{ 20.0f, 0.0f, 20.0f, 0.0f });
+    if (font) { input_box_.set_font_face(font); }
+    // TextChangedEvent 路由：实现双向绑定的反向路径（View → ViewModel）
+    input_box_.add_handler(ui::TextBox::TextChangedEvent(), 
+                          &CounterWindow::s_on_input_text_changed, this);
+    body_panel_.add_child(&input_box_);
+
+    // 回显标签（绑定到 vm_.echo_text，展示双向绑定效果）
+    // 不调用 set_text()，由绑定首次求值写入初始文字
+    echo_label_.set_font_size(15.0f);
+    echo_label_.set_foreground(paint::Brush::solid_rgb(0xB39DDB));    // 浅紫色
+    echo_label_.set_background(paint::Brush::solid_rgb(0x37474F));
+    echo_label_.set_padding(math::Thickness{ 20.0f, 8.0f, 20.0f, 12.0f });
+    if (font) { echo_label_.set_font_face(font); }
+    body_panel_.add_child(&echo_label_);
+
     // ── 按钮行 ────────────────────────────────────────────────────────────────
 
     btn_row_.set_orientation(ui::Orientation::Horizontal);
@@ -184,25 +216,57 @@ void CounterWindow::bind_()
     // 绑定 2：DataContext["hint_text"] → hint_label_.TextProperty
     hint_label_.set_binding(ui::TextBlock::TextProperty, "hint_text");
 
+    // ── TextBox 双向绑定 ──────────────────────────────────────────────────────
+    // 正向绑定（ViewModel → View）：vm_.input_text 变更 → TextBox 更新
+    // 绑定 3：DataContext["input_text"] → input_box_.TextProperty
+    input_box_.set_binding(ui::TextBox::TextProperty, "input_text");
+
+    // 反向路径（View → ViewModel）：由 s_on_input_text_changed() 手动调用 vm_.set_input_text()
+    // 虽然框架 TwoWay 绑定为 M2 预留，但通过手动监听 TextChangedEvent 实现双向同步效果
+
+    // 绑定 4：DataContext["echo_text"] → echo_label_.TextProperty
+    // 用于展示双向绑定效果：TextBox 输入 → ViewModel 更新 → 回显标签自动刷新
+    echo_label_.set_binding(ui::TextBlock::TextProperty, "echo_text");
+
     // ── Command 绑定 ─────────────────────────────────────────────────────────
     // WPF 风格：等价于 btn.SetBinding(Button.CommandProperty, new Binding("increment_cmd"))。
     // get_property("increment_cmd") 返回 Variant{ICommand*}，写入 CommandProperty 后
     // Button 内部自动订阅 can_execute_changed 并刷新 is_enabled_；
     // 用户点击时 Button::raise_click() 内部调用 ICommand::execute()，View 层零业务逻辑。
 
-    // 绑定 3：DataContext["increment_cmd"] → btn_inc_.CommandProperty
+    // 绑定 5：DataContext["increment_cmd"] → btn_inc_.CommandProperty
     btn_inc_.set_binding(ui::Button::CommandProperty, "increment_cmd");
 
-    // 绑定 4：DataContext["decrement_cmd"] → btn_dec_.CommandProperty
+    // 绑定 6：DataContext["decrement_cmd"] → btn_dec_.CommandProperty
     btn_dec_.set_binding(ui::Button::CommandProperty, "decrement_cmd");
 
-    // 绑定 5：DataContext["reset_cmd"] → btn_reset_.CommandProperty
+    // 绑定 7：DataContext["reset_cmd"] → btn_reset_.CommandProperty
     btn_reset_.set_binding(ui::Button::CommandProperty, "reset_cmd");
 }
 
 // ── 事件处理：静态路由桩 ──────────────────────────────────────────────────────
 // 注意：业务命令（[+1] / [-1] / [重置]）已改为 Command 绑定，无需路由桩。
 // 仅保留 [退出] 按钮——其逻辑为跨层信号（通知 App 层退出），不属于 ViewModel 业务。
+void CounterWindow::s_on_input_text_changed(void*                 sender,
+                                             ui::RoutedEventArgs& /*args*/,
+                                             void*                 user_data)
+{
+    auto* self = static_cast<CounterWindow*>(user_data);
+    auto* box  = static_cast<ui::TextBox*>(sender);
+
+    // 读取 TextBox 最新文字内容（View → ViewModel 反向路径）
+    const auto new_text = box->text();
+
+    // 更新 ViewModel 属性（触发属性变更通知）
+    self->vm_.set_input_text(mine::containers::InlineString{new_text.data(), new_text.size()});
+
+    // 同步更新回显文字（带格式化前缀，展示双向绑定效果）
+    char buf[256];
+    std::snprintf(buf, sizeof(buf), "实时回显：%.*s",
+                 static_cast<int>(new_text.size()), new_text.data());
+    self->vm_.set_echo_text(mine::containers::InlineString{buf});
+}
+
 
 void CounterWindow::s_on_click_quit(void* /*sender*/,
                                      ui::RoutedEventArgs& /*args*/,
