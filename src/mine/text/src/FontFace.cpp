@@ -318,14 +318,14 @@ float FontFace::measure_text(const char* utf8,
 
         const FT_UInt glyph_idx = FT_Get_Char_Index(face, static_cast<FT_ULong>(cp));
 
-        // FT_LOAD_DEFAULT 加载字形轮廓/位图到字形槽（不调用 FT_Render_Glyph），
-        // advance.x 在加载完成后即可读取，无需光栅化
-        if (FT_Load_Glyph(face, glyph_idx, FT_LOAD_DEFAULT) != 0) {
+        // FT_LOAD_FORCE_AUTOHINT：与渲染器 rasterize() 使用相同 hinting 模式，
+        // 保证 advance 值与实际渲染一致；无需光栅化，只读 advance
+        if (FT_Load_Glyph(face, glyph_idx, FT_LOAD_FORCE_AUTOHINT) != 0) {
             continue;
         }
 
-        // advance.x 单位为 1/64 像素，转换为逻辑像素
-        total_width += static_cast<float>(face->glyph->advance.x) / 64.0f;
+        // advance.x 单位为 1/64 像素，右移 6 位转整像素（与渲染器 AtlasEntry::advance_x 存储方式一致）
+        total_width += static_cast<float>(face->glyph->advance.x >> 6);
     }
 
     return total_width;
