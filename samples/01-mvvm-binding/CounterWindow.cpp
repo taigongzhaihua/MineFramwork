@@ -257,14 +257,11 @@ void CounterWindow::s_on_input_text_changed(void*                 sender,
     // 读取 TextBox 最新文字内容（View → ViewModel 反向路径）
     const auto new_text = box->text();
 
-    // 更新 ViewModel 属性（触发属性变更通知）
-    self->vm_.set_input_text(mine::containers::InlineString{new_text.data(), new_text.size()});
-
-    // 同步更新回显文字（带格式化前缀，展示双向绑定效果）
-    char buf[256];
-    std::snprintf(buf, sizeof(buf), "实时回显：%.*s",
-                 static_cast<int>(new_text.size()), new_text.data());
-    self->vm_.set_echo_text(mine::containers::InlineString{buf});
+    // 调用 ViewModel 方法更新输入文字
+    // ViewModel 内部自动处理业务逻辑（格式化回显），保持 View 层无业务代码
+    self->vm_.update_input_text(
+        mine::containers::InlineString{new_text.data(), new_text.size()}
+    );
 }
 
 

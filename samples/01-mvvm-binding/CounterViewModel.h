@@ -112,6 +112,28 @@ public:
         update_display_();
     }
 
+    /**
+     * @brief 更新输入文字（TextBox 双向绑定反向路径调用）。
+     *
+     * View 层在 TextChangedEvent 中调用此方法，ViewModel 内部自动同步更新 echo_text。
+     * 这是 MVVM 模式的正确实践：View 只负责回写数据，业务逻辑（格式化回显）
+     * 由 ViewModel 处理，保持 View 层无业务逻辑。
+     *
+     * @param new_input 用户输入的新文字
+     */
+    void update_input_text(const mine::containers::InlineString& new_input) noexcept {
+        // 更新输入文字属性（触发 "input_text" 属性变更通知）
+        set_input_text(new_input);
+
+        // ViewModel 内部业务逻辑：格式化回显文字
+        char buf[256];
+        std::snprintf(buf, sizeof(buf), "实时回显：%.*s",
+                     static_cast<int>(new_input.size()), new_input.data());
+        
+        // 更新回显文字属性（触发 "echo_text" 属性变更通知 → View 自动刷新）
+        set_echo_text(mine::containers::InlineString{buf});
+    }
+
 private:
     // ── 命令执行实现 ──────────────────────────────────────────────────────────
 
