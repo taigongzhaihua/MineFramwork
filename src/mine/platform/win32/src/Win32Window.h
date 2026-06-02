@@ -169,6 +169,7 @@ private:
     Win32WindowEventSource   event_source_;
     WindowDestroyCallback    on_destroy_;
     Win32IMEService*         ime_service_{nullptr};     ///< IME 服务（弱引用，由宿主持有）
+    uint32_t                 ime_committed_chars_{0u};  ///< IME 提交后待过滤的 WM_CHAR 数量
 
     /// 当前自定义 Chrome 配置（默认 enabled=false，即使用系统标题栏）
     WindowChromeDesc         chrome_{};

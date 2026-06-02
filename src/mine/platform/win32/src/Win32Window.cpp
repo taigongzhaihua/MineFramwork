@@ -735,6 +735,9 @@ LRESULT Win32Window::handle_message(
                     ev.ime_text_utf8[copy_len] = '\0';
                     ev.ime_text_length = static_cast<uint32_t>(copy_len);
                     event_source_.fire(ev);
+                    // Windows 在 IME 提交后会为每个字符再发送一条 WM_CHAR，
+                    // 记录提交的 UTF-16 码元数量，在 WM_CHAR 中跳过这些重复消息
+                    ime_committed_chars_ += static_cast<uint32_t>(result_buf.size());
                 }
             }
 
@@ -788,6 +791,11 @@ LRESULT Win32Window::handle_message(
         // wparam 是 UTF-16 码元（代理对暂不处理，M1.1 阶段简化）
         // 控制字符（< 0x20）不作为可打印字符上报
         if (wparam >= 0x20u && wparam != 0x7Fu) {
+            // IME 提交后 Windows 会为每个字符再发一条 WM_CHAR，需要过滤掉以防重复插入
+            if (ime_committed_chars_ > 0u) {
+                --ime_committed_chars_;
+                return 0;
+            }
             WindowEvent ev{};
             ev.kind       = WindowEventKind::Char;
             ev.char_utf32 = static_cast<uint32_t>(wparam); // BMP 内直接是 Unicode 码点
