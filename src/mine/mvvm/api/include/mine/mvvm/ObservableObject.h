@@ -94,6 +94,19 @@ public:
      */
     [[nodiscard]] core::Variant get_property(core::StringView name) const noexcept override;
 
+    /**
+     * @brief 按属性名设置值（属性反射接口，用于 TwoWay 绑定反向写入）。
+     *
+     * 重写 INotifyPropertyChanged::set_property()。
+     * MINE_OBSERVABLE 宏在对象构造时自动通过 register_property_setter()
+     * 将每个属性的 setter 注册到内部查找表，无需手动实现。
+     *
+     * @param name 属性名（须与 MINE_OBSERVABLE 宏的 Name 参数完全一致）
+     * @param value 新值；内部调用对应的 set_<Name> 方法，自动触发变更通知
+     * @return true 设置成功；false 属性未注册或类型不兼容
+     */
+    bool set_property(core::StringView name, const core::Variant& value) noexcept override;
+
 protected:
     /**
      * @brief 属性 setter 辅助方法：值变更时自动触发通知。
@@ -141,6 +154,19 @@ protected:
     void register_property_getter(
         mine::core::StringView                        name,
         mine::core::Function<mine::core::Variant()>   getter) noexcept;
+
+    /**
+     * @brief 注册属性 setter 到内部反射表（用于 TwoWay 绑定）。
+     *
+     * 由 MINE_OBSERVABLE 宏在成员初始化器中自动调用，无需手动使用。
+     * 注册后，set_property(name, value) 将调用对应 setter 设置属性新值。
+     *
+     * @param name   属性名（须与 MINE_OBSERVABLE 宏的 Name 参数完全一致）
+     * @param setter 接受 Variant 参数并设置属性值的单参函数对象
+     */
+    void register_property_setter(
+        mine::core::StringView                               name,
+        mine::core::Function<void(const mine::core::Variant&)> setter) noexcept;
 
 private:
     struct Impl;

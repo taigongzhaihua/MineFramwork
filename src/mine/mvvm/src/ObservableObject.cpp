@@ -46,8 +46,22 @@ struct ObservableObject::Impl {
         mine::core::Function<mine::core::Variant()>  getter;
     };
 
+    /**
+     * @brief 属性 setter 条目：属性名 + 设置值的单参函数（TwoWay 绑定）。
+     *
+     * 由 MINE_OBSERVABLE 宏在成员初始化时自动注入，无需手动维护。
+     * setter 接受 Variant 参数，内部检查类型并调用 set_<Name>()。
+     */
+    struct PropertySetterEntry {
+        mine::core::StringView                                  name;
+        mine::core::Function<void(const mine::core::Variant&)>  setter;
+    };
+
     /// 属性名 → getter 的线性查找表（属性数量通常 < 20，线性查找优于哈希）
     mine::containers::Vector<PropertyEntry> property_getters;
+
+    /// 属性名 → setter 的线性查找表（TwoWay 绑定反向路径）
+    mine::containers::Vector<PropertySetterEntry> property_setters;
 };
 
 // ── 构造 / 析构 ───────────────────────────────────────────────────────────
@@ -121,6 +135,31 @@ mine::core::Variant ObservableObject::get_property(mine::core::StringView name) 
         }
     }
     return mine::core::Variant{};
+}
+
+void ObservableObject::register_property_setter(
+    mine::core::StringView                              name,
+    mine::core::Function<void(const mine::core::Variant&)> setter) noexcept
+{
+    // 如果同名条目已存在则更新（理论上 MINE_OBSERVABLE 宏不会重复注册）
+    for (auto& entry : p_->property_setters) {
+        if (entry.name == name) {
+            entry.setter = std::move(setter);
+            return;
+        }
+    }
+    p_->property_setters.push_back(Impl::PropertySetterEntry{ name, std::move(setter) });
+}
+
+bool ObservableObject::set_property(mine::core::StringView name, const mine::core::Variant& value) noexcept
+{
+    for (const auto& entry : p_->property_setters) {
+        if (entry.name == name) {
+            entry.setter(value);
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace mine::mvvm

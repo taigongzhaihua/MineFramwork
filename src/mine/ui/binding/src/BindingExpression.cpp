@@ -77,10 +77,15 @@ struct BindingExpression::Impl {
     core::StringView          conv_param;          ///< 传递给 converter 的参数
     core::Variant             fallback;
 
-    // ── 防循环标志（TwoWay 预留，M1.1 始终 false）──────────────────────────
+    // ── 防循环标志（TwoWay 反向路径）─────────────────────────────────────
 
-    /// TwoWay 模式下：正在将值写入目标时置 true，防止目标变更触发反向回调死循环
+    /// TwoWay 模式下：正在执行正向/反向更新时置 true，防止循环触发
     bool is_updating = false;
+
+    // ── TwoWay 反向订阅 ───────────────────────────────────────────────────────
+
+    /// TwoWay 模式下对目标属性的订阅令牌（用于监听 View → ViewModel 变更）
+    uint32_t target_sub_token = 0;
 
     // ── 订阅记录 ─────────────────────────────────────────────────────────────
 
@@ -124,9 +129,12 @@ struct BindingExpression::Impl {
      * 以 ValuePriority::TemplateBind 写入，低于 Local 优先级（本地设置不会被覆盖）。
      */
     void re_evaluate() noexcept {
-        // 防循环保护（M1.1 中 is_updating 始终 false，此检查为 TwoWay 预留）
+        // 防循环保护：正在更新时不重复触发
         if (is_updating) return;
         if (!getter)     return;
+
+        // 设置标志，防止反向回调触发
+        is_updating = true;
 
         // 调用 getter 获取源值
         core::Variant value = getter();
@@ -145,6 +153,41 @@ struct BindingExpression::Impl {
         if (value.has_value()) {
             target_obj->set_value(*target_prop, std::move(value), ValuePriority::TemplateBind);
         }
+
+        // 清除标志
+        is_updating = false;
+    }
+
+    /**
+     * @brief TwoWay 反向路径：目标属性变更时回写到源。
+     *
+     * 调用链：目标 DP 变更 → 读取新值 → converter_back（可选）→ setter()
+     * 仅在 TwoWay 模式且 setter 非空时有效。
+     */
+    void write_back_to_source() noexcept {
+        // 防循环保护：正向更新期间不触发反向回写
+        if (is_updating) return;
+        if (!setter)     return;
+
+        // 设置标志，防止 setter 内部触发的属性变更再次调用正向求值
+        is_updating = true;
+
+        // 读取目标属性的当前值
+        core::Variant target_value = target_obj->get_value(*target_prop);
+
+        // 若有转换器，进行反向转换
+        if (converter && target_value.has_value()) {
+            // TODO: 需要获取源属性的类型信息（当前 API 不可用，暂时直接传递）
+            // target_value = converter->convert_back(target_value, source_type, conv_param);
+        }
+
+        // 调用 setter 回写到源
+        if (target_value.has_value()) {
+            setter(target_value);
+        }
+
+        // 清除标志
+        is_updating = false;
     }
 
     /**
@@ -154,6 +197,7 @@ struct BindingExpression::Impl {
      * 调用后 sub_records 被清空，target_obj/target_prop 置 nullptr。
      */
     void detach_impl() noexcept {
+        // 取消正向订阅（源 → 目标）
         for (auto& rec : sub_records) {
             if (rec.token == 0) continue;
 
@@ -166,6 +210,12 @@ struct BindingExpression::Impl {
                     rec.inpc_src->unsubscribe_property_changed(rec.token);
                 }
             }
+        }
+
+        // 取消反向订阅（目标 → 源，TwoWay 模式）
+        if (target_sub_token != 0 && target_obj) {
+            target_obj->unsubscribe_property_changed(target_sub_token);
+            target_sub_token = 0;
         }
 
         sub_records.clear();
@@ -314,11 +364,30 @@ void BindingExpression::attach(
         }
     }
 
-    // ── 步骤 4：立即求值一次写入目标 ─────────────────────────────────────────
+    // ── 步骤 4：TwoWay 模式：订阅目标属性变更（反向路径）────────────────────
+
+    if (impl.mode == BindingMode::TwoWay && impl.setter) {
+        // 订阅目标属性的变更，触发反向回写到源
+        impl.target_sub_token = target.subscribe_property_changed(
+            [](DependencyObject*,
+               const DependencyProperty& p,
+               const core::Variant&,
+               const core::Variant&,
+               void* ud) {
+                auto* impl_ptr = static_cast<Impl*>(ud);
+                // 只响应绑定的目标属性变更
+                if (&p == impl_ptr->target_prop) {
+                    impl_ptr->write_back_to_source();
+                }
+            },
+            &impl);
+    }
+
+    // ── 步骤 5：立即求值一次写入目标 ─────────────────────────────────────────
 
     impl.re_evaluate();
 
-    // ── 步骤 5：OneTime 模式：写入后立即取消订阅（不再响应后续变更）────────
+    // ── 步骤 6：OneTime 模式：写入后立即取消订阅（不再响应后续变更）────────
 
     if (mode == BindingMode::OneTime) {
         // 仅取消订阅，保留 target_obj/target_prop 以供 is_attached() 判断
@@ -403,6 +472,14 @@ void BindingExpression::bind(
     out.getter = [&src, prop_name]() noexcept -> core::Variant {
         return src.get_property(prop_name);
     };
+
+    // TwoWay 模式：创建 setter，用于将目标属性变更回写到源
+    if (mode == BindingMode::TwoWay) {
+        out.setter = [&src, prop_name](const core::Variant& value) noexcept {
+            src.set_property(prop_name, value);
+        };
+    }
+
     out.deps.push_back(PropertyDependency::from_inpc(src, prop_name));
     out.mode = mode;
     out.attach(target, target_prop);
@@ -459,6 +536,14 @@ void BindingExpression::bind(
     out.getter = [&src, prop_name = binding.prop_name]() noexcept -> core::Variant {
         return src.get_property(prop_name);
     };
+
+    // TwoWay 模式：创建 setter，用于将目标属性变更回写到源
+    if (binding.mode == BindingMode::TwoWay) {
+        out.setter = [&src, prop_name = binding.prop_name](const core::Variant& value) noexcept {
+            src.set_property(prop_name, value);
+        };
+    }
+
     out.deps.push_back(PropertyDependency::from_inpc(src, binding.prop_name));
     out.mode       = binding.mode;
     out.converter  = binding.converter;

@@ -79,6 +79,25 @@ public:
     [[nodiscard]] virtual core::Variant get_property([[maybe_unused]] core::StringView name) const noexcept {
         return core::Variant{};
     }
+
+    /**
+     * @brief 按属性名设置值（属性反射接口，用于 TwoWay 绑定反向写入）。
+     *
+     * 默认实现为空操作。继承自 ObservableObject 的 ViewModel 子类
+     * 通过 MINE_OBSERVABLE 宏自动将每个属性的 setter 注册到内部查找表，
+     * 从而重写此方法而无需手动实现。
+     *
+     * BindingExpression 在 TwoWay 模式下，当目标属性（如 TextBox.Text）变更时
+     * 自动调用此接口将新值回写到源 ViewModel 属性，实现真正的双向绑定。
+     *
+     * @param name 属性名，须与 MINE_OBSERVABLE 宏的 Name 参数完全一致
+     * @param value 新值；类型须与属性类型兼容，否则忽略（内部可选转换）
+     * @return true 设置成功；false 属性未注册或类型不兼容
+     */
+    virtual bool set_property([[maybe_unused]] core::StringView name,
+                             [[maybe_unused]] const core::Variant& value) noexcept {
+        return false;
+    }
 };
 
 } // namespace mine::ui

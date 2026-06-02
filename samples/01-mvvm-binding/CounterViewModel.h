@@ -59,13 +59,59 @@ public:
     /// 宏自动注册 getter：get_property("hint_text") → Variant{hint_text()}
     MINE_OBSERVABLE(mine::containers::InlineString, hint_text, "点击下方按钮改变计数")
 
-    /// 用户输入文字（TextBox 双向绑定演示）
-    /// 宏自动注册 getter：get_property("input_text") → Variant{input_text()}
-    MINE_OBSERVABLE(mine::containers::InlineString, input_text, "")
-
     /// 输入文字回显（绑定到 echo_label TextBlock::TextProperty）
     /// 用于展示双向绑定效果：TextBox 输入 → ViewModel → 回显标签
     MINE_OBSERVABLE(mine::containers::InlineString, echo_text, "（输入文字将实时回显在这里）")
+
+private:
+    // ── 用户输入文字（手动实现以添加业务逻辑）────────────────────────────────
+
+    /// 用户输入文字字段（TextBox 双向绑定演示）
+    mine::containers::InlineString mine_prop_input_text_{};
+
+    /// input_text getter 注册哑元（构造时自动注册到反射表）
+    bool mine_reg_input_text_{ (this->register_property_getter(
+        "input_text",
+        [this]() noexcept -> mine::core::Variant {
+            return mine::core::Variant{ mine_prop_input_text_ };
+        }), true) };
+
+    /// input_text setter 注册哑元（构造时自动注册到反射表）
+    bool mine_reg_setter_input_text_{ (this->register_property_setter(
+        "input_text",
+        [this](const mine::core::Variant& v) noexcept {
+            if (v.has<mine::containers::InlineString>()) {
+                this->set_input_text(v.get<mine::containers::InlineString>());
+            }
+        }), true) };
+
+public:
+    /**
+     * @brief input_text getter（公开访问）。
+     */
+    [[nodiscard]] const mine::containers::InlineString& input_text() const noexcept {
+        return mine_prop_input_text_;
+    }
+
+    /**
+     * @brief input_text setter（TwoWay 绑定自动调用，包含业务逻辑）。
+     *
+     * TwoWay 绑定会自动调用此方法回写 TextBox 输入的新值。
+     * ViewModel 内部自动格式化并更新 echo_text，保持业务逻辑封装。
+     */
+    void set_input_text(mine::containers::InlineString value) noexcept {
+        // 调用基类 set() 更新字段并触发 "input_text" 属性变更通知
+        this->set<mine::containers::InlineString>(
+            mine_prop_input_text_, value, "input_text");
+
+        // ViewModel 内部业务逻辑：格式化回显文字
+        char buf[256];
+        std::snprintf(buf, sizeof(buf), "实时回显：%.*s",
+                     static_cast<int>(value.size()), value.data());
+        
+        // 更新回显文字属性（触发 "echo_text" 属性变更通知 → View 自动刷新）
+        set_echo_text(mine::containers::InlineString{buf});
+    }
 
     // ── 命令（MINE_COMMAND 宏自动注册 getter，支持 set_binding(Button::CommandProperty, "cmd_name")）
 
@@ -110,28 +156,6 @@ public:
         // 根据初始 count=0 设置初始显示文字
         // 注意：命令 getter 已由 MINE_COMMAND 宏在构造时自动注册，无需手动调用
         update_display_();
-    }
-
-    /**
-     * @brief 更新输入文字（TextBox 双向绑定反向路径调用）。
-     *
-     * View 层在 TextChangedEvent 中调用此方法，ViewModel 内部自动同步更新 echo_text。
-     * 这是 MVVM 模式的正确实践：View 只负责回写数据，业务逻辑（格式化回显）
-     * 由 ViewModel 处理，保持 View 层无业务逻辑。
-     *
-     * @param new_input 用户输入的新文字
-     */
-    void update_input_text(const mine::containers::InlineString& new_input) noexcept {
-        // 更新输入文字属性（触发 "input_text" 属性变更通知）
-        set_input_text(new_input);
-
-        // ViewModel 内部业务逻辑：格式化回显文字
-        char buf[256];
-        std::snprintf(buf, sizeof(buf), "实时回显：%.*s",
-                     static_cast<int>(new_input.size()), new_input.data());
-        
-        // 更新回显文字属性（触发 "echo_text" 属性变更通知 → View 自动刷新）
-        set_echo_text(mine::containers::InlineString{buf});
     }
 
 private:

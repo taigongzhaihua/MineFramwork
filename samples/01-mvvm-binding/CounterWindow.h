@@ -134,15 +134,6 @@ private:
     /** [退出] 按钮点击：触发 on_close_requested_ 信号。 */
     static void s_on_click_quit(void* sender, mine::ui::RoutedEventArgs& args,
                                 void* user_data);
-
-    /**
-     * @brief TextBox 文本变更事件：手动实现双向绑定的反向路径。
-     *
-     * 虽然框架 TwoWay 绑定为 M2 预留，但通过监听 TextChangedEvent
-     * 并手动调用 vm_.set_input_text() 可实现双向同步效果。
-     */
-    static void s_on_input_text_changed(void* sender, mine::ui::RoutedEventArgs& args,
-                                        void* user_data);
 };
 
 } // namespace app

@@ -128,9 +128,7 @@ void CounterWindow::build_(mine::text::FontFace* font)
     input_box_.set_font_size(16.0f);
     input_box_.set_margin(math::Thickness{ 20.0f, 0.0f, 20.0f, 0.0f });
     if (font) { input_box_.set_font_face(font); }
-    // TextChangedEvent 路由：实现双向绑定的反向路径（View → ViewModel）
-    input_box_.add_handler(ui::TextBox::TextChangedEvent(), 
-                          &CounterWindow::s_on_input_text_changed, this);
+    // TwoWay 绑定将在 bind_() 中自动处理双向同步，无需手动监听事件
     body_panel_.add_child(&input_box_);
 
     // 回显标签（绑定到 vm_.echo_text，展示双向绑定效果）
@@ -217,15 +215,21 @@ void CounterWindow::bind_()
     hint_label_.set_binding(ui::TextBlock::TextProperty, "hint_text");
 
     // ── TextBox 双向绑定 ──────────────────────────────────────────────────────
-    // 正向绑定（ViewModel → View）：vm_.input_text 变更 → TextBox 更新
-    // 绑定 3：DataContext["input_text"] → input_box_.TextProperty
-    input_box_.set_binding(ui::TextBox::TextProperty, "input_text");
-
-    // 反向路径（View → ViewModel）：由 s_on_input_text_changed() 手动调用 vm_.set_input_text()
-    // 虽然框架 TwoWay 绑定为 M2 预留，但通过手动监听 TextChangedEvent 实现双向同步效果
+    // 绑定 3：DataContext["input_text"] ⇔ input_box_.TextProperty（TwoWay）
+    //
+    // 正向路径（ViewModel → View）：vm_.input_text 变更 → TextBox 自动更新
+    // 反向路径（View → ViewModel）：TextBox 输入 → 绑定系统自动调用 setter 回写
+    //
+    // 使用 Binding 结构体指定 TwoWay 模式
+    input_box_.set_binding(ui::TextBox::TextProperty, ui::Binding{
+        .prop_name = "input_text",
+        .mode = ui::BindingMode::TwoWay
+    });
 
     // 绑定 4：DataContext["echo_text"] → echo_label_.TextProperty
-    // 用于展示双向绑定效果：TextBox 输入 → ViewModel 更新 → 回显标签自动刷新
+    // 用于展示双向绑定效果：TextBox 输入 → 绑定自动回写到 vm_.input_text
+    //                            → ViewModel 内部更新 echo_text
+    //                            → 回显标签自动刷新
     echo_label_.set_binding(ui::TextBlock::TextProperty, "echo_text");
 
     // ── Command 绑定 ─────────────────────────────────────────────────────────
@@ -247,23 +251,6 @@ void CounterWindow::bind_()
 // ── 事件处理：静态路由桩 ──────────────────────────────────────────────────────
 // 注意：业务命令（[+1] / [-1] / [重置]）已改为 Command 绑定，无需路由桩。
 // 仅保留 [退出] 按钮——其逻辑为跨层信号（通知 App 层退出），不属于 ViewModel 业务。
-void CounterWindow::s_on_input_text_changed(void*                 sender,
-                                             ui::RoutedEventArgs& /*args*/,
-                                             void*                 user_data)
-{
-    auto* self = static_cast<CounterWindow*>(user_data);
-    auto* box  = static_cast<ui::TextBox*>(sender);
-
-    // 读取 TextBox 最新文字内容（View → ViewModel 反向路径）
-    const auto new_text = box->text();
-
-    // 调用 ViewModel 方法更新输入文字
-    // ViewModel 内部自动处理业务逻辑（格式化回显），保持 View 层无业务代码
-    self->vm_.update_input_text(
-        mine::containers::InlineString{new_text.data(), new_text.size()}
-    );
-}
-
 
 void CounterWindow::s_on_click_quit(void* /*sender*/,
                                      ui::RoutedEventArgs& /*args*/,
