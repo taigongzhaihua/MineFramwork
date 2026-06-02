@@ -20,6 +20,7 @@
 #pragma once
 
 #include <mine/ui/controls/Api.h>
+#include <mine/ui/controls/TextBlock.h>
 #include <mine/ui/visual/Control.h>
 #include <mine/ui/event/RoutedEvent.h>
 #include <mine/ui/property/DependencyProperty.h>
@@ -85,6 +86,15 @@ public:
      *                   Up/Down 键在行间移动光标。
      */
     static const DependencyProperty& AcceptsReturnProperty;
+
+    /**
+     * @brief 自动换行模式属性（TextWrapping，默认 Wrap）。
+     *
+     * NoWrap：不自动换行，单行显示；
+     * Wrap：按字符边界自动换行；
+     * WrapAtWord：按单词边界自动换行。
+     */
+    static const DependencyProperty& TextWrappingProperty;
 
     /**
      * @brief 背景画刷属性（Variant 存储 paint::Brush）。
@@ -175,6 +185,16 @@ public:
      * @brief 设置是否接受 Enter 键（启用多行模式）。
      */
     void set_accepts_return(bool accepts) noexcept;
+
+    /**
+     * @brief 读取自动换行模式。
+     */
+    [[nodiscard]] TextWrapping text_wrapping() const noexcept;
+
+    /**
+     * @brief 设置自动换行模式。
+     */
+    void set_text_wrapping(TextWrapping mode) noexcept;
 
     /**
      * @brief 是否启用（影响 Disabled 视觉状态）。
@@ -353,7 +373,6 @@ private:
     bool  is_hovered_       = false;  ///< 鼠标悬停状态
     bool  is_focused_       = false;  ///< 键盘焦点状态
     bool  is_enabled_       = true;   ///< 启用/禁用状态
-    bool  accepts_return_   = false;  ///< 是否接受回车键（多行模式）
 
     uint32_t cursor_pos_         = 0;      ///< 光标字节偏移（在 text_buf_ 中）
     uint32_t sel_anchor_         = 0;      ///< 选择锚点字节偏移（Shift/点击选择的固定端；无选区时等于 cursor_pos_）

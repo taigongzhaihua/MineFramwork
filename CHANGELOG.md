@@ -5,6 +5,19 @@
 ## [Unreleased]
 
 ### Fixed
+- **mine.ui.controls：修复 TextBox 自动换行未生效且长文本越界问题**：
+
+  根因是多行渲染路径仍读取旧字段 `accepts_return_`，
+  而业务逻辑通过依赖属性 `AcceptsReturnProperty` / `TextWrappingProperty` 读写，
+  导致输入与渲染判定不一致：自动换行分支未进入，长文本按单行渲染。
+
+  修复内容：
+  - 统一以依赖属性判定多行布局：`AcceptsReturn || TextWrapping != NoWrap`；
+  - 自动换行默认生效（`TextWrapping` 默认 `Wrap`），与 `TextBlock` 行布局行为对齐；
+  - `Enter` 是否插入硬换行仍仅由 `AcceptsReturn` 控制；
+  - `measure_override` / `on_render` / 鼠标定位 / Up/Down 导航统一使用同一多行判定；
+  - 删除 `TextBox` 中未使用且易失真的旧状态字段，避免后续再次出现状态分叉。
+
 - **mine.ui.controls / mine.ui.input / mine.platform.win32：修复 TextBox 四项缺陷**：
 
   1. **IME 中文输入不工作**：

@@ -112,27 +112,124 @@ static uint32_t utf32_to_utf8(uint32_t cp, char out[4]) noexcept
 // 多行文本辅助（行分割与查找）
 // ============================================================================
 
+/// UTF-8 下一字符边界
+static uint32_t next_utf8_boundary(const char* data, uint32_t pos, uint32_t end) noexcept
+{
+    if (pos >= end) return end;
+    const auto c = static_cast<uint8_t>(data[pos]);
+    uint32_t skip = 1u;
+    if      ((c & 0xF8u) == 0xF0u) { skip = 4u; }
+    else if ((c & 0xF0u) == 0xE0u) { skip = 3u; }
+    else if ((c & 0xE0u) == 0xC0u) { skip = 2u; }
+    const uint32_t next = pos + skip;
+    return next <= end ? next : end;
+}
+
 /// 行信息：起始字节偏移和字节长度
 struct LineInfo {
     uint32_t start_offset;  ///< 行起始字节偏移
     uint32_t byte_length;   ///< 行字节长度（不含换行符 \n）
+    uint32_t disp_length;   ///< 实际显示长度（可能被截断，用于省略号等）
+    float    disp_width;    ///< 显示宽度（像素）
 };
 
-/// 将文本按 \n 分割为行数组（多行模式）
-static containers::Vector<LineInfo> split_lines(const char* text, size_t text_len)
+/// 将文本按 \n 和可用宽度分割为行数组（支持自动换行）
+/// @param text 文本指针
+/// @param text_len 文本字节长度
+/// @param max_width 最大宽度（像素），0 = 无限制
+/// @param font_face FontFace 指针
+/// @param font_size 字号
+/// @param wrapping 换行模式
+static containers::Vector<LineInfo> split_lines(
+    const char* text,
+    size_t text_len,
+    float max_width,
+    void* font_face,
+    float font_size,
+    TextWrapping wrapping)
 {
     containers::Vector<LineInfo> lines;
-    uint32_t line_start = 0u;
+    
+    // 是否启用宽度自动折叠
+    const bool use_width_limit = (wrapping != TextWrapping::NoWrap)
+                                  && (max_width > 0.0f)
+                                  && (max_width < 1.0e9f);
 
-    for (uint32_t i = 0; i < text_len; ++i) {
-        if (text[i] == '\n') {
-            // 遇到换行符,记录当前行（不含 \n）
-            lines.push_back({ line_start, i - line_start });
-            line_start = i + 1;  // 下一行从 \n 后开始
+    // 按字符折叠的辅助 lambda
+    auto measure_segment = [&](const char* p, uint32_t len) -> float {
+        if (len == 0u) return 0.0f;
+        if (font_face != nullptr) {
+            auto* face = static_cast<text::FontFace*>(font_face);
+            return face->measure_text(p, len, font_size);
         }
+        // 无字体：估算
+        return static_cast<float>(len) * font_size * 0.5f;
+    };
+
+    auto append_char_wrap = [&](uint32_t seg_start, uint32_t seg_end) {
+        if (seg_start == seg_end) {
+            // 空段落保留一个空行
+            lines.push_back({seg_start, 0u, 0u, 0.0f});
+            return;
+        }
+        uint32_t pos = seg_start;
+        while (pos < seg_end) {
+            // 找最长不超过 max_width 的前缀
+            uint32_t line_end = pos;
+            float    accum_w  = 0.0f;
+
+            while (line_end < seg_end) {
+                const uint32_t next_b = next_utf8_boundary(text, line_end, seg_end);
+                const float    cw     = measure_segment(text + line_end, next_b - line_end);
+                // 首字符强制放入，后续若超出则停止
+                if (line_end > pos && accum_w + cw > max_width) break;
+                accum_w  += cw;
+                line_end  = next_b;
+            }
+            // 保证至少放入一个字符（防死循环）
+            if (line_end == pos) {
+                line_end = next_utf8_boundary(text, pos, seg_end);
+                accum_w  = measure_segment(text + pos, line_end - pos);
+            }
+
+            lines.push_back({pos, line_end - pos, line_end - pos, accum_w});
+            pos = line_end;
+        }
+    };
+
+    // 按 '\n' 将文本分割为段落，逐段构建行
+    uint32_t seg_start   = 0u;
+    bool     last_was_nl = false;
+
+    for (uint32_t i = 0u; i <= text_len; ++i) {
+        const bool is_nl  = (i < text_len && text[i] == '\n');
+        const bool is_end = (i == text_len);
+        if (!is_nl && !is_end) continue;
+
+        const uint32_t seg_end = i;
+        last_was_nl = is_nl;
+
+        if (!use_width_limit) {
+            // NoWrap：整段作为一行
+            const float w = measure_segment(text + seg_start, seg_end - seg_start);
+            lines.push_back({seg_start, seg_end - seg_start, seg_end - seg_start, w});
+        } else {
+            // Wrap：字符边界折叠（暂不支持 WrapAtWord）
+            append_char_wrap(seg_start, seg_end);
+        }
+
+        seg_start = i + 1u;  // 跳过 '\n'
     }
-    // 最后一行（无换行符或换行符后的内容）
-    lines.push_back({ line_start, static_cast<uint32_t>(text_len) - line_start });
+
+    // 文本以 '\n' 结尾时，追加一个空行
+    if (last_was_nl) {
+        lines.push_back({static_cast<uint32_t>(text_len), 0u, 0u, 0.0f});
+    }
+
+    // 保证至少一行（空文本）
+    if (lines.empty()) {
+        lines.push_back({0u, 0u, 0u, 0.0f});
+    }
 
     return lines;
 }
@@ -145,7 +242,7 @@ static bool find_line_by_offset(const containers::Vector<LineInfo>& lines,
 {
     for (uint32_t i = 0; i < static_cast<uint32_t>(lines.size()); ++i) {
         const uint32_t line_start = lines[i].start_offset;
-        const uint32_t line_end   = line_start + lines[i].byte_length;
+        const uint32_t line_end   = line_start + lines[i].disp_length;  // 使用 disp_length
         // 允许光标在行末尾（line_end，不含 \n 的位置）
         if (offset >= line_start && offset <= line_end) {
             *out_line_idx    = i;
@@ -196,6 +293,16 @@ const DependencyProperty& TextBox::AcceptsReturnProperty =
         core::Variant{ false },
         PropertyMetadata{
             .affects_measure = true,  // 多行模式影响高度测量
+            .affects_render  = true,  // 影响行布局和渲染
+        });
+
+// TextWrappingProperty — 自动换行模式（TextWrapping，默认 Wrap）
+const DependencyProperty& TextBox::TextWrappingProperty =
+    register_property<TextBox>(
+        "TextWrapping",
+        core::Variant{ TextWrapping::Wrap },
+        PropertyMetadata{
+            .affects_measure = true,  // 换行模式影响高度测量
             .affects_render  = true,  // 影响行布局和渲染
         });
 
@@ -437,15 +544,24 @@ void TextBox::set_read_only(bool read_only) noexcept
 
 bool TextBox::accepts_return() const noexcept
 {
-    return accepts_return_;
+    const core::Variant& v = get_value(AcceptsReturnProperty);
+    return v.has<bool>() ? v.get<bool>() : false;
 }
 
 void TextBox::set_accepts_return(bool accepts) noexcept
 {
-    accepts_return_ = accepts;
-    set_value(AcceptsReturnProperty, core::Variant{ accepts_return_ });
-    invalidate_measure();  // 多行模式影响高度
-    invalidate_render();
+    set_value(AcceptsReturnProperty, core::Variant{ accepts });
+}
+
+TextWrapping TextBox::text_wrapping() const noexcept
+{
+    const core::Variant& v = get_value(TextWrappingProperty);
+    return v.has<TextWrapping>() ? v.get<TextWrapping>() : TextWrapping::Wrap;
+}
+
+void TextBox::set_text_wrapping(TextWrapping mode) noexcept
+{
+    set_value(TextWrappingProperty, core::Variant{ mode });
 }
 
 bool TextBox::is_enabled() const noexcept
@@ -493,11 +609,26 @@ math::Size TextBox::measure_override(math::Size available)
     // 计算行高（有字体则精确，否则估算）
     const float line_h = effective_line_height();
 
+    // 自动换行布局默认开启：
+    // - TextWrapping != NoWrap 时使用多行布局（即使 AcceptsReturn=false）
+    // - AcceptsReturn=true 时也使用多行布局（支持硬换行）
+    const auto wrapping = text_wrapping();
+    const bool use_multiline_layout = accepts_return() || (wrapping != TextWrapping::NoWrap);
+
     // 计算期望高度
     float desired_h;
-    if (accepts_return_ && !text_buf_.empty()) {
-        // 多行模式：计算实际行数
-        const auto lines = split_lines(text_buf_.data(), text_buf_.size());
+    if (use_multiline_layout) {
+        // 多行模式：计算实际行数（考虑自动换行）
+        const float text_area_w = std::isinf(available.width) 
+            ? 1000.0f  // 无限宽度时使用较大默认值
+            : (available.width - pad.left - pad.right);
+
+        const auto lines = split_lines(
+            text_buf_.data(), text_buf_.size(),
+            text_area_w,
+            font_face_, font_size_px_,
+            wrapping);
+        
         const float content_h = static_cast<float>(lines.size()) * line_h;
         desired_h = pad.top + pad.bottom + content_h + 2.0f;  // +2 边框厚度
     } else {
@@ -511,13 +642,21 @@ math::Size TextBox::measure_override(math::Size available)
     float desired_w;
     if (std::isinf(available.width)) {
         // 自然宽度 = 文字内容宽度 + 内边距，最小 120px
-        // 多行模式下取最长行宽度
         float max_line_w = 0.0f;
-        if (accepts_return_ && !text_buf_.empty()) {
-            const auto lines = split_lines(text_buf_.data(), text_buf_.size());
-            for (const auto& line : lines) {
-                const float w = measure_text_width(text_buf_.data() + line.start_offset, line.byte_length);
-                if (w > max_line_w) max_line_w = w;
+        if (use_multiline_layout) {
+            // 多行模式：NoWrap 时取最长行，Wrap 时使用默认宽度
+            if (wrapping == TextWrapping::NoWrap && !text_buf_.empty()) {
+                const auto lines = split_lines(
+                    text_buf_.data(), text_buf_.size(),
+                    0.0f,
+                    nullptr, 0.0f,
+                    TextWrapping::NoWrap);
+                for (const auto& line : lines) {
+                    const float w = measure_text_width(text_buf_.data() + line.start_offset, line.byte_length);
+                    if (w > max_line_w) max_line_w = w;
+                }
+            } else {
+                max_line_w = 200.0f;  // Wrap 模式默认宽度
             }
         } else {
             max_line_w = measure_text_width(text_buf_.data(), static_cast<uint32_t>(text_buf_.size()));
@@ -611,10 +750,15 @@ void TextBox::on_render(paint::Canvas& canvas)
 
     const bool has_text = !text_buf_.empty();
 
+    // 自动换行布局默认开启：
+    // - TextWrapping != NoWrap 时使用多行布局（支持自动折行）
+    // - AcceptsReturn=true 时允许 Enter 插入硬换行
+    const bool use_multiline_layout = accepts_return() || (text_wrapping() != TextWrapping::NoWrap);
+
     // ────────────────────────────────────────────────────────────────────────
     // 单行模式快速路径
     // ────────────────────────────────────────────────────────────────────────
-    if (!accepts_return_) {
+    if (!use_multiline_layout) {
         // ── 4a-pre. 选择高亮（在文字下方渲染）──────────────────────────────
         if (is_focused_ && has_selection() && has_text) {
             const float x_sel0   = text_x0 + measure_text_width(text_buf_.data(), sel_start());
@@ -682,7 +826,13 @@ void TextBox::on_render(paint::Canvas& canvas)
         }
 
         if (has_text) {
-            const auto lines = split_lines(text_buf_.data(), text_buf_.size());
+            const float text_area_w = rect.width - pad.left - pad.right;
+            const auto wrapping = text_wrapping();
+            const auto lines = split_lines(
+                text_buf_.data(), text_buf_.size(),
+                text_area_w,
+                font_face_, font_size_px_,
+                wrapping);
 
             // ── 选择高亮（逐行计算）──────────────────────────────────────────
             if (is_focused_ && has_selection()) {
@@ -905,8 +1055,10 @@ void TextBox::on_mouse_down(input::MouseEventArgs& args)
     const float click_rel_x = args.position().x - text_x0;
     const float click_rel_y = args.position().y - text_y0;
 
+    const bool use_multiline_layout = accepts_return() || (text_wrapping() != TextWrapping::NoWrap);
+
     uint32_t new_pos;
-    if (accepts_return_) {
+    if (use_multiline_layout) {
         // 多行模式：使用 xy 定位
         new_pos = cursor_pos_from_xy(
             click_rel_x < 0.0f ? 0.0f : click_rel_x,
@@ -941,6 +1093,7 @@ void TextBox::on_key_down(input::KeyEventArgs& args)
     const uint32_t sz    = static_cast<uint32_t>(text_buf_.size());
     const bool     shift = args.shift();
     const bool     ctrl  = args.ctrl();
+    const bool     use_multiline_layout = accepts_return() || (text_wrapping() != TextWrapping::NoWrap);
 
     // 光标移动后立即显示（重置闪烁计时）
     auto reset_blink = [this]() {
@@ -991,7 +1144,7 @@ void TextBox::on_key_down(input::KeyEventArgs& args)
 
     case input::Key::Up:
         // 多行模式：向上移动一行
-        if (accepts_return_) {
+        if (use_multiline_layout) {
             move_cursor_up();
             commit_move();
             reset_blink(); invalidate_render(); args.set_handled(true);
@@ -1000,7 +1153,7 @@ void TextBox::on_key_down(input::KeyEventArgs& args)
 
     case input::Key::Down:
         // 多行模式：向下移动一行
-        if (accepts_return_) {
+        if (use_multiline_layout) {
             move_cursor_down();
             commit_move();
             reset_blink(); invalidate_render(); args.set_handled(true);
@@ -1009,7 +1162,7 @@ void TextBox::on_key_down(input::KeyEventArgs& args)
 
     case input::Key::Enter:
         // 多行模式：插入换行符 \n
-        if (accepts_return_ && !is_read_only_) {
+        if (accepts_return() && !is_read_only_) {
             insert_char('\n');
             args.set_handled(true);
         }
@@ -1411,7 +1564,19 @@ uint32_t TextBox::cursor_pos_from_xy(float click_x, float click_y) const noexcep
         return 0u;
     }
 
-    const auto lines      = split_lines(text_buf_.data(), text_buf_.size());
+    const math::Rect final_rc = bounds_rect();
+    const core::Variant& pad_var = get_value(PaddingProperty);
+    const math::Thickness pad = pad_var.has<math::Thickness>()
+        ? pad_var.get<math::Thickness>()
+        : math::Thickness{ 16.0f, 8.0f, 16.0f, 8.0f };
+    
+    const float text_area_w = final_rc.width - pad.left - pad.right;
+    const auto wrapping = text_wrapping();
+    const auto lines = split_lines(
+        text_buf_.data(), text_buf_.size(),
+        text_area_w,
+        font_face_, font_size_px_,
+        wrapping);
     const float line_h    = effective_line_height();
     const uint32_t line_idx = static_cast<uint32_t>(click_y / line_h);
 
@@ -1441,11 +1606,23 @@ uint32_t TextBox::cursor_pos_from_xy(float click_x, float click_y) const noexcep
 
 void TextBox::move_cursor_up()
 {
-    if (!accepts_return_) {
+    if (!accepts_return() && text_wrapping() == TextWrapping::NoWrap) {
         return;  // 单行模式不支持上下移动
     }
 
-    const auto   lines = split_lines(text_buf_.data(), text_buf_.size());
+    const math::Rect final_rc = bounds_rect();
+    const core::Variant& pad_var = get_value(PaddingProperty);
+    const math::Thickness pad = pad_var.has<math::Thickness>()
+        ? pad_var.get<math::Thickness>()
+        : math::Thickness{ 16.0f, 8.0f, 16.0f, 8.0f };
+    
+    const float text_area_w = final_rc.width - pad.left - pad.right;
+    const auto wrapping = text_wrapping();
+    const auto lines = split_lines(
+        text_buf_.data(), text_buf_.size(),
+        text_area_w,
+        font_face_, font_size_px_,
+        wrapping);
     uint32_t     line_idx, line_offset;
     if (!find_line_by_offset(lines, cursor_pos_, &line_idx, &line_offset)) {
         return;
@@ -1487,11 +1664,23 @@ void TextBox::move_cursor_up()
 
 void TextBox::move_cursor_down()
 {
-    if (!accepts_return_) {
+    if (!accepts_return() && text_wrapping() == TextWrapping::NoWrap) {
         return;
     }
 
-    const auto   lines = split_lines(text_buf_.data(), text_buf_.size());
+    const math::Rect final_rc = bounds_rect();
+    const core::Variant& pad_var = get_value(PaddingProperty);
+    const math::Thickness pad = pad_var.has<math::Thickness>()
+        ? pad_var.get<math::Thickness>()
+        : math::Thickness{ 16.0f, 8.0f, 16.0f, 8.0f };
+    
+    const float text_area_w = final_rc.width - pad.left - pad.right;
+    const auto wrapping = text_wrapping();
+    const auto lines = split_lines(
+        text_buf_.data(), text_buf_.size(),
+        text_area_w,
+        font_face_, font_size_px_,
+        wrapping);
     uint32_t     line_idx, line_offset;
     if (!find_line_by_offset(lines, cursor_pos_, &line_idx, &line_offset)) {
         return;
