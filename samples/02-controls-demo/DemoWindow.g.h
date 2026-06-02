@@ -40,6 +40,7 @@
 #include <mine/ui/layout/LayoutAll.h>
 #include <mine/ui/controls/Button.h>
 #include <mine/ui/controls/TextBlock.h>
+#include <mine/ui/controls/TextBox.h>
 #include <mine/ui/controls/Border.h>
 #include <mine/ui/style/StyleAll.h>
 #include <mine/ui/event/RoutedEventArgs.h>
@@ -180,10 +181,11 @@ private:
 
     // TextBlock 功能演示区
     mine::ui::TextBlock       tb_section_;         ///< 区域分隔标题
-    // Grid 1：自动换行 & 省略号（2行×2列）
-    mine::ui::Grid            tb_grid1_;           ///< 演示 Grid 1：换行 & 省略号（2行×2列）
+    mine::ui::Grid            tb_demos_grid_;      ///< 8a-8e 所有演示横向合并（2行×5列）
+    // 自动换行
     mine::ui::TextBlock       tb_label_wrap_;      ///< "自动换行" 标签
     mine::ui::TextBlock       tb_wrap_;            ///< Wrap 模式演示
+    // 省略号裁剪 + 最大行数
     mine::ui::TextBlock       tb_label_ellipsis_;  ///< "省略号裁剪" 标签
     mine::ui::TextBlock       tb_ellipsis_;        ///< Ellipsis + MaxLines 演示
     // Grid 2：文字对齐 L/C/R（2行×3列）
@@ -193,7 +195,6 @@ private:
     mine::ui::TextBlock       tb_align_center_;    ///< Center 对齐
     mine::ui::TextBlock       tb_align_right_;     ///< Right 对齐
     // Grid 3：字符间距 & 行距（2行×2列）
-    mine::ui::Grid            tb_grid3_;           ///< 演示 Grid 3：字符间距 & 行距（2行×2列）
     mine::ui::TextBlock       tb_label_spacing_;   ///< "字符间距" 标签
     mine::ui::Grid            tb_spacing_grid_;    ///< 字间距子 Grid（3列：0/6/12px）
     mine::ui::TextBlock       tb_spacing_norm_;    ///< 字间距 0px
@@ -203,6 +204,14 @@ private:
     mine::ui::Grid            tb_lineh_grid_;      ///< 行距子 Grid（2列：默认/28px）
     mine::ui::TextBlock       tb_lineh_default_;   ///< 默认行高
     mine::ui::TextBlock       tb_lineh_;           ///< LineHeight=28px 演示
+
+    // TextBox 输入控件演示区
+    mine::ui::TextBlock       textbox_section_;      ///< 区域分隔标题
+    mine::ui::TextBlock       textbox_hint_;         ///< 操作提示说明
+    mine::ui::TextBlock       textbox_label_input_;  ///< "普通输入框" 标签
+    mine::ui::TextBox         textbox_input_;        ///< 普通输入框（带 Placeholder）
+    mine::ui::TextBlock       textbox_label_ro_;     ///< "只读模式" 标签
+    mine::ui::TextBox         textbox_readonly_;     ///< 只读输入框
 };
 
 } // namespace app

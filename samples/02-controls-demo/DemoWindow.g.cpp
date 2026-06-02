@@ -56,7 +56,7 @@ void DemoWindowBase::_configure()
     // 直接调用继承自 Window 的方法（无 win_. 前缀）
     // 值暂存于 Impl::pending_* 字段，首次 show() 时应用到原生窗口
     set_title("MineFramework - 控件交互演示");
-    set_size({ 800.0f, 800.0f });
+    set_size({ 800.0f, 1100.0f });
 }
 
 // ── _build：视觉树构建（对应 MML 中的嵌套元素声明）───────────────────────────
@@ -214,15 +214,7 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     if (font) { tb_section_.set_font_face(font); }
     body_panel_.add_child(&tb_section_);
 
-    // ── Grid 1：自动换行 & 省略号（2行×2列）──────────────────────────────────────
-    // Row 0（auto）：标签行；Row 1（*）：内容行
-    // 在 StackPanel 无限高度下，Row 1 通过 star_unit 策略按内容最小等比分配
-    tb_grid1_.add_row(ui::RowDefinition{ ui::GridLength::auto_() });
-    tb_grid1_.add_row(ui::RowDefinition{ ui::GridLength::star() });
-    tb_grid1_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
-    tb_grid1_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
-    tb_grid1_.set_margin(math::Thickness{ 16.0f, 8.0f, 16.0f, 0.0f });
-
+    
     // 8a. 自动换行（Col 0）
     tb_label_wrap_.set_text("自动换行  Wrap");
     tb_label_wrap_.set_font_size(10.0f);
@@ -230,9 +222,7 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tb_label_wrap_.set_background(paint::Brush::solid(math::Color::Transparent));
     tb_label_wrap_.set_padding(math::Thickness{ 4.0f, 8.0f, 4.0f, 2.0f });
     if (font) { tb_label_wrap_.set_font_face(font); }
-    ui::Grid::set_row(tb_label_wrap_, 0);
-    ui::Grid::set_column(tb_label_wrap_, 0);
-    tb_grid1_.add_child(&tb_label_wrap_);
+    body_panel_.add_child(&tb_label_wrap_);
 
     tb_wrap_.set_text(
         "MineFramework \u662f\u4e00\u4e2a\u9ad8\u6027\u80fd C++ UI \u6846\u67b6\uff0c"
@@ -244,9 +234,8 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tb_wrap_.set_padding(math::Thickness{ 6.0f, 6.0f, 6.0f, 6.0f });
     tb_wrap_.set_text_wrapping(ui::TextWrapping::Wrap);
     if (font) { tb_wrap_.set_font_face(font); }
-    ui::Grid::set_row(tb_wrap_, 1);
-    ui::Grid::set_column(tb_wrap_, 0);
-    tb_grid1_.add_child(&tb_wrap_);
+    body_panel_.add_child(&tb_label_wrap_);
+    body_panel_.add_child(&tb_wrap_);
 
     // 8b. 省略号裁剪（Col 1）
     tb_label_ellipsis_.set_text("省略号  MaxLines=2");
@@ -257,7 +246,7 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     if (font) { tb_label_ellipsis_.set_font_face(font); }
     ui::Grid::set_row(tb_label_ellipsis_, 0);
     ui::Grid::set_column(tb_label_ellipsis_, 1);
-    tb_grid1_.add_child(&tb_label_ellipsis_);
+    body_panel_.add_child(&tb_label_ellipsis_);
 
     tb_ellipsis_.set_text(
         "\u7b2c\u4e00\u884c\uff1a\u8fd9\u662f\u4e00\u6bb5\u8d85\u957f\u7684\u6587\u5b57\uff0c"
@@ -274,11 +263,8 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tb_ellipsis_.set_text_trimming(ui::TextTrimming::CharacterEllipsis);
     tb_ellipsis_.set_max_lines(2);
     if (font) { tb_ellipsis_.set_font_face(font); }
-    ui::Grid::set_row(tb_ellipsis_, 1);
-    ui::Grid::set_column(tb_ellipsis_, 1);
-    tb_grid1_.add_child(&tb_ellipsis_);
+    body_panel_.add_child(&tb_ellipsis_);
 
-    body_panel_.add_child(&tb_grid1_);
 
     // ── Grid 2：文字对齐 L/C/R（2行×3列，标签跨3列）─────────────────────────────
     // Row 0（auto）：标签（colspan=3）；Row 1（*）：三列内容
@@ -337,15 +323,6 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
 
     body_panel_.add_child(&tb_align_grid_);
 
-    // ── Grid 3：字符间距 & 行距（2行×2列）────────────────────────────────────────
-    // Row 0（auto）：各自标签；Row 1（*）：各自子 Grid 内容
-    // Col 0（3*）：字间距区域（3个子格，稍宽）；Col 1（2*）：行距区域（2个子格）
-    tb_grid3_.add_row(ui::RowDefinition{ ui::GridLength::auto_() });
-    tb_grid3_.add_row(ui::RowDefinition{ ui::GridLength::star() });
-    tb_grid3_.add_column(ui::ColumnDefinition{ ui::GridLength::star(3.0f) });
-    tb_grid3_.add_column(ui::ColumnDefinition{ ui::GridLength::star(2.0f) });
-    tb_grid3_.set_margin(math::Thickness{ 16.0f, 8.0f, 16.0f, 0.0f });
-
     // 8d. 字符间距标签（Row 0，Col 0）
     tb_label_spacing_.set_text("\u5b57\u7b26\u95f4\u8ddd  0 / 6 / 12px");
     tb_label_spacing_.set_font_size(10.0f);
@@ -353,26 +330,14 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     tb_label_spacing_.set_background(paint::Brush::solid(math::Color::Transparent));
     tb_label_spacing_.set_padding(math::Thickness{ 4.0f, 8.0f, 4.0f, 2.0f });
     if (font) { tb_label_spacing_.set_font_face(font); }
-    ui::Grid::set_row(tb_label_spacing_, 0);
-    ui::Grid::set_column(tb_label_spacing_, 0);
-    tb_grid3_.add_child(&tb_label_spacing_);
 
-    // 8e. 行距标签（Row 0，Col 1）
-    tb_label_lineh_.set_text("\u884c\u8ddd  \u9ed8\u8ba4 vs 28px");
-    tb_label_lineh_.set_font_size(10.0f);
-    tb_label_lineh_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
-    tb_label_lineh_.set_background(paint::Brush::solid(math::Color::Transparent));
-    tb_label_lineh_.set_padding(math::Thickness{ 4.0f, 8.0f, 4.0f, 2.0f });
-    if (font) { tb_label_lineh_.set_font_face(font); }
-    ui::Grid::set_row(tb_label_lineh_, 0);
-    ui::Grid::set_column(tb_label_lineh_, 1);
-    tb_grid3_.add_child(&tb_label_lineh_);
+    body_panel_.add_child(&tb_label_spacing_);
 
     // 8d. 字间距子 Grid（1行×3列：0px / 6px / 12px），放入 Grid3 Row 1 Col 0
     tb_spacing_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
     tb_spacing_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
     tb_spacing_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
-
+    tb_spacing_grid_.set_margin(math::Thickness{ 16.0f, 8.0f, 16.0f, 0.0f });
     const char* const kSpacingText =
         "汉字排版演示\n0123456789";
 
@@ -408,12 +373,20 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
 
     ui::Grid::set_row(tb_spacing_grid_, 1);
     ui::Grid::set_column(tb_spacing_grid_, 0);
-    tb_grid3_.add_child(&tb_spacing_grid_);
+    body_panel_.add_child(&tb_spacing_grid_);
 
+    // 8e. 行距标签（Row 0，Col 1）
+    tb_label_lineh_.set_text("\u884c\u8ddd  \u9ed8\u8ba4 vs 28px");
+    tb_label_lineh_.set_font_size(10.0f);
+    tb_label_lineh_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
+    tb_label_lineh_.set_background(paint::Brush::solid(math::Color::Transparent));
+    tb_label_lineh_.set_padding(math::Thickness{ 4.0f, 8.0f, 4.0f, 2.0f });
+    if (font) { tb_label_lineh_.set_font_face(font); }
+    body_panel_.add_child(&tb_label_lineh_);
     // 8e. 行距子 Grid（1行×2列：默认行高 / 28px），放入 Grid3 Row 1 Col 1
     tb_lineh_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
     tb_lineh_grid_.add_column(ui::ColumnDefinition{ ui::GridLength::star() });
-
+tb_lineh_grid_.set_margin(math::Thickness{ 16.0f, 8.0f, 16.0f, 0.0f });
     const char* const kLineHText =
         "第一行文字\n第二行文字\n第三行文字\n第四行文字";
 
@@ -436,14 +409,64 @@ void DemoWindowBase::_build(mine::text::FontFace* font)
     ui::Grid::set_column(tb_lineh_, 1);
     tb_lineh_grid_.add_child(&tb_lineh_);
 
-    ui::Grid::set_row(tb_lineh_grid_, 1);
-    ui::Grid::set_column(tb_lineh_grid_, 1);
-    tb_grid3_.add_child(&tb_lineh_grid_);
+    body_panel_.add_child(&tb_lineh_grid_);
 
-    body_panel_.add_child(&tb_grid3_);
+    // ── 9. TextBox 输入控件演示区 ──────────────────────────────────────────────────
 
-    // ── 9. 将根布局挂载到窗口 ────────────────────────────────────────────────
-    // 直接调用继承自 Window 的 set_content()（无 win_. 前缀）
+    // 区域分隔标题
+    textbox_section_.set_text("── TextBox 输入控件演示 ──");
+    textbox_section_.set_font_size(11.0f);
+    textbox_section_.set_foreground(paint::Brush::solid_rgb(0x757575));
+    textbox_section_.set_background(paint::Brush::solid_rgb(0xF0F0F0));
+    textbox_section_.set_padding(math::Thickness{ 16.0f, 6.0f, 16.0f, 6.0f });
+    textbox_section_.set_margin(math::Thickness{ 0.0f, 16.0f, 0.0f, 0.0f });
+    if (font) { textbox_section_.set_font_face(font); }
+    body_panel_.add_child(&textbox_section_);
+
+    // 操作提示说明
+    textbox_hint_.set_text(
+        "单击输入框获得焦点，可输入文字、"
+        "Left/Right/Home/End 移动光标、"
+        "Backspace/Delete 删除字符。光标 500ms 闪烁。");
+    textbox_hint_.set_font_size(11.0f);
+    textbox_hint_.set_foreground(paint::Brush::solid_rgb(0x757575));
+    textbox_hint_.set_background(paint::Brush::solid(math::Color::Transparent));
+    textbox_hint_.set_padding(math::Thickness{ 4.0f, 4.0f, 4.0f, 4.0f });
+    textbox_hint_.set_margin(math::Thickness{ 16.0f, 4.0f, 16.0f, 0.0f });
+    textbox_hint_.set_text_wrapping(ui::TextWrapping::Wrap);
+    if (font) { textbox_hint_.set_font_face(font); }
+    body_panel_.add_child(&textbox_hint_);
+
+    // 普通输入框标签
+    textbox_label_input_.set_text("普通输入框（点击后可输入）");
+    textbox_label_input_.set_font_size(10.0f);
+    textbox_label_input_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
+    textbox_label_input_.set_background(paint::Brush::solid(math::Color::Transparent));
+    textbox_label_input_.set_padding(math::Thickness{ 4.0f, 8.0f, 4.0f, 2.0f });
+    if (font) { textbox_label_input_.set_font_face(font); }
+    body_panel_.add_child(&textbox_label_input_);
+
+    // 普通输入框（带 Placeholder）
+    textbox_input_.set_placeholder("请在此输入文字…");
+    textbox_input_.set_margin(math::Thickness{ 16.0f, 0.0f, 16.0f, 0.0f });
+    if (font) { textbox_input_.set_font_face(font); }
+    body_panel_.add_child(&textbox_input_);
+
+    // 只读输入框标签
+    textbox_label_ro_.set_text("只读模式（IsReadOnly = true）");
+    textbox_label_ro_.set_font_size(10.0f);
+    textbox_label_ro_.set_foreground(paint::Brush::solid_rgb(0x546E7A));
+    textbox_label_ro_.set_background(paint::Brush::solid(math::Color::Transparent));
+    textbox_label_ro_.set_padding(math::Thickness{ 4.0f, 8.0f, 4.0f, 2.0f });
+    if (font) { textbox_label_ro_.set_font_face(font); }
+    body_panel_.add_child(&textbox_label_ro_);
+
+    // 只读输入框（展示只读状态）
+    textbox_readonly_.set_text("此内容不可编辑（只读模式）");
+    textbox_readonly_.set_read_only(true);
+    textbox_readonly_.set_margin(math::Thickness{ 16.0f, 0.0f, 16.0f, 16.0f });
+    if (font) { textbox_readonly_.set_font_face(font); }
+    body_panel_.add_child(&textbox_readonly_);
     // set_content 同时自动设置 InputRouter 路由根节点与默认键盘焦点
     set_content(&root_grid_);
 }
