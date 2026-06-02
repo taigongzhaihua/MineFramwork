@@ -78,6 +78,15 @@ public:
     static const DependencyProperty& IsReadOnlyProperty;
 
     /**
+     * @brief 接受回车键属性（bool，默认 false）。
+     *
+     * false（单行模式）：Enter 键不插入换行符，控件保持单行；
+     * true（多行模式）：Enter 键插入换行符 \n，支持多行文本显示和编辑，
+     *                   Up/Down 键在行间移动光标。
+     */
+    static const DependencyProperty& AcceptsReturnProperty;
+
+    /**
      * @brief 背景画刷属性（Variant 存储 paint::Brush）。
      *
      * 默认：MD3 Surface #FFFBFE。
@@ -156,6 +165,16 @@ public:
      * @brief 设置只读模式。
      */
     void set_read_only(bool read_only) noexcept;
+
+    /**
+     * @brief 读取 AcceptsReturn 标志（多行模式）。
+     */
+    [[nodiscard]] bool accepts_return() const noexcept;
+
+    /**
+     * @brief 设置是否接受 Enter 键（启用多行模式）。
+     */
+    void set_accepts_return(bool accepts) noexcept;
 
     /**
      * @brief 是否启用（影响 Disabled 视觉状态）。
@@ -291,6 +310,23 @@ private:
      */
     [[nodiscard]] uint32_t cursor_pos_from_x(float click_x) const noexcept;
 
+    /**
+     * @brief 根据点击坐标（相对于文字区域左上角）计算最近的字节偏移（多行模式）。
+     *
+     * 先根据 y 确定行号，再在该行内根据 x 确定字符位置。
+     */
+    [[nodiscard]] uint32_t cursor_pos_from_xy(float click_x, float click_y) const noexcept;
+
+    /**
+     * @brief 光标向上移动一行（多行模式 Up 键）。
+     */
+    void move_cursor_up();
+
+    /**
+     * @brief 光标向下移动一行（多行模式 Down 键）。
+     */
+    void move_cursor_down();
+
     // ── 剪贴板支持 ────────────────────────────────────────────────────────
 
     /**
@@ -313,18 +349,20 @@ private:
     containers::InlineString text_buf_;         ///< 实际文字内容缓冲（UTF-8）
     containers::InlineString placeholder_buf_;  ///< 占位文字缓冲（UTF-8）
 
-    bool  is_read_only_ = false;  ///< 只读模式
-    bool  is_hovered_   = false;  ///< 鼠标悬停状态
-    bool  is_focused_   = false;  ///< 键盘焦点状态
-    bool  is_enabled_   = true;   ///< 启用/禁用状态
+    bool  is_read_only_     = false;  ///< 只读模式
+    bool  is_hovered_       = false;  ///< 鼠标悬停状态
+    bool  is_focused_       = false;  ///< 键盘焦点状态
+    bool  is_enabled_       = true;   ///< 启用/禁用状态
+    bool  accepts_return_   = false;  ///< 是否接受回车键（多行模式）
 
     uint32_t cursor_pos_         = 0;      ///< 光标字节偏移（在 text_buf_ 中）
     uint32_t sel_anchor_         = 0;      ///< 选择锚点字节偏移（Shift/点击选择的固定端；无选区时等于 cursor_pos_）
+    float    cursor_target_x_    = 0.0f;   ///< Up/Down 键移动时保持的目标 x 坐标（像素）
     bool     cursor_visible_     = true;   ///< 光标当前是否可见（闪烁控制）
     float    cursor_blink_accum_ = 0.0f;   ///< 光标闪烁累计时间（秒）
 
     void*  font_face_   = nullptr;  ///< 字体（text::FontFace*，可为 nullptr）
-    float  font_size_px_ = 14.0f;  ///< 字号（逻辑像素）
+    float  font_size_px_ = 14.0f;   ///< 字号（逻辑像素）
 };
 
 } // namespace mine::ui

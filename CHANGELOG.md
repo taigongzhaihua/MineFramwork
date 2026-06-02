@@ -39,6 +39,54 @@
        使只读模式下光标可见，支持键盘定位和选择操作。
 
 ### Added / Changed
+- **mine.ui.controls / mine.text：修复 TextBox 字符宽度测量精度问题**：
+  `FontFace::measure_text()` 原使用 `FT_LOAD_DEFAULT` 与浮点除法（`/64.0f`），
+  而 `rasterize()` 使用 `FT_LOAD_FORCE_AUTOHINT` 与整数位移（`>>6`），
+  两处 hinting 模式和精度不一致导致测量宽度与实际渲染宽度不符，
+  光标和选择区定位出现偏移。
+  修复：统一 `measure_text` 为 `FT_LOAD_FORCE_AUTOHINT` 和整数截断，
+  确保测量与渲染精确一致。
+
+- **mine.platform.win32：修复 IME 提交字符重复插入问题**：
+  Windows IME 在提交输入时同时发送 `WM_IME_COMPOSITION(GCS_RESULTSTR)` 和 `WM_CHAR` 消息，
+  导致相同字符被处理两次插入文本框。
+  修复：在 `Win32Window` 新增 `ime_committed_chars_` 计数器，
+  在 `WM_IME_COMPOSITION` 中按 UTF-16 code unit 数量累加，
+  在 `WM_CHAR` 中匹配计数并忽略重复消息，确保每次输入仅插入一次。
+
+- **mine.ui.controls：TextBox 新增多行模式（`AcceptsReturnProperty`）**：
+
+  新增依赖属性：
+  - `AcceptsReturnProperty`（`bool`，默认 `false`）：
+    - `false`（单行模式）：Enter 键不插入换行符，保持单行显示
+    - `true`（多行模式）：Enter 键插入 `\n`，Up/Down 键在行间垂直导航
+
+  多行功能实现：
+  - 新增辅助函数：
+    - `split_lines(text, len)`：按 `\n` 分割文本为行数组（`LineInfo` 包含起始偏移和字节长度）
+    - `find_line_by_offset(lines, offset, *line_idx, *line_offset)`：根据字节偏移查找所在行号和行内偏移
+    - `cursor_pos_from_xy(click_x, click_y)`：多行点击定位，按点击坐标计算目标行和行内位置
+    - `move_cursor_up()` / `move_cursor_down()`：垂直导航，保持 `cursor_target_x_` 记忆水平位置
+  
+  - 输入处理（`on_key_down`）：
+    - `Key::Enter`：多行模式且非只读时插入换行符 `\n`
+    - `Key::Up` / `Key::Down`：多行模式下调用 `move_cursor_up/down()` 在行间移动
+    - `Key::Left` / `Key::Right`：重置 `cursor_target_x_ = 0.0f`，取消垂直导航记忆
+  
+  - 渲染（`on_render`）：
+    - 单行快速路径（原逻辑不变）：单行居中、光标、选区
+    - 多行分支：
+      - 逐行分割，计算每行基线 Y 坐标（行号 × 行高）
+      - 逐行绘制选择高亮（计算选区起止在当前行的像素区间）
+      - 逐行绘制文本内容（空行不绘制）
+      - 光标绘制：定位到光标所在行，计算行内 X 偏移
+  
+  - 布局（`measure_override`）：
+    - 单行模式：固定单行高度 `line_h + padding + 2.0f`
+    - 多行模式：
+      - 高度 = `行数 × line_h + padding + 2.0f`
+      - 宽度（无限空间时）取最长行宽度 + padding，最小 120px
+
 - **mine.ui.controls：实现 TextBox 单行文本输入控件（MD3 Filled Text Field 风格）**：
 
   新增 `TextBox` 控件（继承 `Control`），支持以下特性：

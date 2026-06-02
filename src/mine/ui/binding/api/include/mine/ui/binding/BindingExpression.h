@@ -48,7 +48,7 @@ class DependencyObject;
 class DependencyProperty;
 struct Binding;
 struct IConverter;
-struct INotifyPropertyChanged;
+class INotifyPropertyChanged;
 struct Binding;
 
 /**

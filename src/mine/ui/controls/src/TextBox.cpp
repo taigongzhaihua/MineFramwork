@@ -109,6 +109,55 @@ static uint32_t utf32_to_utf8(uint32_t cp, char out[4]) noexcept
 }
 
 // ============================================================================
+// 多行文本辅助（行分割与查找）
+// ============================================================================
+
+/// 行信息：起始字节偏移和字节长度
+struct LineInfo {
+    uint32_t start_offset;  ///< 行起始字节偏移
+    uint32_t byte_length;   ///< 行字节长度（不含换行符 \n）
+};
+
+/// 将文本按 \n 分割为行数组（多行模式）
+static containers::Vector<LineInfo> split_lines(const char* text, size_t text_len)
+{
+    containers::Vector<LineInfo> lines;
+    uint32_t line_start = 0u;
+
+    for (uint32_t i = 0; i < text_len; ++i) {
+        if (text[i] == '\n') {
+            // 遇到换行符,记录当前行（不含 \n）
+            lines.push_back({ line_start, i - line_start });
+            line_start = i + 1;  // 下一行从 \n 后开始
+        }
+    }
+    // 最后一行（无换行符或换行符后的内容）
+    lines.push_back({ line_start, static_cast<uint32_t>(text_len) - line_start });
+
+    return lines;
+}
+
+/// 根据字节偏移查找所在行号和行内偏移
+static bool find_line_by_offset(const containers::Vector<LineInfo>& lines,
+                                 uint32_t offset,
+                                 uint32_t* out_line_idx,
+                                 uint32_t* out_line_offset)
+{
+    for (uint32_t i = 0; i < static_cast<uint32_t>(lines.size()); ++i) {
+        const uint32_t line_start = lines[i].start_offset;
+        const uint32_t line_end   = line_start + lines[i].byte_length;
+        // 允许光标在行末尾（line_end，不含 \n 的位置）
+        if (offset >= line_start && offset <= line_end) {
+            *out_line_idx    = i;
+            *out_line_offset = offset - line_start;
+            return true;
+        }
+    }
+    return false;  // 不应发生（offset 超出文本范围）
+}
+
+
+// ============================================================================
 // 依赖属性注册
 // ============================================================================
 
@@ -138,6 +187,16 @@ const DependencyProperty& TextBox::IsReadOnlyProperty =
         core::Variant{ false },
         PropertyMetadata{
             .affects_render = true,
+        });
+
+// AcceptsReturnProperty — 接受回车键（bool，默认 false，单行模式）
+const DependencyProperty& TextBox::AcceptsReturnProperty =
+    register_property<TextBox>(
+        "AcceptsReturn",
+        core::Variant{ false },
+        PropertyMetadata{
+            .affects_measure = true,  // 多行模式影响高度测量
+            .affects_render  = true,  // 影响行布局和渲染
         });
 
 // BackgroundProperty — 背景画刷（MD3 Surface #FFFBFE）
@@ -376,6 +435,19 @@ void TextBox::set_read_only(bool read_only) noexcept
     invalidate_render();
 }
 
+bool TextBox::accepts_return() const noexcept
+{
+    return accepts_return_;
+}
+
+void TextBox::set_accepts_return(bool accepts) noexcept
+{
+    accepts_return_ = accepts;
+    set_value(AcceptsReturnProperty, core::Variant{ accepts_return_ });
+    invalidate_measure();  // 多行模式影响高度
+    invalidate_render();
+}
+
 bool TextBox::is_enabled() const noexcept
 {
     return is_enabled_;
@@ -421,8 +493,17 @@ math::Size TextBox::measure_override(math::Size available)
     // 计算行高（有字体则精确，否则估算）
     const float line_h = effective_line_height();
 
-    // 期望高度 = 上下内边距 + 行高 + 边框厚度（最大 2px）
-    const float desired_h = pad.top + pad.bottom + line_h + 2.0f;
+    // 计算期望高度
+    float desired_h;
+    if (accepts_return_ && !text_buf_.empty()) {
+        // 多行模式：计算实际行数
+        const auto lines = split_lines(text_buf_.data(), text_buf_.size());
+        const float content_h = static_cast<float>(lines.size()) * line_h;
+        desired_h = pad.top + pad.bottom + content_h + 2.0f;  // +2 边框厚度
+    } else {
+        // 单行模式：固定单行高度
+        desired_h = pad.top + pad.bottom + line_h + 2.0f;
+    }
 
     // 期望宽度策略：
     //   - available.width 为有限值（父容器有限宽度）时，填充可用宽度
@@ -430,9 +511,18 @@ math::Size TextBox::measure_override(math::Size available)
     float desired_w;
     if (std::isinf(available.width)) {
         // 自然宽度 = 文字内容宽度 + 内边距，最小 120px
-        const float text_w = measure_text_width(text_buf_.data(),
-                                                static_cast<uint32_t>(text_buf_.size()));
-        desired_w = text_w + pad.left + pad.right;
+        // 多行模式下取最长行宽度
+        float max_line_w = 0.0f;
+        if (accepts_return_ && !text_buf_.empty()) {
+            const auto lines = split_lines(text_buf_.data(), text_buf_.size());
+            for (const auto& line : lines) {
+                const float w = measure_text_width(text_buf_.data() + line.start_offset, line.byte_length);
+                if (w > max_line_w) max_line_w = w;
+            }
+        } else {
+            max_line_w = measure_text_width(text_buf_.data(), static_cast<uint32_t>(text_buf_.size()));
+        }
+        desired_w = max_line_w + pad.left + pad.right;
         if (desired_w < 120.0f) {
             desired_w = 120.0f;
         }
@@ -521,55 +611,142 @@ void TextBox::on_render(paint::Canvas& canvas)
 
     const bool has_text = !text_buf_.empty();
 
-    // ── 4a-pre. 选择高亮（在文字下方渲染）──────────────────────────────────────────
-    if (is_focused_ && has_selection() && has_text) {
-        const float x_sel0   = text_x0 + measure_text_width(text_buf_.data(), sel_start());
-        const float x_sel1   = text_x0 + measure_text_width(text_buf_.data(), sel_end());
-        const float sel_top  = text_y0 + (text_h - line_h) * 0.5f;
-        canvas.fill_rect(
-            { x_sel0, sel_top, x_sel1 - x_sel0, line_h },
-            paint::Brush::solid(math::Color{ 0.404f, 0.314f, 0.643f, 0.30f }));  // MD3 Primary 30% alpha
-    }
-
-    if (has_text) {
-        // ── 4a. 绘制实际文字 ─────────────────────────────────────────────────
-        const core::Variant& fg_var = get_value(ForegroundProperty);
-        const paint::Brush fg = fg_var.has<paint::Brush>()
-            ? fg_var.get<paint::Brush>()
-            : paint::Brush::solid_rgb(0x1C1B1F);
-        canvas.draw_text(
-            core::StringView{ text_buf_.data(), text_buf_.size() },
-            { text_x0, baseline_y },
-            font_face_,
-            font_size_px_,
-            fg);
-    } else if (!placeholder_buf_.empty()) {
-        // ── 4b. 绘制占位文字（无实际文本时显示）────────────────────────────
-        const core::Variant& ph_var = get_value(PlaceholderForegroundProperty);
-        const paint::Brush ph_fg = ph_var.has<paint::Brush>()
-            ? ph_var.get<paint::Brush>()
-            : paint::Brush::solid(math::Color{ 0.29f, 0.27f, 0.31f, 0.60f });
-        canvas.draw_text(
-            core::StringView{ placeholder_buf_.data(), placeholder_buf_.size() },
-            { text_x0, baseline_y },
-            font_face_,
-            font_size_px_,
-            ph_fg);
-    }
-
-    // ── 5. 绘制插入光标（获焦时可见；只读模式下常亮不闪烁）───────────
-    if (is_focused_ && (cursor_visible_ || is_read_only_)) {
-        // 计算光标 x：光标前方文字的水平宽度
-        float cursor_x = text_x0;
-        if (cursor_pos_ > 0u && has_text) {
-            cursor_x += measure_text_width(text_buf_.data(), cursor_pos_);
+    // ────────────────────────────────────────────────────────────────────────
+    // 单行模式快速路径
+    // ────────────────────────────────────────────────────────────────────────
+    if (!accepts_return_) {
+        // ── 4a-pre. 选择高亮（在文字下方渲染）──────────────────────────────
+        if (is_focused_ && has_selection() && has_text) {
+            const float x_sel0   = text_x0 + measure_text_width(text_buf_.data(), sel_start());
+            const float x_sel1   = text_x0 + measure_text_width(text_buf_.data(), sel_end());
+            const float sel_top  = text_y0 + (text_h - line_h) * 0.5f;
+            canvas.fill_rect(
+                { x_sel0, sel_top, x_sel1 - x_sel0, line_h },
+                paint::Brush::solid(math::Color{ 0.404f, 0.314f, 0.643f, 0.30f }));
         }
 
-        // 光标高度与行高一致，垂直居中于内容区
-        const float cursor_top = text_y0 + (text_h - line_h) * 0.5f;
-        canvas.fill_rect(
-            { cursor_x, cursor_top, 1.5f, line_h },
-            paint::Brush::solid_rgb(0x6750A4));  // MD3 Primary
+        if (has_text) {
+            // ── 4a. 绘制实际文字 ─────────────────────────────────────────────
+            const core::Variant& fg_var = get_value(ForegroundProperty);
+            const paint::Brush fg = fg_var.has<paint::Brush>()
+                ? fg_var.get<paint::Brush>()
+                : paint::Brush::solid_rgb(0x1C1B1F);
+            canvas.draw_text(
+                core::StringView{ text_buf_.data(), text_buf_.size() },
+                { text_x0, baseline_y },
+                font_face_,
+                font_size_px_,
+                fg);
+        } else if (!placeholder_buf_.empty()) {
+            // ── 4b. 绘制占位文字 ─────────────────────────────────────────────
+            const core::Variant& ph_var = get_value(PlaceholderForegroundProperty);
+            const paint::Brush ph_fg = ph_var.has<paint::Brush>()
+                ? ph_var.get<paint::Brush>()
+                : paint::Brush::solid(math::Color{ 0.29f, 0.27f, 0.31f, 0.60f });
+            canvas.draw_text(
+                core::StringView{ placeholder_buf_.data(), placeholder_buf_.size() },
+                { text_x0, baseline_y },
+                font_face_,
+                font_size_px_,
+                ph_fg);
+        }
+
+        // ── 5. 绘制插入光标 ──────────────────────────────────────────────────
+        if (is_focused_ && (cursor_visible_ || is_read_only_)) {
+            float cursor_x = text_x0;
+            if (cursor_pos_ > 0u && has_text) {
+                cursor_x += measure_text_width(text_buf_.data(), cursor_pos_);
+            }
+            const float cursor_top = text_y0 + (text_h - line_h) * 0.5f;
+            canvas.fill_rect(
+                { cursor_x, cursor_top, 1.5f, line_h },
+                paint::Brush::solid_rgb(0x6750A4));
+        }
+    }
+    // ────────────────────────────────────────────────────────────────────────
+    // 多行模式
+    // ────────────────────────────────────────────────────────────────────────
+    else {
+        if (!has_text && !placeholder_buf_.empty()) {
+            // 无文字时显示占位文字（单行，不分割）
+            const core::Variant& ph_var = get_value(PlaceholderForegroundProperty);
+            const paint::Brush ph_fg = ph_var.has<paint::Brush>()
+                ? ph_var.get<paint::Brush>()
+                : paint::Brush::solid(math::Color{ 0.29f, 0.27f, 0.31f, 0.60f });
+            canvas.draw_text(
+                core::StringView{ placeholder_buf_.data(), placeholder_buf_.size() },
+                { text_x0, baseline_y },
+                font_face_,
+                font_size_px_,
+                ph_fg);
+        }
+
+        if (has_text) {
+            const auto lines = split_lines(text_buf_.data(), text_buf_.size());
+
+            // ── 选择高亮（逐行计算）──────────────────────────────────────────
+            if (is_focused_ && has_selection()) {
+                const uint32_t sel_s = sel_start();
+                const uint32_t sel_e = sel_end();
+                for (uint32_t i = 0; i < static_cast<uint32_t>(lines.size()); ++i) {
+                    const LineInfo& line = lines[i];
+                    const uint32_t line_end = line.start_offset + line.byte_length;
+                    // 该行与选区有交集
+                    if (sel_s < line_end && sel_e > line.start_offset) {
+                        const uint32_t hl_start = sel_s > line.start_offset ? sel_s : line.start_offset;
+                        const uint32_t hl_end   = sel_e < line_end ? sel_e : line_end;
+                        const char*    line_text = text_buf_.data() + line.start_offset;
+                        const float    x0 = text_x0 + measure_text_width(line_text, hl_start - line.start_offset);
+                        const float    x1 = text_x0 + measure_text_width(line_text, hl_end   - line.start_offset);
+                        const float    y  = text_y0 + static_cast<float>(i) * line_h;
+                        canvas.fill_rect(
+                            { x0, y, x1 - x0, line_h },
+                            paint::Brush::solid(math::Color{ 0.404f, 0.314f, 0.643f, 0.30f }));
+                    }
+                }
+            }
+
+            // ── 绘制文字（逐行）──────────────────────────────────────────────
+            const core::Variant& fg_var = get_value(ForegroundProperty);
+            const paint::Brush fg = fg_var.has<paint::Brush>()
+                ? fg_var.get<paint::Brush>()
+                : paint::Brush::solid_rgb(0x1C1B1F);
+
+            float line_baseline_y = baseline_y;  // 单行时的基线 y
+            // 多行从顶部开始（不垂直居中）
+            if (font_face_ != nullptr) {
+                auto* face = static_cast<text::FontFace*>(font_face_);
+                line_baseline_y = text_y0 + static_cast<float>(face->ascender());
+            } else {
+                line_baseline_y = text_y0 + line_h * 0.8f;
+            }
+
+            for (uint32_t i = 0; i < static_cast<uint32_t>(lines.size()); ++i) {
+                const LineInfo& line = lines[i];
+                if (line.byte_length > 0) {
+                    canvas.draw_text(
+                        core::StringView{ text_buf_.data() + line.start_offset, line.byte_length },
+                        { text_x0, line_baseline_y + static_cast<float>(i) * line_h },
+                        font_face_,
+                        font_size_px_,
+                        fg);
+                }
+            }
+
+            // ── 绘制光标（多行）──────────────────────────────────────────────
+            if (is_focused_ && (cursor_visible_ || is_read_only_)) {
+                uint32_t cursor_line_idx, cursor_line_offset;
+                if (find_line_by_offset(lines, cursor_pos_, &cursor_line_idx, &cursor_line_offset)) {
+                    const LineInfo& cursor_line = lines[cursor_line_idx];
+                    const char*     line_text   = text_buf_.data() + cursor_line.start_offset;
+                    const float     cursor_x    = text_x0 + measure_text_width(line_text, cursor_line_offset);
+                    const float     cursor_y    = text_y0 + static_cast<float>(cursor_line_idx) * line_h;
+                    canvas.fill_rect(
+                        { cursor_x, cursor_y, 1.5f, line_h },
+                        paint::Brush::solid_rgb(0x6750A4));
+                }
+            }
+        }
     }
 
     canvas.restore();
@@ -717,16 +894,27 @@ void TextBox::on_mouse_down(input::MouseEventArgs& args)
 {
     // 焦点切换已由 InputRouter 的 GotFocusEvent 处理
 
-    // 计算文字区域起始 x（bounds_rect 和 position() 同为窗口根坐标系）
+    // 计算文字区域起始 x/y（bounds_rect 和 position() 同为窗口根坐标系）
     const core::Variant& pad_var = get_value(PaddingProperty);
     const math::Thickness pad = pad_var.has<math::Thickness>()
         ? pad_var.get<math::Thickness>()
         : math::Thickness{ 16.0f, 8.0f, 16.0f, 8.0f };
 
-    const float text_x0   = bounds_rect().x + pad.left;
-    const float click_rel = args.position().x - text_x0;
+    const float text_x0    = bounds_rect().x + pad.left;
+    const float text_y0    = bounds_rect().y + pad.top;
+    const float click_rel_x = args.position().x - text_x0;
+    const float click_rel_y = args.position().y - text_y0;
 
-    const uint32_t new_pos = cursor_pos_from_x(click_rel < 0.0f ? 0.0f : click_rel);
+    uint32_t new_pos;
+    if (accepts_return_) {
+        // 多行模式：使用 xy 定位
+        new_pos = cursor_pos_from_xy(
+            click_rel_x < 0.0f ? 0.0f : click_rel_x,
+            click_rel_y < 0.0f ? 0.0f : click_rel_y);
+    } else {
+        // 单行模式：仅用 x 定位
+        new_pos = cursor_pos_from_x(click_rel_x < 0.0f ? 0.0f : click_rel_x);
+    }
 
     if (args.shift()) {
         // Shift+Click：从现有 sel_anchor_ 延伸选择到点击位置
@@ -737,6 +925,7 @@ void TextBox::on_mouse_down(input::MouseEventArgs& args)
         sel_anchor_ = new_pos;
     }
 
+    cursor_target_x_    = 0.0f;  // 鼠标点击后重置目标 x
     cursor_visible_     = true;
     cursor_blink_accum_ = 0.0f;
     invalidate_render();
@@ -798,6 +987,32 @@ void TextBox::on_key_down(input::KeyEventArgs& args)
         cursor_pos_ = sz;
         commit_move();
         reset_blink(); invalidate_render(); args.set_handled(true);
+        break;
+
+    case input::Key::Up:
+        // 多行模式：向上移动一行
+        if (accepts_return_) {
+            move_cursor_up();
+            commit_move();
+            reset_blink(); invalidate_render(); args.set_handled(true);
+        }
+        break;
+
+    case input::Key::Down:
+        // 多行模式：向下移动一行
+        if (accepts_return_) {
+            move_cursor_down();
+            commit_move();
+            reset_blink(); invalidate_render(); args.set_handled(true);
+        }
+        break;
+
+    case input::Key::Enter:
+        // 多行模式：插入换行符 \n
+        if (accepts_return_ && !is_read_only_) {
+            insert_char('\n');
+            args.set_handled(true);
+        }
         break;
 
     case input::Key::Backspace:
@@ -956,13 +1171,15 @@ void TextBox::delete_char_after()
 
 void TextBox::move_cursor_left()
 {
-    cursor_pos_ = utf8_prev(text_buf_.data(), cursor_pos_);
+    cursor_pos_      = utf8_prev(text_buf_.data(), cursor_pos_);
+    cursor_target_x_ = 0.0f;  // 水平移动，重置目标 x（下次垂直移动时重新计算）
 }
 
 void TextBox::move_cursor_right()
 {
     const uint32_t sz = static_cast<uint32_t>(text_buf_.size());
-    cursor_pos_ = utf8_next(text_buf_.data(), cursor_pos_, sz);
+    cursor_pos_      = utf8_next(text_buf_.data(), cursor_pos_, sz);
+    cursor_target_x_ = 0.0f;  // 水平移动，重置目标 x
 }
 
 // ============================================================================
@@ -1185,6 +1402,130 @@ void TextBox::paste_from_clipboard()
     cursor_blink_accum_ = 0.0f;
     invalidate_render();
 #endif  // _WIN32
+}
+
+uint32_t TextBox::cursor_pos_from_xy(float click_x, float click_y) const noexcept
+{
+    const uint32_t len = static_cast<uint32_t>(text_buf_.size());
+    if (len == 0u) {
+        return 0u;
+    }
+
+    const auto lines      = split_lines(text_buf_.data(), text_buf_.size());
+    const float line_h    = effective_line_height();
+    const uint32_t line_idx = static_cast<uint32_t>(click_y / line_h);
+
+    // 超出范围返回文本末尾
+    if (line_idx >= static_cast<uint32_t>(lines.size())) {
+        return len;
+    }
+
+    const LineInfo& line       = lines[line_idx];
+    const char*     line_start = text_buf_.data() + line.start_offset;
+
+    // 在该行内按 x 坐标定位字符（与单行逻辑相同）
+    uint32_t i = 0;
+    while (i < line.byte_length) {
+        const uint32_t next     = utf8_next(line_start, i, line.byte_length);
+        const float    x_before = measure_text_width(line_start, i);
+        const float    x_after  = measure_text_width(line_start, next);
+        const float    midpoint = (x_before + x_after) * 0.5f;
+        if (click_x < midpoint) {
+            return line.start_offset + i;
+        }
+        i = next;
+    }
+    // 点击在行末尾或之后
+    return line.start_offset + line.byte_length;
+}
+
+void TextBox::move_cursor_up()
+{
+    if (!accepts_return_) {
+        return;  // 单行模式不支持上下移动
+    }
+
+    const auto   lines = split_lines(text_buf_.data(), text_buf_.size());
+    uint32_t     line_idx, line_offset;
+    if (!find_line_by_offset(lines, cursor_pos_, &line_idx, &line_offset)) {
+        return;
+    }
+
+    if (line_idx == 0) {
+        return;  // 已在第一行，无法上移
+    }
+
+    // 上一行
+    const LineInfo& prev_line = lines[line_idx - 1];
+    const char*     prev_text = text_buf_.data() + prev_line.start_offset;
+
+    // 使用 cursor_target_x_（左右移动时更新）保持水平位置，或用当前 x
+    if (cursor_target_x_ == 0.0f) {
+        // 首次垂直移动，记录当前 x
+        const LineInfo& curr_line = lines[line_idx];
+        const char*     curr_text = text_buf_.data() + curr_line.start_offset;
+        cursor_target_x_ = measure_text_width(curr_text, line_offset);
+    }
+
+    // 在上一行中找最接近 target_x 的位置
+    uint32_t best_offset = 0;
+    float    min_dist    = 1e9f;
+    uint32_t i           = 0;
+    while (i <= prev_line.byte_length) {
+        const float x = measure_text_width(prev_text, i);
+        const float dist = std::abs(x - cursor_target_x_);
+        if (dist < min_dist) {
+            min_dist    = dist;
+            best_offset = i;
+        }
+        if (i >= prev_line.byte_length) break;
+        i = utf8_next(prev_text, i, prev_line.byte_length);
+    }
+
+    cursor_pos_ = prev_line.start_offset + best_offset;
+}
+
+void TextBox::move_cursor_down()
+{
+    if (!accepts_return_) {
+        return;
+    }
+
+    const auto   lines = split_lines(text_buf_.data(), text_buf_.size());
+    uint32_t     line_idx, line_offset;
+    if (!find_line_by_offset(lines, cursor_pos_, &line_idx, &line_offset)) {
+        return;
+    }
+
+    if (line_idx + 1 >= static_cast<uint32_t>(lines.size())) {
+        return;  // 已在最后一行
+    }
+
+    // 下一行
+    const LineInfo& next_line = lines[line_idx + 1];
+    const char*     next_text = text_buf_.data() + next_line.start_offset;
+
+    if (cursor_target_x_ == 0.0f) {
+        const LineInfo& curr_line = lines[line_idx];
+        const char*     curr_text = text_buf_.data() + curr_line.start_offset;
+        cursor_target_x_ = measure_text_width(curr_text, line_offset);
+    }
+
+    uint32_t best_offset = 0;
+    float    min_dist    = 1e9f;
+    uint32_t i           = 0;
+    while (i <= next_line.byte_length) {
+        const float x = measure_text_width(next_text, i);
+        const float dist = std::abs(x - cursor_target_x_);
+        if (dist < min_dist) {
+            min_dist    = dist;
+            best_offset = i;
+        }
+        if (i >= next_line.byte_length) break;
+        i = utf8_next(next_text, i, next_line.byte_length);
+    }
+
+    cursor_pos_ = next_line.start_offset + best_offset;
 }
 
 } // namespace mine::ui
