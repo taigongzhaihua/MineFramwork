@@ -77,6 +77,8 @@ private:
     void dispatch_mouse_event(const platform::WindowEvent& we);
     /// 派发字符输入事件（TextInputEvent，向键盘焦点派发）
     void dispatch_char_event(const platform::WindowEvent& we);
+    /// 派发 IME 确认提交文字（逐 UTF-32 码点转发为 TextInputEvent）
+    void dispatch_ime_text_event(const platform::WindowEvent& we);
 
     UIElement* root_{nullptr};
     UIElement* keyboard_focus_{nullptr};

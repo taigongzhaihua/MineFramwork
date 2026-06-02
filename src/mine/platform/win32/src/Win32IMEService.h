@@ -94,7 +94,7 @@ private:
 
 private:
     HWND       active_hwnd_{nullptr};   ///< 当前获得焦点的窗口句柄
-    bool       enabled_{false};          ///< 是否已通过 enable() 启用
+    bool       enabled_{true};           ///< 是否已通过 enable() 启用（默认开启，支持 IME 中文输入）
     math::Rect composition_rect_{};      ///< 当前候选框区域（物理像素）
 };
 

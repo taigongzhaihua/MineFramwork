@@ -4,6 +4,40 @@
 
 ## [Unreleased]
 
+### Fixed
+- **mine.ui.controls / mine.ui.input / mine.platform.win32：修复 TextBox 四项缺陷**：
+
+  1. **IME 中文输入不工作**：
+     - `Win32IMEService::enabled_` 从 `false` 改为 `true`（默认启用 IME，符合常规应用行为）；
+     - `Window::Impl::on_window_event` 新增 `ImeCompositionCommitted` case，转发到 InputRouter；
+     - `InputRouter` 新增 `dispatch_ime_text_event()`，逐 UTF-32 码点将 IME 提交文字派发为 `TextInputEvent`。
+
+  2. **鼠标点击无法定位光标**：
+     - 实现 `TextBox::on_mouse_down()`：按点击 x 坐标（相对于文字区左边缘）通过
+       `cursor_pos_from_x()` 找到最近字符位置，设置 `cursor_pos_` / `sel_anchor_`；
+     - 新增 `cursor_pos_from_x(float click_x)` 辅助方法，以字符中点判断落点，支持精确像素定位；
+     - Shift+Click 延伸选择（光标移动，`sel_anchor_` 保持）。
+
+  3. **不支持复制/粘贴**：
+     - `on_key_down` 新增 `Ctrl+C` 处理：调用 `copy_to_clipboard()`，有选区则复制选区，无选区复制全文；
+     - `on_key_down` 新增 `Ctrl+V` 处理：调用 `paste_from_clipboard()`（只读模式禁止）；
+     - 剪贴板操作通过 Win32 API（`OpenClipboard` / `CF_UNICODETEXT` / `GlobalAlloc`）直接实现，
+       UTF-8↔UTF-16 转换使用 `MultiByteToWideChar` / `WideCharToMultiByte`。
+
+  4. **只读模式不支持选中**：
+     - 新增 `sel_anchor_` 字段（选择锚点字节偏移），与 `cursor_pos_` 共同构成选择区间；
+     - 新增辅助方法：`has_selection()`、`sel_start()`、`sel_end()`、`delete_selection()`；
+     - `on_key_down` 完整重写：
+       - 无 Shift：方向键移动后 `sel_anchor_ = cursor_pos_`（取消选择）；
+       - 有 Shift：`cursor_pos_` 移动，`sel_anchor_` 保持（延伸选择）；
+       - `Ctrl+A`：`sel_anchor_ = 0; cursor_pos_ = text_size`（全选）；
+       - Backspace / Delete：有选区时先调用 `delete_selection()`；
+     - `insert_char()` 在插入前先 `delete_selection()`（替换选中内容）；
+     - 只读模式下光标常亮不闪烁（`anim_tick_callback` 在只读模式跳过闪烁更新）；
+     - `on_render` 绘制选择高亮（MD3 Primary 30% alpha 蓝紫色矩形，在文字下方）；
+     - `on_render` 修改光标可见条件为 `is_focused_ && (cursor_visible_ || is_read_only_)`，
+       使只读模式下光标可见，支持键盘定位和选择操作。
+
 ### Added / Changed
 - **mine.ui.controls：实现 TextBox 单行文本输入控件（MD3 Filled Text Field 风格）**：
 

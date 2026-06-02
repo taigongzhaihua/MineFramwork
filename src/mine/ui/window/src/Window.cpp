@@ -321,7 +321,8 @@ struct Window::Impl : public platform::IWindowEventSink {
         case Kind::MouseWheel:
         case Kind::KeyDown:
         case Kind::KeyUp:
-        case Kind::Char:   // 字符输入事件→ InputRouter 路由为 TextInputEvent
+        case Kind::Char:                    // 字符输入事件→ InputRouter 路由为 TextInputEvent
+        case Kind::ImeCompositionCommitted: // IME 确认提交→ InputRouter 逐码点路由
             router_.on_window_event(event);
             if (post_input_fn_) { post_input_fn_(); }
             break;

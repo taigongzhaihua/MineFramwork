@@ -36,6 +36,18 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <string>  // std::string（剪贴板 UTF-16 转换用）
+
+// ── Win32 剪贴板支持 ─────────────────────────────────────────────────────────────────
+#ifdef _WIN32
+#  ifndef WIN32_LEAN_AND_MEAN
+#  define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#  define NOMINMAX
+#  endif
+#  include <windows.h>
+#endif  // _WIN32
 
 namespace mine::ui {
 
@@ -333,6 +345,7 @@ void TextBox::set_text(core::StringView text)
     }
     // 光标移到末尾
     cursor_pos_ = static_cast<uint32_t>(text_buf_.size());
+    sel_anchor_ = cursor_pos_;  // 设置文字后取消选区
     // 同步 DP（affects_measure/affects_render=true → 自动触发重新测量和重绘）
     set_value(TextProperty, core::Variant{ text_buf_ });
 }
@@ -508,6 +521,16 @@ void TextBox::on_render(paint::Canvas& canvas)
 
     const bool has_text = !text_buf_.empty();
 
+    // ── 4a-pre. 选择高亮（在文字下方渲染）──────────────────────────────────────────
+    if (is_focused_ && has_selection() && has_text) {
+        const float x_sel0   = text_x0 + measure_text_width(text_buf_.data(), sel_start());
+        const float x_sel1   = text_x0 + measure_text_width(text_buf_.data(), sel_end());
+        const float sel_top  = text_y0 + (text_h - line_h) * 0.5f;
+        canvas.fill_rect(
+            { x_sel0, sel_top, x_sel1 - x_sel0, line_h },
+            paint::Brush::solid(math::Color{ 0.404f, 0.314f, 0.643f, 0.30f }));  // MD3 Primary 30% alpha
+    }
+
     if (has_text) {
         // ── 4a. 绘制实际文字 ─────────────────────────────────────────────────
         const core::Variant& fg_var = get_value(ForegroundProperty);
@@ -534,8 +557,8 @@ void TextBox::on_render(paint::Canvas& canvas)
             ph_fg);
     }
 
-    // ── 5. 绘制插入光标（仅 Focused 且非只读时可见）──────────────────────
-    if (is_focused_ && cursor_visible_ && !is_read_only_) {
+    // ── 5. 绘制插入光标（获焦时可见；只读模式下常亮不闪烁）───────────
+    if (is_focused_ && (cursor_visible_ || is_read_only_)) {
         // 计算光标 x：光标前方文字的水平宽度
         float cursor_x = text_x0;
         if (cursor_pos_ > 0u && has_text) {
@@ -602,16 +625,19 @@ bool TextBox::anim_tick_callback(void* handle, float dt) noexcept
         }
     }
 
-    // ── 光标闪烁（仅获焦时）──────────────────────────────────────────────
+    // ── 光标闪烁（仅获焦且非只读时闪烁）──────────────────────────────
     if (self->is_focused_) {
-        constexpr float kBlinkInterval = 0.5f;  // 500ms 半周期（闪烁周期 1s）
-        self->cursor_blink_accum_ += dt;
-        if (self->cursor_blink_accum_ >= kBlinkInterval) {
-            self->cursor_blink_accum_ -= kBlinkInterval;
-            self->cursor_visible_ = !self->cursor_visible_;
-            self->invalidate_render();
+        if (!self->is_read_only_) {
+            // 只读模式下光标常亮，不需要闪烁
+            constexpr float kBlinkInterval = 0.5f;  // 500ms 半周期（闪烁周期 1s）
+            self->cursor_blink_accum_ += dt;
+            if (self->cursor_blink_accum_ >= kBlinkInterval) {
+                self->cursor_blink_accum_ -= kBlinkInterval;
+                self->cursor_visible_ = !self->cursor_visible_;
+                self->invalidate_render();
+            }
         }
-        // 有焦点时持续保持注册（需要一直驱动光标闪烁）
+        // 有焦点时持续保持注册（需要一直驱动光标闪烁和 VSM 动画）
         any_active = true;
     }
 
@@ -687,10 +713,34 @@ void TextBox::on_mouse_leave()
     update_visual_state();
 }
 
-void TextBox::on_mouse_down(input::MouseEventArgs& /*args*/)
+void TextBox::on_mouse_down(input::MouseEventArgs& args)
 {
-    // 焦点设置由 InputRouter 和 GotFocusEvent 负责，此处无需额外操作。
-    // 后续可在此实现鼠标点击定位光标位置。
+    // 焦点切换已由 InputRouter 的 GotFocusEvent 处理
+
+    // 计算文字区域起始 x（bounds_rect 和 position() 同为窗口根坐标系）
+    const core::Variant& pad_var = get_value(PaddingProperty);
+    const math::Thickness pad = pad_var.has<math::Thickness>()
+        ? pad_var.get<math::Thickness>()
+        : math::Thickness{ 16.0f, 8.0f, 16.0f, 8.0f };
+
+    const float text_x0   = bounds_rect().x + pad.left;
+    const float click_rel = args.position().x - text_x0;
+
+    const uint32_t new_pos = cursor_pos_from_x(click_rel < 0.0f ? 0.0f : click_rel);
+
+    if (args.shift()) {
+        // Shift+Click：从现有 sel_anchor_ 延伸选择到点击位置
+        cursor_pos_ = new_pos;
+    } else {
+        // 普通点击：取消选择，光标移到点击位置
+        cursor_pos_ = new_pos;
+        sel_anchor_ = new_pos;
+    }
+
+    cursor_visible_     = true;
+    cursor_blink_accum_ = 0.0f;
+    invalidate_render();
+    args.set_handled(true);
 }
 
 void TextBox::on_key_down(input::KeyEventArgs& args)
@@ -699,52 +749,100 @@ void TextBox::on_key_down(input::KeyEventArgs& args)
         return;
     }
 
-    const uint32_t sz = static_cast<uint32_t>(text_buf_.size());
+    const uint32_t sz    = static_cast<uint32_t>(text_buf_.size());
+    const bool     shift = args.shift();
+    const bool     ctrl  = args.ctrl();
+
+    // 光标移动后立即显示（重置闪烁计时）
+    auto reset_blink = [this]() {
+        cursor_visible_     = true;
+        cursor_blink_accum_ = 0.0f;
+    };
+    // 非 Shift 时取消选择（将 sel_anchor_ 置于光标新位置）
+    auto commit_move = [this, shift]() {
+        if (!shift) { sel_anchor_ = cursor_pos_; }
+    };
 
     switch (args.key()) {
     case input::Key::Left:
-        move_cursor_left();
-        // 光标移动后立即显示（重置闪烁计时）
-        cursor_visible_     = true;
-        cursor_blink_accum_ = 0.0f;
-        invalidate_render();
-        args.set_handled(true);
+        if (has_selection() && !shift) {
+            // 有选区且无 Shift：光标跳到选区左端，取消选择
+            cursor_pos_ = sel_start();
+            sel_anchor_ = cursor_pos_;
+        } else {
+            move_cursor_left();
+            commit_move();
+        }
+        reset_blink(); invalidate_render(); args.set_handled(true);
         break;
 
     case input::Key::Right:
-        move_cursor_right();
-        cursor_visible_     = true;
-        cursor_blink_accum_ = 0.0f;
-        invalidate_render();
-        args.set_handled(true);
+        if (has_selection() && !shift) {
+            // 有选区且无 Shift：光标跳到选区右端，取消选择
+            cursor_pos_ = sel_end();
+            sel_anchor_ = cursor_pos_;
+        } else {
+            move_cursor_right();
+            commit_move();
+        }
+        reset_blink(); invalidate_render(); args.set_handled(true);
         break;
 
     case input::Key::Home:
-        cursor_pos_         = 0u;
-        cursor_visible_     = true;
-        cursor_blink_accum_ = 0.0f;
-        invalidate_render();
-        args.set_handled(true);
+        cursor_pos_ = 0u;
+        commit_move();
+        reset_blink(); invalidate_render(); args.set_handled(true);
         break;
 
     case input::Key::End:
-        cursor_pos_         = sz;
-        cursor_visible_     = true;
-        cursor_blink_accum_ = 0.0f;
-        invalidate_render();
-        args.set_handled(true);
+        cursor_pos_ = sz;
+        commit_move();
+        reset_blink(); invalidate_render(); args.set_handled(true);
         break;
 
     case input::Key::Backspace:
         if (!is_read_only_) {
-            delete_char_before();
+            if (has_selection()) {
+                delete_selection();
+            } else {
+                delete_char_before();
+            }
             args.set_handled(true);
         }
         break;
 
     case input::Key::Delete:
         if (!is_read_only_) {
-            delete_char_after();
+            if (has_selection()) {
+                delete_selection();
+            } else {
+                delete_char_after();
+            }
+            args.set_handled(true);
+        }
+        break;
+
+    case input::Key::A:
+        // Ctrl+A：全选文字
+        if (ctrl) {
+            sel_anchor_ = 0u;
+            cursor_pos_ = sz;
+            reset_blink(); invalidate_render(); args.set_handled(true);
+        }
+        break;
+
+    case input::Key::C:
+        // Ctrl+C：复制选中文字（无选区则复制全部）
+        if (ctrl) {
+            copy_to_clipboard();
+            args.set_handled(true);
+        }
+        break;
+
+    case input::Key::V:
+        // Ctrl+V：粘贴（只读模式禁止）
+        if (ctrl && !is_read_only_) {
+            paste_from_clipboard();
             args.set_handled(true);
         }
         break;
@@ -773,6 +871,11 @@ void TextBox::on_text_input(input::TextInputEventArgs& args)
 
 void TextBox::insert_char(uint32_t char_utf32)
 {
+    // 若当前有选区，先删除选区内容（以新字符替换选区）
+    if (has_selection()) {
+        delete_selection();
+    }
+
     char utf8_bytes[4]{};
     const uint32_t byte_count = utf32_to_utf8(char_utf32, utf8_bytes);
     const uint32_t sz  = static_cast<uint32_t>(text_buf_.size());
@@ -786,6 +889,7 @@ void TextBox::insert_char(uint32_t char_utf32)
     new_buf.append(text_buf_.data() + pos, sz - pos);
     text_buf_   = std::move(new_buf);
     cursor_pos_ = pos + byte_count;
+    sel_anchor_ = cursor_pos_;  // 插入后取消选择
 
     // 同步 DP 并派发 TextChangedEvent
     set_value(TextProperty, core::Variant{ text_buf_ });
@@ -813,10 +917,11 @@ void TextBox::delete_char_before()
     new_buf.append(text_buf_.data() + cursor_pos_, sz - cursor_pos_);
     text_buf_   = std::move(new_buf);
     cursor_pos_ = prev_pos;
+    sel_anchor_ = cursor_pos_;  // 删除后取消选择
 
     set_value(TextProperty, core::Variant{ text_buf_ });
-    RoutedEventArgs changed{ TextChangedEvent() };
-    EventManager::raise(*this, changed);
+    RoutedEventArgs changed1{ TextChangedEvent() };
+    EventManager::raise(*this, changed1);
 
     cursor_visible_     = true;
     cursor_blink_accum_ = 0.0f;
@@ -838,6 +943,7 @@ void TextBox::delete_char_after()
     new_buf.append(text_buf_.data() + next_pos, sz - next_pos);
     text_buf_ = std::move(new_buf);
     // cursor_pos_ 不变（光标位置不随 Delete 移动）
+    sel_anchor_ = cursor_pos_;  // 删除后取消选择
 
     set_value(TextProperty, core::Variant{ text_buf_ });
     RoutedEventArgs changed{ TextChangedEvent() };
@@ -891,6 +997,194 @@ float TextBox::measure_text_width(const char* utf8, uint32_t len) const noexcept
         ++char_count;
     }
     return static_cast<float>(char_count) * font_size_px_ * 0.55f;
+}
+
+// ============================================================================
+// 选择区间辅助方法
+// ============================================================================
+
+bool TextBox::has_selection() const noexcept
+{
+    return cursor_pos_ != sel_anchor_;
+}
+
+uint32_t TextBox::sel_start() const noexcept
+{
+    return cursor_pos_ < sel_anchor_ ? cursor_pos_ : sel_anchor_;
+}
+
+uint32_t TextBox::sel_end() const noexcept
+{
+    return cursor_pos_ < sel_anchor_ ? sel_anchor_ : cursor_pos_;
+}
+
+void TextBox::delete_selection()
+{
+    if (!has_selection()) {
+        return;
+    }
+    const uint32_t start = sel_start();
+    const uint32_t end   = sel_end();
+    const uint32_t sz    = static_cast<uint32_t>(text_buf_.size());
+
+    // 构建新字符串：删除 [start, end) 区间
+    containers::InlineString new_buf;
+    new_buf.reserve(sz - (end - start));
+    new_buf.append(text_buf_.data(), start);
+    new_buf.append(text_buf_.data() + end, sz - end);
+    text_buf_   = std::move(new_buf);
+    cursor_pos_ = start;
+    sel_anchor_ = start;  // 删除后无选择
+
+    set_value(TextProperty, core::Variant{ text_buf_ });
+    RoutedEventArgs changed{ TextChangedEvent() };
+    EventManager::raise(*this, changed);
+
+    cursor_visible_     = true;
+    cursor_blink_accum_ = 0.0f;
+    invalidate_render();
+}
+
+uint32_t TextBox::cursor_pos_from_x(float click_x) const noexcept
+{
+    const uint32_t len = static_cast<uint32_t>(text_buf_.size());
+    if (click_x <= 0.0f || len == 0u) {
+        return 0u;
+    }
+
+    uint32_t i = 0;
+    while (i < len) {
+        const uint32_t next     = utf8_next(text_buf_.data(), i, len);
+        const float    x_before = measure_text_width(text_buf_.data(), i);
+        const float    x_after  = measure_text_width(text_buf_.data(), next);
+        const float    midpoint = (x_before + x_after) * 0.5f;
+        if (click_x < midpoint) {
+            return i;
+        }
+        i = next;
+    }
+    // 点击在最后一个字符右半边或文字末尾之后
+    return len;
+}
+
+// ============================================================================
+// 剪贴板操作（Win32 API 直接实现）
+// ============================================================================
+
+void TextBox::copy_to_clipboard() const
+{
+    // 有选区则复制选中内容，无选区则复制全部文字
+    const char* data;
+    size_t      len;
+    if (has_selection()) {
+        data = text_buf_.data() + sel_start();
+        len  = static_cast<size_t>(sel_end() - sel_start());
+    } else {
+        data = text_buf_.data();
+        len  = text_buf_.size();
+    }
+    if (len == 0) {
+        return;
+    }
+
+#ifdef _WIN32
+    // UTF-8 → UTF-16 转换（不含 null 终止符：显式传入字节数）
+    const int wlen = MultiByteToWideChar(
+        CP_UTF8, 0, data, static_cast<int>(len), nullptr, 0);
+    if (wlen <= 0) {
+        return;
+    }
+    if (!OpenClipboard(nullptr)) {
+        return;
+    }
+    EmptyClipboard();
+    HGLOBAL hglobal = GlobalAlloc(
+        GMEM_MOVEABLE, (static_cast<size_t>(wlen) + 1u) * sizeof(wchar_t));
+    if (!hglobal) {
+        CloseClipboard();
+        return;
+    }
+    auto* dest = static_cast<wchar_t*>(GlobalLock(hglobal));
+    if (!dest) {
+        GlobalFree(hglobal);
+        CloseClipboard();
+        return;
+    }
+    MultiByteToWideChar(CP_UTF8, 0, data, static_cast<int>(len), dest, wlen);
+    dest[wlen] = L'\0';
+    GlobalUnlock(hglobal);
+    SetClipboardData(CF_UNICODETEXT, hglobal);
+    CloseClipboard();
+#endif  // _WIN32
+}
+
+void TextBox::paste_from_clipboard()
+{
+    if (is_read_only_) {
+        return;
+    }
+#ifdef _WIN32
+    if (!IsClipboardFormatAvailable(CF_UNICODETEXT)) {
+        return;
+    }
+    if (!OpenClipboard(nullptr)) {
+        return;
+    }
+    HANDLE hdata = GetClipboardData(CF_UNICODETEXT);
+    if (!hdata) {
+        CloseClipboard();
+        return;
+    }
+    const auto* ws = static_cast<const wchar_t*>(GlobalLock(hdata));
+    if (!ws) {
+        CloseClipboard();
+        return;
+    }
+
+    // 在 GlobalLock 持有期间完成 UTF-16 → UTF-8 转换
+    // -1 表示 null 终止宽字符串；返回值包含 null 终止符
+    const int utf8_bytes = WideCharToMultiByte(
+        CP_UTF8, 0, ws, -1, nullptr, 0, nullptr, nullptr);
+
+    std::string utf8;
+    if (utf8_bytes > 1) {
+        utf8.resize(static_cast<size_t>(utf8_bytes - 1));  // 不含 null 终止符
+        WideCharToMultiByte(CP_UTF8, 0, ws, -1,
+                            utf8.data(), utf8_bytes - 1, nullptr, nullptr);
+    }
+    GlobalUnlock(hdata);
+    CloseClipboard();
+
+    if (utf8.empty()) {
+        return;
+    }
+
+    // 若当前有选区，先删除选区内容
+    if (has_selection()) {
+        delete_selection();
+    }
+
+    const uint32_t sz        = static_cast<uint32_t>(text_buf_.size());
+    const uint32_t pos       = cursor_pos_;
+    const uint32_t paste_len = static_cast<uint32_t>(utf8.size());
+
+    containers::InlineString new_buf;
+    new_buf.reserve(sz + paste_len);
+    new_buf.append(text_buf_.data(), pos);
+    new_buf.append(utf8.data(), paste_len);
+    new_buf.append(text_buf_.data() + pos, sz - pos);
+    text_buf_   = std::move(new_buf);
+    cursor_pos_ = pos + paste_len;
+    sel_anchor_ = cursor_pos_;
+
+    set_value(TextProperty, core::Variant{ text_buf_ });
+    RoutedEventArgs changed{ TextChangedEvent() };
+    EventManager::raise(*this, changed);
+
+    cursor_visible_     = true;
+    cursor_blink_accum_ = 0.0f;
+    invalidate_render();
+#endif  // _WIN32
 }
 
 } // namespace mine::ui

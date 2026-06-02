@@ -227,6 +227,8 @@ private:
 
     /**
      * @brief 在 cursor_pos_ 处插入 UTF-32 字符（转 UTF-8 写入 text_buf_）。
+     *
+     * 若当前有选中区间，先删除选区再插入。
      */
     void insert_char(uint32_t char_utf32);
 
@@ -260,6 +262,52 @@ private:
      */
     [[nodiscard]] float measure_text_width(const char* utf8, uint32_t len) const noexcept;
 
+    // ── 选择区间辅助方法 ─────────────────────────────────────────────────
+
+    /**
+     * @brief 当前是否有选中区间（cursor_pos_ != sel_anchor_）。
+     */
+    [[nodiscard]] bool has_selection() const noexcept;
+
+    /**
+     * @brief 返回选区起始字节偏移（较小值）。
+     */
+    [[nodiscard]] uint32_t sel_start() const noexcept;
+
+    /**
+     * @brief 返回选区结束字节偏移（较大值）。
+     */
+    [[nodiscard]] uint32_t sel_end() const noexcept;
+
+    /**
+     * @brief 删除当前选中区间的文字，并将 cursor_pos_ 和 sel_anchor_ 置于区间起点。
+     */
+    void delete_selection();
+
+    /**
+     * @brief 根据点击 x 坐标（相对于文字区域左边缘）计算最近的字节偏移。
+     *
+     * 使用字符中点判断光标落点，返回对应 UTF-8 序列的起始字节偏移。
+     */
+    [[nodiscard]] uint32_t cursor_pos_from_x(float click_x) const noexcept;
+
+    // ── 剪贴板支持 ────────────────────────────────────────────────────────
+
+    /**
+     * @brief 将选中文字（无选区时复制全部）写入系统剪贴板。
+     *
+     * 仅在 _WIN32 编译时有实际效果（通过 Win32 API 直接操作剪贴板）。
+     */
+    void copy_to_clipboard() const;
+
+    /**
+     * @brief 从系统剪贴板读取 Unicode 文字并粘贴到当前光标位置。
+     *
+     * 若有选区先删除选区；粘贴后 cursor_pos_ 移到粘贴内容末尾。
+     * 只读模式不执行任何操作。
+     */
+    void paste_from_clipboard();
+
     // ── 私有字段 ──────────────────────────────────────────────────────────
 
     containers::InlineString text_buf_;         ///< 实际文字内容缓冲（UTF-8）
@@ -270,9 +318,10 @@ private:
     bool  is_focused_   = false;  ///< 键盘焦点状态
     bool  is_enabled_   = true;   ///< 启用/禁用状态
 
-    uint32_t cursor_pos_       = 0;      ///< 光标字节偏移（在 text_buf_ 中）
-    bool     cursor_visible_   = true;   ///< 光标当前是否可见（闪烁控制）
-    float    cursor_blink_accum_ = 0.0f; ///< 光标闪烁累计时间（秒）
+    uint32_t cursor_pos_         = 0;      ///< 光标字节偏移（在 text_buf_ 中）
+    uint32_t sel_anchor_         = 0;      ///< 选择锚点字节偏移（Shift/点击选择的固定端；无选区时等于 cursor_pos_）
+    bool     cursor_visible_     = true;   ///< 光标当前是否可见（闪烁控制）
+    float    cursor_blink_accum_ = 0.0f;   ///< 光标闪烁累计时间（秒）
 
     void*  font_face_   = nullptr;  ///< 字体（text::FontFace*，可为 nullptr）
     float  font_size_px_ = 14.0f;  ///< 字号（逻辑像素）

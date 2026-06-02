@@ -97,6 +97,9 @@ void InputRouter::on_window_event(platform::WindowEvent& event) {
     case Kind::Char:
         dispatch_char_event(event);
         break;
+    case Kind::ImeCompositionCommitted:
+        dispatch_ime_text_event(event);
+        break;
     default:
         // 非输入事件（窗口大小、焦点等）忽略
         break;
@@ -225,6 +228,59 @@ void InputRouter::dispatch_char_event(const platform::WindowEvent& we) {
     }
     TextInputEventArgs args{ TextInputEvent(), we.char_utf32 };
     EventManager::raise(*target, args);
+}
+
+void InputRouter::dispatch_ime_text_event(const platform::WindowEvent& we) {
+    // IME 确认提交的 UTF-8 字符串逐码点转为 UTF-32，每个码点派发一次 TextInputEvent
+    UIElement* target = keyboard_focus_;
+    if (!target && root_) {
+        target = root_->as_element();
+    }
+    if (!target) {
+        return;
+    }
+
+    const char*    data = we.ime_text_utf8;
+    const uint32_t len  = we.ime_text_length;
+    uint32_t       i    = 0;
+
+    while (i < len) {
+        const auto c = static_cast<uint8_t>(data[i]);
+        uint32_t   cp      = 0;
+        uint32_t   seq_len = 1;
+
+        if ((c & 0x80u) == 0u) {
+            cp      = c;
+            seq_len = 1;
+        } else if ((c & 0xE0u) == 0xC0u && (i + 1u) < len) {
+            cp      = static_cast<uint32_t>(c & 0x1Fu) << 6
+                    | (static_cast<uint8_t>(data[i + 1]) & 0x3Fu);
+            seq_len = 2;
+        } else if ((c & 0xF0u) == 0xE0u && (i + 2u) < len) {
+            cp      = static_cast<uint32_t>(c & 0x0Fu) << 12
+                    | (static_cast<uint32_t>(static_cast<uint8_t>(data[i + 1]) & 0x3Fu) << 6)
+                    | (static_cast<uint8_t>(data[i + 2]) & 0x3Fu);
+            seq_len = 3;
+        } else if ((c & 0xF8u) == 0xF0u && (i + 3u) < len) {
+            cp      = static_cast<uint32_t>(c & 0x07u) << 18
+                    | (static_cast<uint32_t>(static_cast<uint8_t>(data[i + 1]) & 0x3Fu) << 12)
+                    | (static_cast<uint32_t>(static_cast<uint8_t>(data[i + 2]) & 0x3Fu) << 6)
+                    | (static_cast<uint8_t>(data[i + 3]) & 0x3Fu);
+            seq_len = 4;
+        } else {
+            // 无效 UTF-8 字节，跳过一个字节
+            ++i;
+            continue;
+        }
+
+        i += seq_len;
+
+        // 过滤控制字符（码点 < 0x20 由 KeyDown 处理）
+        if (cp >= 0x20u) {
+            TextInputEventArgs args{ TextInputEvent(), cp };
+            EventManager::raise(*target, args);
+        }
+    }
 }
 
 } // namespace mine::ui::input
