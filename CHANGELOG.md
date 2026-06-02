@@ -5,6 +5,21 @@
 ## [Unreleased]
 
 ### Fixed
+- **mine.ui.controls：修复 TextBox 两项交互问题**：
+
+  1. **空文本时不显示光标**：
+     - 在自动换行路径下，光标绘制原先依赖 `has_text` 分支，
+       当文本为空仅显示 placeholder 时未进入光标绘制逻辑；
+     - 修复后多行路径统一先构建行信息，光标绘制独立于 `has_text`，
+       为空内容且获得焦点时也能正确显示插入光标。
+
+  2. **缺少鼠标拖拽选中字符串**：
+     - 新增 `MouseMoveEvent` / `MouseUpEvent` 处理链路，
+       按下左键后进入拖拽选择状态，移动时实时更新 `cursor_pos_`，
+       释放左键结束选择；
+     - 失焦时自动清理拖拽状态，避免状态残留；
+     - 新增 `selected_text()` 接口，直接读取当前选中字符串切片。
+
 - **mine.ui.controls：修复 TextBox 自动换行未生效且长文本越界问题**：
 
   根因是多行渲染路径仍读取旧字段 `accepts_return_`，

@@ -478,6 +478,8 @@ TextBox::TextBox()
     add_handler(input::MouseEnterEvent(), &TextBox::on_mouse_enter_router, this);
     add_handler(input::MouseLeaveEvent(), &TextBox::on_mouse_leave_router, this);
     add_handler(input::MouseDownEvent(),  &TextBox::on_mouse_down_router,  this);
+    add_handler(input::MouseMoveEvent(),  &TextBox::on_mouse_move_router,  this);
+    add_handler(input::MouseUpEvent(),    &TextBox::on_mouse_up_router,    this);
     add_handler(input::KeyDownEvent(),    &TextBox::on_key_down_router,    this);
     add_handler(input::TextInputEvent(),  &TextBox::on_text_input_router,  this);
     add_handler(input::GotFocusEvent(),   &TextBox::on_got_focus_router,   this);
@@ -500,6 +502,16 @@ TextBox::~TextBox()
 core::StringView TextBox::text() const noexcept
 {
     return { text_buf_.data(), text_buf_.size() };
+}
+
+core::StringView TextBox::selected_text() const noexcept
+{
+    if (!has_selection()) {
+        return {};
+    }
+    const uint32_t start = sel_start();
+    const uint32_t end   = sel_end();
+    return { text_buf_.data() + start, static_cast<size_t>(end - start) };
 }
 
 void TextBox::set_text(core::StringView text)
@@ -811,6 +823,14 @@ void TextBox::on_render(paint::Canvas& canvas)
     // 多行模式
     // ────────────────────────────────────────────────────────────────────────
     else {
+        const float text_area_w = rect.width - pad.left - pad.right;
+        const auto wrapping = text_wrapping();
+        const auto lines = split_lines(
+            text_buf_.data(), text_buf_.size(),
+            text_area_w,
+            font_face_, font_size_px_,
+            wrapping);
+
         if (!has_text && !placeholder_buf_.empty()) {
             // 无文字时显示占位文字（单行，不分割）
             const core::Variant& ph_var = get_value(PlaceholderForegroundProperty);
@@ -826,14 +846,6 @@ void TextBox::on_render(paint::Canvas& canvas)
         }
 
         if (has_text) {
-            const float text_area_w = rect.width - pad.left - pad.right;
-            const auto wrapping = text_wrapping();
-            const auto lines = split_lines(
-                text_buf_.data(), text_buf_.size(),
-                text_area_w,
-                font_face_, font_size_px_,
-                wrapping);
-
             // ── 选择高亮（逐行计算）──────────────────────────────────────────
             if (is_focused_ && has_selection()) {
                 const uint32_t sel_s = sel_start();
@@ -883,18 +895,20 @@ void TextBox::on_render(paint::Canvas& canvas)
                 }
             }
 
-            // ── 绘制光标（多行）──────────────────────────────────────────────
-            if (is_focused_ && (cursor_visible_ || is_read_only_)) {
-                uint32_t cursor_line_idx, cursor_line_offset;
-                if (find_line_by_offset(lines, cursor_pos_, &cursor_line_idx, &cursor_line_offset)) {
-                    const LineInfo& cursor_line = lines[cursor_line_idx];
-                    const char*     line_text   = text_buf_.data() + cursor_line.start_offset;
-                    const float     cursor_x    = text_x0 + measure_text_width(line_text, cursor_line_offset);
-                    const float     cursor_y    = text_y0 + static_cast<float>(cursor_line_idx) * line_h;
-                    canvas.fill_rect(
-                        { cursor_x, cursor_y, 1.5f, line_h },
-                        paint::Brush::solid_rgb(0x6750A4));
-                }
+        }
+
+        // ── 绘制光标（多行，空文本时也可见）────────────────────────────────
+        if (is_focused_ && (cursor_visible_ || is_read_only_)) {
+            uint32_t cursor_line_idx = 0u;
+            uint32_t cursor_line_offset = 0u;
+            if (find_line_by_offset(lines, cursor_pos_, &cursor_line_idx, &cursor_line_offset)) {
+                const LineInfo& cursor_line = lines[cursor_line_idx];
+                const char* line_text = text_buf_.data() + cursor_line.start_offset;
+                const float cursor_x = text_x0 + measure_text_width(line_text, cursor_line_offset);
+                const float cursor_y = text_y0 + static_cast<float>(cursor_line_idx) * line_h;
+                canvas.fill_rect(
+                    { cursor_x, cursor_y, 1.5f, line_h },
+                    paint::Brush::solid_rgb(0x6750A4));
             }
         }
     }
@@ -991,6 +1005,18 @@ void TextBox::on_mouse_down_router(void* /*sender*/, RoutedEventArgs& args, void
     static_cast<TextBox*>(ud)->on_mouse_down(mouse_args);
 }
 
+void TextBox::on_mouse_move_router(void* /*sender*/, RoutedEventArgs& args, void* ud)
+{
+    auto& mouse_args = static_cast<input::MouseEventArgs&>(args);
+    static_cast<TextBox*>(ud)->on_mouse_move(mouse_args);
+}
+
+void TextBox::on_mouse_up_router(void* /*sender*/, RoutedEventArgs& args, void* ud)
+{
+    auto& mouse_args = static_cast<input::MouseEventArgs&>(args);
+    static_cast<TextBox*>(ud)->on_mouse_up(mouse_args);
+}
+
 void TextBox::on_key_down_router(void* /*sender*/, RoutedEventArgs& args, void* ud)
 {
     auto& key_args = static_cast<input::KeyEventArgs&>(args);
@@ -1017,6 +1043,7 @@ void TextBox::on_lost_focus_router(void* /*sender*/, RoutedEventArgs& /*args*/, 
 {
     auto* self = static_cast<TextBox*>(ud);
     self->is_focused_  = false;
+    self->is_mouse_selecting_ = false;
     self->cursor_visible_ = false;
     self->update_visual_state();
 }
@@ -1042,6 +1069,10 @@ void TextBox::on_mouse_leave()
 
 void TextBox::on_mouse_down(input::MouseEventArgs& args)
 {
+    if (args.button() != input::MouseButton::Left) {
+        return;
+    }
+
     // 焦点切换已由 InputRouter 的 GotFocusEvent 处理
 
     // 计算文字区域起始 x/y（bounds_rect 和 position() 同为窗口根坐标系）
@@ -1078,10 +1109,52 @@ void TextBox::on_mouse_down(input::MouseEventArgs& args)
     }
 
     cursor_target_x_    = 0.0f;  // 鼠标点击后重置目标 x
+    is_mouse_selecting_ = true;
     cursor_visible_     = true;
     cursor_blink_accum_ = 0.0f;
     invalidate_render();
     args.set_handled(true);
+}
+
+void TextBox::on_mouse_move(input::MouseEventArgs& args)
+{
+    if (!is_mouse_selecting_) {
+        return;
+    }
+
+    const core::Variant& pad_var = get_value(PaddingProperty);
+    const math::Thickness pad = pad_var.has<math::Thickness>()
+        ? pad_var.get<math::Thickness>()
+        : math::Thickness{ 16.0f, 8.0f, 16.0f, 8.0f };
+
+    const float text_x0 = bounds_rect().x + pad.left;
+    const float text_y0 = bounds_rect().y + pad.top;
+    const float click_rel_x = args.position().x - text_x0;
+    const float click_rel_y = args.position().y - text_y0;
+    const bool use_multiline_layout = accepts_return() || (text_wrapping() != TextWrapping::NoWrap);
+
+    uint32_t new_pos;
+    if (use_multiline_layout) {
+        new_pos = cursor_pos_from_xy(
+            click_rel_x < 0.0f ? 0.0f : click_rel_x,
+            click_rel_y < 0.0f ? 0.0f : click_rel_y);
+    } else {
+        new_pos = cursor_pos_from_x(click_rel_x < 0.0f ? 0.0f : click_rel_x);
+    }
+
+    cursor_pos_ = new_pos;
+    cursor_visible_     = true;
+    cursor_blink_accum_ = 0.0f;
+    invalidate_render();
+    args.set_handled(true);
+}
+
+void TextBox::on_mouse_up(input::MouseEventArgs& args)
+{
+    if (args.button() == input::MouseButton::Left && is_mouse_selecting_) {
+        is_mouse_selecting_ = false;
+        args.set_handled(true);
+    }
 }
 
 void TextBox::on_key_down(input::KeyEventArgs& args)

@@ -152,6 +152,13 @@ public:
     [[nodiscard]] core::StringView text() const noexcept;
 
     /**
+     * @brief 读取当前选中字符串（UTF-8）。
+     *
+     * 无选区时返回空视图。
+     */
+    [[nodiscard]] core::StringView selected_text() const noexcept;
+
+    /**
      * @brief 设置文字内容并将光标移到末尾。
      */
     void set_text(core::StringView text);
@@ -235,6 +242,8 @@ private:
     static void on_mouse_enter_router(void*, RoutedEventArgs&, void* ud);
     static void on_mouse_leave_router(void*, RoutedEventArgs&, void* ud);
     static void on_mouse_down_router (void*, RoutedEventArgs&, void* ud);
+    static void on_mouse_move_router (void*, RoutedEventArgs&, void* ud);
+    static void on_mouse_up_router   (void*, RoutedEventArgs&, void* ud);
     static void on_key_down_router   (void*, RoutedEventArgs&, void* ud);
     static void on_text_input_router (void*, RoutedEventArgs&, void* ud);
     static void on_got_focus_router  (void*, RoutedEventArgs&, void* ud);
@@ -245,6 +254,8 @@ private:
     void on_mouse_enter();
     void on_mouse_leave();
     void on_mouse_down(input::MouseEventArgs& args);
+    void on_mouse_move(input::MouseEventArgs& args);
+    void on_mouse_up  (input::MouseEventArgs& args);
     void on_key_down  (input::KeyEventArgs& args);
     void on_text_input(input::TextInputEventArgs& args);
 
@@ -373,6 +384,7 @@ private:
     bool  is_hovered_       = false;  ///< 鼠标悬停状态
     bool  is_focused_       = false;  ///< 键盘焦点状态
     bool  is_enabled_       = true;   ///< 启用/禁用状态
+    bool  is_mouse_selecting_ = false; ///< 鼠标左键拖拽选择进行中
 
     uint32_t cursor_pos_         = 0;      ///< 光标字节偏移（在 text_buf_ 中）
     uint32_t sel_anchor_         = 0;      ///< 选择锚点字节偏移（Shift/点击选择的固定端；无选区时等于 cursor_pos_）
