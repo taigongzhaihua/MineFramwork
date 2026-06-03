@@ -16,14 +16,6 @@ option(MINE_OFFLINE_BUILD "离线构建模式（需要预下载 third_party/）"
 set(FETCHCONTENT_QUIET OFF)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
 
-if(MINE_USE_SHALLOW_CLONE)
-    set(GIT_SHALLOW "GIT_SHALLOW TRUE")
-    set(GIT_PROGRESS "GIT_PROGRESS TRUE")
-else()
-    set(GIT_SHALLOW "")
-    set(GIT_PROGRESS "")
-endif()
-
 message(STATUS "")
 message(STATUS "配置 MineFramework 第三方依赖")
 message(STATUS "====================================================")
@@ -90,13 +82,22 @@ function(mine_fetch_content name)
             unset(${name}_BINARY_DIR CACHE)
         endif()
         
-        FetchContent_Declare(
-            ${name}
-            GIT_REPOSITORY ${mirror_url}
-            GIT_TAG ${ARG_GIT_TAG}
-            ${GIT_SHALLOW}
-            ${GIT_PROGRESS}
-        )
+        # 构建 FetchContent_Declare 参数
+        if(MINE_USE_SHALLOW_CLONE)
+            FetchContent_Declare(
+                ${name}
+                GIT_REPOSITORY ${mirror_url}
+                GIT_TAG ${ARG_GIT_TAG}
+                GIT_SHALLOW TRUE
+                GIT_PROGRESS TRUE
+            )
+        else()
+            FetchContent_Declare(
+                ${name}
+                GIT_REPOSITORY ${mirror_url}
+                GIT_TAG ${ARG_GIT_TAG}
+            )
+        endif()
         
         # 设置 CMake 参数
         if(ARG_CMAKE_ARGS)
