@@ -17,7 +17,21 @@
 *.user
 *.VC.db
 *.opendb
+
+# 日志和临时输出文件（统一存放到 .logs/ 目录）
+.logs/
 Logs/
 artifacts/
-debug_output.txt
-build_output.txt
+*.txt
+!docs/**/*.txt
+!third_party/**/*.txt
+!README.txt
+!CMakeLists.txt
+debug_output.*
+build_output.*
+*_output.*
+*_err.*
+*_stderr.*
+*_stdout.*
+out*.txt
+err*.txt
