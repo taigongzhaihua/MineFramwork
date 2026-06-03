@@ -6,10 +6,52 @@
 
 - **CMake**: >= 3.25
 - **编译器**:
-  - Windows: MSVC 2022 或 Clang-cl
+  - Windows: MSVC 2026 或 Clang-cl
   - macOS: Apple Clang (Xcode 15+)
   - Linux: GCC 13+ 或 Clang 17+
 - **C++ 标准**: C++23
+
+## 依赖管理
+
+MineFramework 支持多种依赖获取方式，按优先级排序：
+
+1. **系统库**（推荐）：使用已安装的库（vcpkg、apt、brew 等）
+2. **在线下载**：从 GitHub/GitCode/Hub.njuu.cf 自动下载
+3. **离线构建**：使用预下载的 `third_party/` 目录
+
+### 依赖管理选项
+
+| 选项 | 默认值 | 说明 |
+|------|--------|------|
+| `MINE_PREFER_SYSTEM_LIBS` | `ON` | 优先使用系统已安装的库 |
+| `MINE_USE_SHALLOW_CLONE` | `ON` | 使用浅克隆（减少 80% 下载量） |
+| `MINE_OFFLINE_BUILD` | `OFF` | 离线构建模式 |
+
+### 使用 vcpkg（推荐）
+
+```powershell
+# 1. 安装依赖
+vcpkg install freetype harfbuzz libpng sqlite3 mbedtls zlib utf8cpp
+
+# 2. 配置项目
+cmake -B build -DCMAKE_TOOLCHAIN_FILE=<vcpkg-root>/scripts/buildsystems/vcpkg.cmake
+
+# 3. 构建
+cmake --build build --config Release
+```
+
+### 离线构建
+
+```powershell
+# 1. 下载依赖（需要网络）
+.\scripts\download_deps.ps1
+
+# 2. 离线配置
+cmake -B build -DMINE_OFFLINE_BUILD=ON
+
+# 3. 构建
+cmake --build build --config Release
+```
 
 ## 快速开始
 
@@ -20,7 +62,7 @@
 New-Item -ItemType Directory -Force build; cd build
 
 # 2. 配置项目
-cmake .. -G "Visual Studio 17 2022" -A x64
+cmake .. -G "Visual Studio 18 2026" -A x64
 
 # 3. 构建
 cmake --build . --config Release
@@ -32,7 +74,7 @@ cmake --build . --config Release
 ### Windows (Ninja + MSVC)
 
 ```powershell
-# 使用 Developer PowerShell for VS 2022
+# 使用 Developer PowerShell for VS 2026
 
 # 1. 创建构建目录
 mkdir build; cd build
