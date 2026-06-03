@@ -1,0 +1,22 @@
+@PACKAGE_INIT@
+
+# MineFramework CMake 包配置文件
+
+include(CMakeFindDependencyMacro)
+
+# 检查必需的依赖
+find_dependency(Threads REQUIRED)
+
+# 包含导出的目标
+include("${CMAKE_CURRENT_LIST_DIR}/MineFrameworkTargets.cmake")
+
+# 设置变量
+set(MineFramework_VERSION @PROJECT_VERSION@)
+set(MineFramework_VERSION_MAJOR @PROJECT_VERSION_MAJOR@)
+set(MineFramework_VERSION_MINOR @PROJECT_VERSION_MINOR@)
+set(MineFramework_VERSION_PATCH @PROJECT_VERSION_PATCH@)
+
+# 提供组件查找
+set(MineFramework_FOUND TRUE)
+
+check_required_components(MineFramework)

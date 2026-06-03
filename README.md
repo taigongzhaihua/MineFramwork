@@ -26,12 +26,32 @@ MineFramework 是一套基于 C++20 与 xmake 的声明式 UI 框架工程仓库
 
 ## 构建
 
+MineFramework 支持 **xmake** 和 **CMake** 双构建系统。
+
+### 使用 xmake（推荐，开发环境）
+
 ```powershell
 xmake f -m release
-xmake project -k compile_commands
+xmake build
+xmake run sample.01-mvvm-binding
 ```
 
-随着模块实现逐步补充，顶层工程会自动包含已存在的模块 `xmake.lua` 文件。
+### 使用 CMake（生产环境、CI/CD）
+
+```powershell
+# Windows (MSVC)
+mkdir build && cd build
+cmake .. -G "Visual Studio 17 2022" -A x64
+cmake --build . --config Release
+
+# 或使用 Ninja
+cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build .
+```
+
+CMake 构建系统已配置国内镜像源（Gitee、清华大学镜像），详见 [docs/CMAKE_BUILD.md](docs/CMAKE_BUILD.md)。
+
+随着模块实现逐步补充，顶层工程会自动包含已存在的模块 `xmake.lua` 和 `CMakeLists.txt` 文件。
 
 ## 文档
 

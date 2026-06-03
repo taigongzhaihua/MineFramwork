@@ -18,6 +18,17 @@
 *.VC.db
 *.opendb
 
+# CMake 生成文件
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+_deps/
+*.cmake
+!cmake/*.cmake
+!**/CMakeLists.txt
+!cmake/MineFrameworkConfig.cmake.in
+
 # 日志和临时输出文件（统一存放到 .logs/ 目录）
 .logs/
 Logs/
