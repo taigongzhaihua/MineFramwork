@@ -106,13 +106,14 @@ function(mine_fetch_content name)
             endforeach()
         endif()
         
-        # 尝试获取（捕获错误）
-        block(SCOPE_FOR VARIABLES)
-            set(CMAKE_MESSAGE_LOG_LEVEL WARNING)
-            FetchContent_MakeAvailable(${name})
-        endblock()
+        # 尝试获取（抑制详细输出）
+        set(FETCHCONTENT_QUIET ON)
+        FetchContent_MakeAvailable(${name})
+        set(FETCHCONTENT_QUIET OFF)
         
-        if(${name}_POPULATED OR TARGET ${name})
+        # 检测是否成功（通过 SOURCE_DIR 存在性判断）
+        FetchContent_GetProperties(${name})
+        if(${name}_POPULATED OR EXISTS "${${name}_SOURCE_DIR}")
             set(fetch_success TRUE)
             message(STATUS "      ✓ ${name} 配置完成")
             break()
@@ -156,8 +157,8 @@ function(mine_setup_dependencies)
         SYSTEM_PACKAGE Freetype
         GIT_TAG "master"
         GIT_MIRRORS
-            "https://github.com/freetype/freetype.git"
             "https://gitcode.com/gh_mirrors/fr/freetype.git"
+            "https://github.com/freetype/freetype.git"
             "https://hub.njuu.cf/freetype/freetype.git"
     )
     
@@ -176,8 +177,8 @@ function(mine_setup_dependencies)
         SYSTEM_PACKAGE harfbuzz
         GIT_TAG "main"
         GIT_MIRRORS
-            "https://github.com/harfbuzz/harfbuzz.git"
             "https://gitcode.com/gh_mirrors/ha/harfbuzz.git"
+            "https://github.com/harfbuzz/harfbuzz.git"
             "https://hub.njuu.cf/harfbuzz/harfbuzz.git"
     )
     
@@ -192,8 +193,8 @@ function(mine_setup_dependencies)
         SYSTEM_PACKAGE utf8cpp
         GIT_TAG "master"
         GIT_MIRRORS
-            "https://github.com/nemtrif/utfcpp.git"
             "https://gitcode.com/gh_mirrors/ut/utfcpp.git"
+            "https://github.com/nemtrif/utfcpp.git"
             "https://hub.njuu.cf/nemtrif/utfcpp.git"
     )
     
@@ -206,8 +207,8 @@ function(mine_setup_dependencies)
     mine_fetch_content(stb
         GIT_TAG "master"
         GIT_MIRRORS
+            "https://gitcode.com/GitHub_Trending/st/stb.git"
             "https://github.com/nothings/stb.git"
-            "https://gitcode.com/gh_mirrors/st/stb.git"
             "https://hub.njuu.cf/nothings/stb.git"
     )
     
@@ -219,14 +220,29 @@ function(mine_setup_dependencies)
     message(STATUS "[5/8] 配置 libpng...")
     set(PNG_SHARED OFF CACHE BOOL "" FORCE)
     set(PNG_TESTS OFF CACHE BOOL "" FORCE)
-    set(PNG_BUILD_ZLIB ON CACHE BOOL "" FORCE)
+    
+    # libpng 需要 zlib 依赖
+    find_package(ZLIB QUIET)
+    if(NOT ZLIB_FOUND)
+        message(STATUS "      下载 zlib...")
+        FetchContent_Declare(
+            zlib
+            GIT_REPOSITORY https://github.com/madler/zlib.git
+            GIT_TAG master
+            GIT_SHALLOW TRUE
+            GIT_PROGRESS TRUE
+        )
+        FetchContent_MakeAvailable(zlib)
+        set(ZLIB_LIBRARY zlib)
+        set(ZLIB_INCLUDE_DIR ${zlib_SOURCE_DIR})
+    endif()
     
     mine_fetch_content(libpng
         SYSTEM_PACKAGE PNG
         GIT_TAG "libpng16"
         GIT_MIRRORS
-            "https://github.com/pnggroup/libpng.git"
             "https://gitcode.com/gh_mirrors/li/libpng.git"
+            "https://github.com/pnggroup/libpng.git"
             "https://hub.njuu.cf/pnggroup/libpng.git"
     )
     
@@ -248,27 +264,34 @@ function(mine_setup_dependencies)
         endif()
     endif()
     
-    # 降级方案：从清华镜像下载预编译源
+    # 降级方案：使用 Git 仓库克隆
     if(NOT SQLite3_FOUND)
-        FetchContent_Declare(
+        mine_fetch_content(
             sqlite
-            URL https://mirrors.tuna.tsinghua.edu.cn/sqlite/2024/sqlite-amalgamation-3460100.zip
-            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+            GIT_MIRRORS
+                "https://gitcode.com/gh_mirrors/sq/sqlite.git"
+                "https://github.com/sqlite/sqlite.git"
+                "https://hub.njuu.cf/sqlite/sqlite.git"
+            GIT_TAG "master"
         )
-        FetchContent_MakeAvailable(sqlite)
         
-        add_library(sqlite3 STATIC ${sqlite_SOURCE_DIR}/sqlite3.c)
-        target_include_directories(sqlite3 PUBLIC ${sqlite_SOURCE_DIR})
-        target_compile_definitions(sqlite3 PRIVATE
-            SQLITE_THREADSAFE=1
-            SQLITE_ENABLE_COLUMN_METADATA
-            SQLITE_ENABLE_FTS5
-            SQLITE_ENABLE_JSON1
-            SQLITE_ENABLE_RTREE
-        )
-        set(SQLITE_INCLUDE_DIR ${sqlite_SOURCE_DIR} PARENT_SCOPE)
-        set(SQLITE_LIBRARIES sqlite3 PARENT_SCOPE)
-        message(STATUS "      ✓ SQLite 配置完成")
+        # SQLite 源码在 Git 仓库中，但需要使用预处理后的 amalgamation 版本
+        # 检查是否存在 sqlite3.c（amalgamation 文件）
+        if(EXISTS "${sqlite_SOURCE_DIR}/sqlite3.c")
+            add_library(sqlite3 STATIC ${sqlite_SOURCE_DIR}/sqlite3.c)
+            target_include_directories(sqlite3 PUBLIC ${sqlite_SOURCE_DIR})
+            target_compile_definitions(sqlite3 PRIVATE
+                SQLITE_THREADSAFE=1
+                SQLITE_ENABLE_COLUMN_METADATA
+                SQLITE_ENABLE_FTS5
+                SQLITE_ENABLE_JSON1
+                SQLITE_ENABLE_RTREE
+            )
+            set(SQLITE_INCLUDE_DIR ${sqlite_SOURCE_DIR} PARENT_SCOPE)
+            set(SQLITE_LIBRARIES sqlite3 PARENT_SCOPE)
+        else()
+            message(WARNING "SQLite amalgamation 文件未找到，请使用 vcpkg 或系统包管理器安装")
+        endif()
     endif()
 
     # mbedTLS（加密库）
@@ -282,8 +305,8 @@ function(mine_setup_dependencies)
             SYSTEM_PACKAGE MbedTLS
             GIT_TAG "master"
             GIT_MIRRORS
-                "https://github.com/Mbed-TLS/mbedtls.git"
                 "https://gitcode.com/gh_mirrors/mb/mbedtls.git"
+                "https://github.com/Mbed-TLS/mbedtls.git"
                 "https://hub.njuu.cf/Mbed-TLS/mbedtls.git"
         )
         
@@ -299,8 +322,8 @@ function(mine_setup_dependencies)
         mine_fetch_content(doctest
             GIT_TAG "master"
             GIT_MIRRORS
-                "https://github.com/doctest/doctest.git"
                 "https://gitcode.com/gh_mirrors/do/doctest.git"
+                "https://github.com/doctest/doctest.git"
                 "https://hub.njuu.cf/doctest/doctest.git"
         )
         

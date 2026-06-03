@@ -3,7 +3,7 @@
 
 param(
     [switch]$Shallow = $true,
-    [switch]$UseGitCode = $false
+    [switch]$UseGitHub = $false  # 默认使用 GitCode，设置此参数使用 GitHub
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,7 +43,13 @@ $dependencies = @(
     @{
         Name = "stb"
         GitHub = "https://github.com/nothings/stb.git"
-        GitCode = "https://gitcode.com/gh_mirrors/st/stb.git"
+        GitCode = "https://gitcode.com/GitHub_Trending/st/stb.git"
+        Branch = "master"
+    },
+    @{
+        Name = "zlib"
+        GitHub = "https://github.com/madler/zlib.git"
+        GitCode = "https://gitcode.com/gh_mirrors/zl/zlib.git"
         Branch = "master"
     },
     @{
@@ -51,6 +57,12 @@ $dependencies = @(
         GitHub = "https://github.com/pnggroup/libpng.git"
         GitCode = "https://gitcode.com/gh_mirrors/li/libpng.git"
         Branch = "libpng16"
+    },
+    @{
+        Name = "sqlite"
+        GitHub = "https://github.com/sqlite/sqlite.git"
+        GitCode = "https://gitcode.com/gh_mirrors/sq/sqlite.git"
+        Branch = "master"
     },
     @{
         Name = "mbedtls"
@@ -80,8 +92,8 @@ foreach ($dep in $dependencies) {
     
     Write-Host "[$($dep.Name)] 下载中..." -ForegroundColor Yellow
     
-    # 选择镜像源
-    $url = if ($UseGitCode) { $dep.GitCode } else { $dep.GitHub }
+    # 选择镜像源（默认使用 GitCode 国内镜像）
+    $url = if ($UseGitHub) { $dep.GitHub } else { $dep.GitCode }
     
     # 构建 git clone 命令
     $gitArgs = @("clone", $url, $depPath, "--branch", $dep.Branch)
@@ -120,7 +132,7 @@ if ($FailedDeps.Count -gt 0) {
     Write-Host ""
     Write-Host "提示：" -ForegroundColor Yellow
     Write-Host "  1. 检查网络连接" -ForegroundColor Yellow
-    Write-Host "  2. 尝试使用 GitCode 镜像：./download_deps.ps1 -UseGitCode" -ForegroundColor Yellow
+    Write-Host "  2. 默认使用 GitCode 国内镜像，失败时尝试 GitHub：./download_deps.ps1 -UseGitHub" -ForegroundColor Yellow
     Write-Host "  3. 手动克隆失败的库到 third_party/<name>/" -ForegroundColor Yellow
 } else {
     Write-Host ""
