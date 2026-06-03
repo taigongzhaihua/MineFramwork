@@ -10,6 +10,8 @@
 
 #include <mine/ui/controls/TextBox.h>
 
+#include <mine/ui/window/Window.h>
+#include <mine/platform/IMEService.h>
 #include <mine/paint/Canvas.h>
 #include <mine/paint/Brush.h>
 #include <mine/paint/Pen.h>
@@ -1037,6 +1039,16 @@ void TextBox::on_got_focus_router(void* /*sender*/, RoutedEventArgs& /*args*/, v
     self->cursor_blink_accum_  = 0.0f;
     self->is_focused_          = true;
     self->update_visual_state();
+
+    // 启用 IME 并设置候选框位置
+    if (Window* win = self->get_window()) {
+        try {
+            math::Rect cursor_rect = self->get_cursor_rect_in_window();
+            win->ime().enable(cursor_rect);
+        } catch (...) {
+            // 防止 IME 调用异常导致程序崩溃
+        }
+    }
 }
 
 void TextBox::on_lost_focus_router(void* /*sender*/, RoutedEventArgs& /*args*/, void* ud)
@@ -1046,6 +1058,15 @@ void TextBox::on_lost_focus_router(void* /*sender*/, RoutedEventArgs& /*args*/, 
     self->is_mouse_selecting_ = false;
     self->cursor_visible_ = false;
     self->update_visual_state();
+
+    // 禁用 IME
+    if (Window* win = self->get_window()) {
+        try {
+            win->ime().disable();
+        } catch (...) {
+            // 防止 IME 调用异常导致程序崩溃
+        }
+    }
 }
 
 // ============================================================================
@@ -1112,6 +1133,7 @@ void TextBox::on_mouse_down(input::MouseEventArgs& args)
     is_mouse_selecting_ = true;
     cursor_visible_     = true;
     cursor_blink_accum_ = 0.0f;
+    update_ime_position();
     invalidate_render();
     args.set_handled(true);
 }
@@ -1145,6 +1167,7 @@ void TextBox::on_mouse_move(input::MouseEventArgs& args)
     cursor_pos_ = new_pos;
     cursor_visible_     = true;
     cursor_blink_accum_ = 0.0f;
+    update_ime_position();
     invalidate_render();
     args.set_handled(true);
 }
@@ -1188,7 +1211,7 @@ void TextBox::on_key_down(input::KeyEventArgs& args)
             move_cursor_left();
             commit_move();
         }
-        reset_blink(); invalidate_render(); args.set_handled(true);
+        reset_blink(); update_ime_position(); invalidate_render(); args.set_handled(true);
         break;
 
     case input::Key::Right:
@@ -1200,19 +1223,19 @@ void TextBox::on_key_down(input::KeyEventArgs& args)
             move_cursor_right();
             commit_move();
         }
-        reset_blink(); invalidate_render(); args.set_handled(true);
+        reset_blink(); update_ime_position(); invalidate_render(); args.set_handled(true);
         break;
 
     case input::Key::Home:
         cursor_pos_ = 0u;
         commit_move();
-        reset_blink(); invalidate_render(); args.set_handled(true);
+        reset_blink(); update_ime_position(); invalidate_render(); args.set_handled(true);
         break;
 
     case input::Key::End:
         cursor_pos_ = sz;
         commit_move();
-        reset_blink(); invalidate_render(); args.set_handled(true);
+        reset_blink(); update_ime_position(); invalidate_render(); args.set_handled(true);
         break;
 
     case input::Key::Up:
@@ -1220,7 +1243,7 @@ void TextBox::on_key_down(input::KeyEventArgs& args)
         if (use_multiline_layout) {
             move_cursor_up();
             commit_move();
-            reset_blink(); invalidate_render(); args.set_handled(true);
+            reset_blink(); update_ime_position(); invalidate_render(); args.set_handled(true);
         }
         break;
 
@@ -1229,7 +1252,7 @@ void TextBox::on_key_down(input::KeyEventArgs& args)
         if (use_multiline_layout) {
             move_cursor_down();
             commit_move();
-            reset_blink(); invalidate_render(); args.set_handled(true);
+            reset_blink(); update_ime_position(); invalidate_render(); args.set_handled(true);
         }
         break;
 
@@ -1268,7 +1291,7 @@ void TextBox::on_key_down(input::KeyEventArgs& args)
         if (ctrl) {
             sel_anchor_ = 0u;
             cursor_pos_ = sz;
-            reset_blink(); invalidate_render(); args.set_handled(true);
+            reset_blink(); update_ime_position(); invalidate_render(); args.set_handled(true);
         }
         break;
 
@@ -1366,6 +1389,7 @@ void TextBox::delete_char_before()
 
     cursor_visible_     = true;
     cursor_blink_accum_ = 0.0f;
+    update_ime_position();
     invalidate_render();
 }
 
@@ -1392,6 +1416,7 @@ void TextBox::delete_char_after()
 
     cursor_visible_     = true;
     cursor_blink_accum_ = 0.0f;
+    update_ime_position();
     invalidate_render();
 }
 
@@ -1406,6 +1431,7 @@ void TextBox::move_cursor_right()
     const uint32_t sz = static_cast<uint32_t>(text_buf_.size());
     cursor_pos_      = utf8_next(text_buf_.data(), cursor_pos_, sz);
     cursor_target_x_ = 0.0f;  // 水平移动，重置目标 x
+    update_ime_position();
 }
 
 // ============================================================================
@@ -1485,6 +1511,7 @@ void TextBox::delete_selection()
 
     cursor_visible_     = true;
     cursor_blink_accum_ = 0.0f;
+    update_ime_position();
     invalidate_render();
 }
 
@@ -1626,6 +1653,7 @@ void TextBox::paste_from_clipboard()
 
     cursor_visible_     = true;
     cursor_blink_accum_ = 0.0f;
+    update_ime_position();
     invalidate_render();
 #endif  // _WIN32
 }
@@ -1733,6 +1761,7 @@ void TextBox::move_cursor_up()
     }
 
     cursor_pos_ = prev_line.start_offset + best_offset;
+    update_ime_position();
 }
 
 void TextBox::move_cursor_down()
@@ -1788,6 +1817,77 @@ void TextBox::move_cursor_down()
     }
 
     cursor_pos_ = next_line.start_offset + best_offset;
+    update_ime_position();
+}
+
+// ============================================================================
+// IME 支持
+// ============================================================================
+
+Window* TextBox::get_window() noexcept
+{
+    // 使用 Window::from_element 静态方法获取当前事件处理上下文中的窗口
+    // 由于 Window 不在视觉树中，无法通过 parent() 遍历找到
+    return Window::from_element(this);
+}
+
+math::Rect TextBox::get_cursor_rect_in_window() const noexcept
+{
+    // 1. 计算光标在本控件坐标系中的位置
+    const core::Variant& pad_var = get_value(PaddingProperty);
+    const math::Thickness pad = pad_var.has<math::Thickness>()
+        ? pad_var.get<math::Thickness>()
+        : math::Thickness{ 16.0f, 8.0f, 16.0f, 8.0f };
+
+    // 光标相对于控件内容区左上角的偏移
+    float cursor_local_x = pad.left;
+    float cursor_local_y = pad.top;
+
+    // 计算光标 x 坐标（在单行模式下简化处理）
+    if (cursor_pos_ > 0 && !text_buf_.empty()) {
+        cursor_local_x += measure_text_width(text_buf_.data(), cursor_pos_);
+    }
+
+    float cursor_h = effective_line_height();
+
+    // 2. 转换到窗口坐标系：从本控件开始递归向上累加所有祖先的 bounds_rect 偏移
+    float window_x = cursor_local_x;
+    float window_y = cursor_local_y;
+    
+    const UIElement* current = this;
+    while (current != nullptr) {
+        const math::Rect bounds = current->bounds_rect();
+        window_x += bounds.x;
+        window_y += bounds.y;
+        
+        // 到达根节点（Window）时停止
+        if (current->parent() == nullptr) {
+            break;
+        }
+        current = static_cast<const UIElement*>(current->parent());
+    }
+
+    return math::Rect{ window_x, window_y, 2.0f, cursor_h };
+}
+
+void TextBox::update_ime_position()
+{
+    if (!is_focused_) {
+        return;  // 未获得焦点时不更新 IME
+    }
+
+    Window* win = get_window();
+    if (win == nullptr) {
+        return;  // 未挂载到窗口树
+    }
+
+    try {
+        platform::IMEService& ime = win->ime();
+        math::Rect cursor_rect = get_cursor_rect_in_window();
+        ime.set_composition_rect(cursor_rect);
+    } catch (...) {
+        // 防止 IME 调用异常导致程序崩溃
+    }
 }
 
 } // namespace mine::ui

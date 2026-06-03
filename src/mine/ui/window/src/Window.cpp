@@ -42,6 +42,13 @@
 
 namespace mine::ui {
 
+// ── 线程局部存储：当前正在处理事件的窗口 ──────────────────────────────────────
+// 在 Window::Impl::on_window_event 开始时设置，结束时清除
+// 用于在事件处理上下文中从任意 UIElement 反向查找所属 Window
+namespace {
+    thread_local Window* g_current_event_window = nullptr;
+}
+
 // ============================================================================
 // 依赖属性静态注册
 // ============================================================================
@@ -297,6 +304,9 @@ struct Window::Impl : public platform::IWindowEventSink {
     {
         using Kind = platform::WindowEventKind;
 
+        // 设置当前事件处理窗口（供 Window::from_element 使用）
+        g_current_event_window = owner_;
+
         switch (event.kind) {
         case Kind::Resized:
             handle_resized(event.new_size);
@@ -330,6 +340,9 @@ struct Window::Impl : public platform::IWindowEventSink {
         default:
             break;
         }
+
+        // 清除当前事件处理窗口
+        g_current_event_window = nullptr;
     }
 
     // ── 事件处理器 ────────────────────────────────────────────────────────
@@ -650,9 +663,26 @@ input::InputRouter& Window::input_router() noexcept
     return p_->router_;
 }
 
+platform::IMEService& Window::ime() noexcept
+{
+    auto* ctx = get_application_window_context();
+    MINE_ASSERT(ctx != nullptr && "Window::ime() must be called after show()");
+    return ctx->ime();
+}
+
 void Window::set_on_input_processed(std::function<void()> fn)
 {
     p_->post_input_fn_ = std::move(fn);
+}
+
+// ── 静态辅助 ───────────────────────────────────────────────────────────────────
+
+Window* Window::from_element(ui::UIElement* /*element*/) noexcept
+{
+    // 在事件处理上下文中，返回当前正在处理事件的窗口
+    // 由于 Window 不在视觉树中，无法通过 parent() 遍历找到，
+    // 因此使用线程局部变量在事件处理期间临时存储窗口指针
+    return g_current_event_window;
 }
 
 // ── 数据上下文 ───────────────────────────────────────────────────────────────

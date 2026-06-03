@@ -20,7 +20,7 @@
 #include <mine/core/Memory.h>
 
 // 前向声明，避免将大型头文件拉入公共接口
-namespace mine::platform { struct WindowDesc; class IWindow; }
+namespace mine::platform { struct WindowDesc; class IWindow; class IMEService; }
 namespace mine::gfx      { class IDevice; class IQueue; }
 namespace mine::paint    { class IRenderer; }
 
@@ -48,9 +48,10 @@ public:
         create_native_window(const platform::WindowDesc& desc) = 0;
 
     /// 返回图形设备（生命周期由 Application 管理）
-    [[nodiscard]] virtual gfx::IDevice&     device()   noexcept = 0;
-    [[nodiscard]] virtual gfx::IQueue&      queue()    noexcept = 0;
-    [[nodiscard]] virtual paint::IRenderer& renderer() noexcept = 0;
+    [[nodiscard]] virtual gfx::IDevice&       device()   noexcept = 0;
+    [[nodiscard]] virtual gfx::IQueue&        queue()    noexcept = 0;
+    [[nodiscard]] virtual paint::IRenderer&   renderer() noexcept = 0;
+    [[nodiscard]] virtual platform::IMEService& ime()      noexcept = 0;
 
     /**
      * @brief Window 首次 show() 时的通知回调。

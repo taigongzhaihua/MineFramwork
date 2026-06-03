@@ -44,7 +44,7 @@
 #include <functional>
 
 // 前向声明，避免将大型头文件拉入公共接口
-namespace mine::platform   { class IWindow; enum class WindowKind : int; enum class WindowCornerPreference : int; enum class WindowState : int; }
+namespace mine::platform   { class IWindow; class IMEService; enum class WindowKind : int; enum class WindowCornerPreference : int; enum class WindowState : int; }
 namespace mine::gfx        { class IDevice; class IQueue; }
 namespace mine::paint       { class IRenderer; }
 namespace mine::ui          { class UIElement; }
@@ -447,6 +447,17 @@ public:
     [[nodiscard]] input::InputRouter& input_router() noexcept;
 
     /**
+     * @brief 获取 IME 服务引用（供控件设置输入法候选窗口位置）。
+     *
+     * TextBox 等输入控件在获得/失去焦点时可调用此方法访问 IME 服务，
+     * 启用/禁用 IME 并设置候选框位置跟随光标。
+     *
+     * @return IME 服务引用（生命周期由 Application 管理）
+     * @pre show() 已完成懒初始化（即窗口已关联到 Application）
+     */
+    [[nodiscard]] platform::IMEService& ime() noexcept;
+
+    /**
      * @brief 注册输入事件处理完毕后的回调（用于触发动画 tick + 重绘）。
      *
      * 每次鼠标/键盘事件经 InputRouter 路由完成后，Window 会调用此回调。
@@ -468,6 +479,19 @@ public:
      * 若窗口已关闭（is_closed() == true），此函数为空操作。
      */
     void render();
+
+    // ── 静态辅助 ─────────────────────────────────────────────────────────────
+
+    /**
+     * @brief 获取元素所属的窗口（从视觉树根节点的关联信息查找）。
+     *
+     * 当元素挂载到窗口的内容根树中时，可通过此方法反向获取 Window 指针。
+     * 内部实现：在事件处理期间使用线程局部存储临时记录当前窗口。
+     *
+     * @param element 视觉树中的任意元素
+     * @return 所属窗口指针，nullptr 表示未挂载或不在事件处理上下文中
+     */
+    [[nodiscard]] static Window* from_element(ui::UIElement* element) noexcept;
 
 private:
     /**

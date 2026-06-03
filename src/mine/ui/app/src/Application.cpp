@@ -195,17 +195,18 @@ class ApplicationWindowContext final : public ui::IWindowContext {
     using CreateFn    = std::function<core::OwnedPtr<platform::IWindow>(const platform::WindowDesc&)>;
     using FirstShowFn = std::function<void(ui::Window&)>;
 
-    CreateFn          create_fn_;      ///< 创建原生窗口回调（委托 host_->create_window）
-    gfx::IDevice&     device_ref_;     ///< 图形设备引用
-    gfx::IQueue&      queue_ref_;      ///< 图形命令队列引用
-    paint::IRenderer& renderer_ref_;   ///< 2D 渲染器引用
-    FirstShowFn       first_show_fn_;  ///< 首次 show() 时的后处理回调
+    CreateFn            create_fn_;      ///< 创建原生窗口回调（委托 host_->create_window）
+    gfx::IDevice&       device_ref_;     ///< 图形设备引用
+    gfx::IQueue&        queue_ref_;      ///< 图形命令队列引用
+    paint::IRenderer&   renderer_ref_;   ///< 2D 渲染器引用
+    platform::IMEService& ime_ref_;      ///< IME 服务引用
+    FirstShowFn         first_show_fn_;  ///< 首次 show() 时的后处理回调
 
 public:
     ApplicationWindowContext(CreateFn create, gfx::IDevice& dev, gfx::IQueue& q,
-                             paint::IRenderer& r, FirstShowFn first_show)
+                             paint::IRenderer& r, platform::IMEService& ime, FirstShowFn first_show)
         : create_fn_{std::move(create)}, device_ref_{dev}, queue_ref_{q},
-          renderer_ref_{r}, first_show_fn_{std::move(first_show)}
+          renderer_ref_{r}, ime_ref_{ime}, first_show_fn_{std::move(first_show)}
     {}
 
     [[nodiscard]] core::OwnedPtr<platform::IWindow>
@@ -217,6 +218,7 @@ public:
     [[nodiscard]] gfx::IDevice& device() noexcept override { return device_ref_; }
     [[nodiscard]] gfx::IQueue& queue() noexcept override { return queue_ref_; }
     [[nodiscard]] paint::IRenderer& renderer() noexcept override { return renderer_ref_; }
+    [[nodiscard]] platform::IMEService& ime() noexcept override { return ime_ref_; }
 
     void on_window_first_show(ui::Window& win) override { first_show_fn_(win); }
 };
@@ -253,7 +255,7 @@ int Application::run(int argc, char** argv)
     //   run() 是 Application 的成员函数，可合法访问 protected tick_and_render 和 private p_
     ApplicationWindowContext window_ctx{
         [&](const platform::WindowDesc& desc) { return p_->host_->create_window(desc); },
-        *p_->device_, *p_->queue_, *p_->renderer_,
+        *p_->device_, *p_->queue_, *p_->renderer_, p_->host_->ime(),
         [this](ui::Window& win) {
             // 安装输入后处理回调：推进动画并触发重绘（tick_and_render 是 protected）
             win.set_on_input_processed([this, &win]() { tick_and_render(&win); });

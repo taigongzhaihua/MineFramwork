@@ -18,5 +18,7 @@ mine_module("mine.ui.controls", {
         "mine.ui.layout",
         "mine.ui.style",      -- ContentPresenter 和 Button 模板注册依赖 TemplateRegistry
         "mine.ui.animation",  -- Button 背景色过渡动画（Storyboard + EasingFunction）
+        "mine.ui.window",     -- TextBox IME 支持需要 Window::ime() 访问 IMEService
+        "mine.platform.abi",  -- IMEService 头文件依赖
     },
 })

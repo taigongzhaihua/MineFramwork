@@ -27,10 +27,12 @@
 #include <mine/containers/InlineString.h>
 #include <mine/paint/Brush.h>
 #include <mine/math/Thickness.h>
+#include <mine/math/Rect.h>
 #include <mine/core/StringView.h>
 
 namespace mine::paint { class Canvas; }
 namespace mine::ui::input { class MouseEventArgs; class KeyEventArgs; class TextInputEventArgs; }
+namespace mine::ui { class Window; }
 
 namespace mine::ui {
 
@@ -374,6 +376,25 @@ private:
      * 只读模式不执行任何操作。
      */
     void paste_from_clipboard();
+
+    // ── IME 支持 ──────────────────────────────────────────────────────────
+
+    /**
+     * @brief 向上遍历视觉树，找到所属的 Window 对象。
+     * @return 窗口指针，若未挂载到窗口树则返回 nullptr
+     */
+    [[nodiscard]] Window* get_window() noexcept;
+
+    /**
+     * @brief 计算光标在窗口坐标系中的矩形（用于设置 IME 候选框位置）。
+     * @return 光标矩形（x, y 为窗口坐标系，width 通常为 1~2 像素，height 为行高）
+     */
+    [[nodiscard]] math::Rect get_cursor_rect_in_window() const noexcept;
+
+    /**
+     * @brief 更新 IME 候选框位置（当光标移动或文字改变时调用）。
+     */
+    void update_ime_position();
 
     // ── 私有字段 ──────────────────────────────────────────────────────────
 
