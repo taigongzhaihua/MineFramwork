@@ -5,6 +5,17 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.controls：TextBox 外观升级至 MD3 Outlined Text Field 风格**：
+
+  实现 Material Design 3 Outlined Text Field 规范：
+  - 新增 `IndicatorThicknessProperty` 和 `IndicatorBrushProperty` 依赖属性，
+    控制四边描边粗细与画刷；
+  - `CornerRadiusProperty` 类型为 `math::CornerRadii`（四角独立），默认均匀 4dp；
+  - 默认背景透明，四边全描边（Normal 1dp #79747E / Focused 2dp #6750A4）；
+  - VSM 过渡动画驱动描边颜色和粗细在 Normal/Hovered/Focused 间平滑切换；
+  - 悬停时叠加 OnSurface 8% 状态层；
+  - 默认字号 16px，默认 padding {16, 12, 16, 12}。
+
 - **mine.ui.controls：TextBox 新增滚动支持**：
 
   当文本内容超出控件可视区域时，可通过鼠标滚轮滚动查看被裁剪的内容：

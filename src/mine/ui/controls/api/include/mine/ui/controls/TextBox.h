@@ -27,6 +27,7 @@
 #include <mine/containers/InlineString.h>
 #include <mine/paint/Brush.h>
 #include <mine/math/Thickness.h>
+#include <mine/math/CornerRadii.h>
 #include <mine/math/Rect.h>
 #include <mine/core/StringView.h>
 
@@ -37,7 +38,7 @@ namespace mine::ui { class Window; }
 namespace mine::ui {
 
 /**
- * @brief 单行文本输入控件（MD3 Filled Text Field 风格）。
+ * @brief 单行文本输入控件（MD3 Outlined Text Field 风格）。
  *
  * 直接继承 Control（而非 ContentControl），TextBox 自行管理文字缓冲。
  * 所有可视属性均通过 DependencyProperty 管理（单一真相源）。
@@ -132,9 +133,34 @@ public:
     static const DependencyProperty& PaddingProperty;
 
     /**
-     * @brief 圆角半径属性（float，默认 4.0f）。
+     * @brief 圆角半径属性（math::CornerRadii，四角独立）。
+     *
+     * MD3 Outlined Text Field 默认：四角均匀 4dp。
+     * 用户可通过 set_corner_radii() 覆盖各角半径。
      */
     static const DependencyProperty& CornerRadiusProperty;
+
+    /**
+     * @brief 底部指示线粗细属性（float，默认 1.0f）。
+     *
+     * MD3 Filled Text Field 规范：
+     *   Normal  : 1.5dp（OnSurfaceVariant 颜色）
+     *   Hovered : 1.5dp（OnSurface 颜色）
+     *   Focused : 2dp（Primary 颜色）
+     *   Disabled: 1.5dp（OnSurface 38% alpha）
+     */
+    static const DependencyProperty& IndicatorThicknessProperty;
+
+    /**
+     * @brief 指示线画刷属性（Variant 存储 paint::Brush）。
+     *
+     * 与 BorderBrushProperty 独立，专注底部指示线：
+     *   Normal  : MD3 On Surface Variant #49454F
+     *   Hovered : MD3 On Surface #1C1B1F
+     *   Focused : MD3 Primary #6750A4
+     *   Disabled: On Surface 38%
+     */
+    static const DependencyProperty& IndicatorBrushProperty;
 
     // ── 生命周期 ───────────────────────────────────────────────────────────
 
@@ -224,6 +250,20 @@ public:
      * @brief 设置字号（逻辑像素，默认 14.0f）。
      */
     void set_font_size(float size_px) noexcept;
+
+    /**
+     * @brief 读取四角独立圆角半径。
+     *
+     * 默认 MD3 Filled：顶部 8dp / 底部 0dp。
+     */
+    [[nodiscard]] math::CornerRadii corner_radii() const noexcept;
+
+    /**
+     * @brief 设置四角独立圆角半径。
+     *
+     * 写入 CornerRadiusProperty 的 Local 槽。
+     */
+    void set_corner_radii(math::CornerRadii radii);
 
 protected:
     // ── 布局 ──────────────────────────────────────────────────────────────
@@ -446,11 +486,13 @@ private:
     float    cursor_blink_accum_ = 0.0f;   ///< 光标闪烁累计时间（秒）
 
     void*  font_face_   = nullptr;  ///< 字体（text::FontFace*，可为 nullptr）
-    float  font_size_px_ = 14.0f;   ///< 字号（逻辑像素）
+    float  font_size_px_ = 16.0f;   ///< 字号（逻辑像素）
 
     // ── 滚动偏移 ──────────────────────────────────────────────────────────
     float  scroll_offset_x_ = 0.0f;  ///< 水平滚动偏移（像素，正值 = 内容左移）
     float  scroll_offset_y_ = 0.0f;  ///< 垂直滚动偏移（像素，正值 = 内容上移）
+
+
 };
 
 } // namespace mine::ui

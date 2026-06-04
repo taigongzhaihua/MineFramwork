@@ -1,6 +1,6 @@
 /**
  * @file TextBox.cpp
- * @brief TextBox 单行文本输入控件实现（MD3 Filled Text Field 风格）。
+ * @brief TextBox 单行文本输入控件实现（MD3 Outlined Text Field 风格）。
  *
  * 架构三层分离：
  *   层1（逻辑层）：DP + 交互状态 bool（is_hovered_/is_focused_/is_enabled_）+ VSM 状态计算
@@ -16,6 +16,7 @@
 #include <mine/paint/Brush.h>
 #include <mine/paint/Pen.h>
 #include <mine/math/RoundedRect.h>
+#include <mine/math/ComplexRoundedRect.h>
 #include <mine/math/Color.h>
 #include <mine/ui/event/EventManager.h>
 #include <mine/ui/event/RoutedEventArgs.h>
@@ -308,11 +309,11 @@ const DependencyProperty& TextBox::TextWrappingProperty =
             .affects_render  = true,  // 影响行布局和渲染
         });
 
-// BackgroundProperty — 背景画刷（MD3 Surface #FFFBFE）
+// BackgroundProperty — 背景画刷（MD3 Outlined Text Field 默认透明）
 const DependencyProperty& TextBox::BackgroundProperty =
     register_property<TextBox>(
         "Background",
-        core::Variant{ paint::Brush::solid_rgb(0xFFFBFE) },
+        core::Variant{ paint::Brush::solid(math::Color::Transparent) },
         PropertyMetadata{
             .affects_render = true,
         });
@@ -326,42 +327,60 @@ const DependencyProperty& TextBox::ForegroundProperty =
             .affects_render = true,
         });
 
-// BorderColorProperty — 边框画刷（MD3 Outline #79747E）
-const DependencyProperty& TextBox::BorderColorProperty =
-    register_property<TextBox>(
-        "BorderColor",
-        core::Variant{ paint::Brush::solid_rgb(0x79747E) },
-        PropertyMetadata{
-            .affects_render = true,
-        });
-
-// PlaceholderForegroundProperty — 占位文字颜色（MD3 On Surface Variant 60%）
+// PlaceholderForegroundProperty — 占位文字颜色（MD3 On Surface Variant #49454F）
 const DependencyProperty& TextBox::PlaceholderForegroundProperty =
     register_property<TextBox>(
         "PlaceholderForeground",
-        core::Variant{ paint::Brush::solid(math::Color{ 0.29f, 0.27f, 0.31f, 0.60f }) },
+        core::Variant{ paint::Brush::solid_rgb(0x49454F) },
         PropertyMetadata{
             .affects_render = true,
         });
 
-// PaddingProperty — 内边距（Thickness，默认左右 16px、上下 8px）
+// BorderColorProperty — 边框画刷（保留兼容，默认透明，MD3 Filled 使用指示线）
+const DependencyProperty& TextBox::BorderColorProperty =
+    register_property<TextBox>(
+        "BorderColor",
+        core::Variant{ paint::Brush::solid(math::Color::Transparent) },
+        PropertyMetadata{
+            .affects_render = true,
+        });
+
+// PaddingProperty — 内边距（Thickness，MD3 默认左右 16px、上下 12px）
 const DependencyProperty& TextBox::PaddingProperty =
     register_property<TextBox>(
         "Padding",
-        core::Variant{ math::Thickness{ 16.0f, 8.0f, 16.0f, 8.0f } },
+        core::Variant{ math::Thickness{ 16.0f, 12.0f, 16.0f, 12.0f } },
         PropertyMetadata{
             .affects_measure = true,
             .affects_render  = true,
         });
 
-// CornerRadiusProperty — 圆角半径（float，默认 4.0f）
+// CornerRadiusProperty — 四角独立圆角半径（CornerRadii，MD3 Outlined 默认均匀 4dp）
 const DependencyProperty& TextBox::CornerRadiusProperty =
     register_property<TextBox>(
         "CornerRadius",
-        core::Variant{ 4.0f },
+        core::Variant{ math::CornerRadii::uniform(4.0f) },
         PropertyMetadata{
             .affects_arrange = true,
             .affects_render  = true,
+        });
+
+// IndicatorThicknessProperty — 描边粗细（float，默认 1.0f）
+const DependencyProperty& TextBox::IndicatorThicknessProperty =
+    register_property<TextBox>(
+        "IndicatorThickness",
+        core::Variant{ 1.0f },
+        PropertyMetadata{
+            .affects_render = true,
+        });
+
+// IndicatorBrushProperty — 描边画刷（Brush，默认 MD3 Outline #79747E）
+const DependencyProperty& TextBox::IndicatorBrushProperty =
+    register_property<TextBox>(
+        "IndicatorBrush",
+        core::Variant{ paint::Brush::solid_rgb(0x79747E) },
+        PropertyMetadata{
+            .affects_render = true,
         });
 
 // ============================================================================
@@ -398,33 +417,37 @@ static style::Style& default_textbox_style()
 
         // ── P5 StyleSetter：Normal 基线外观 ────────────────────────────────
         s.add_setter({ &TextBox::BackgroundProperty,
-                       core::Variant{ Brush::solid_rgb(0xFFFBFE) } });  // MD3 Surface
+                       core::Variant{ Brush::solid(Color::Transparent) } });  // MD3 Outlined 背景透明
         s.add_setter({ &TextBox::ForegroundProperty,
                        core::Variant{ Brush::solid_rgb(0x1C1B1F) } });  // MD3 On Surface
-        s.add_setter({ &TextBox::BorderColorProperty,
+        s.add_setter({ &TextBox::IndicatorBrushProperty,
                        core::Variant{ Brush::solid_rgb(0x79747E) } });  // MD3 Outline
+        s.add_setter({ &TextBox::IndicatorThicknessProperty,
+                       core::Variant{ 1.0f } });                       // Normal 1dp
 
         // ── P4 StyleTrigger：Hovered 状态终值 ──────────────────────────────
         style::VisualStateSetters hovered;
         hovered.state_name = "Hovered";
-        hovered.setters.push_back({ &TextBox::BorderColorProperty,
-            core::Variant{ Brush::solid_rgb(0x1C1B1F) } });  // MD3 On Surface（边框深色）
+        hovered.setters.push_back({ &TextBox::IndicatorBrushProperty,
+            core::Variant{ Brush::solid_rgb(0x1C1B1F) } });  // MD3 On Surface
         s.add_state_setters(std::move(hovered));
 
         // ── P4 StyleTrigger：Focused 状态终值 ──────────────────────────────
         style::VisualStateSetters focused;
         focused.state_name = "Focused";
-        focused.setters.push_back({ &TextBox::BorderColorProperty,
-            core::Variant{ Brush::solid_rgb(0x6750A4) } });  // MD3 Primary（主色边框）
+        focused.setters.push_back({ &TextBox::IndicatorBrushProperty,
+            core::Variant{ Brush::solid_rgb(0x6750A4) } });  // MD3 Primary
+        focused.setters.push_back({ &TextBox::IndicatorThicknessProperty,
+            core::Variant{ 2.0f } });                       // Focused 2dp
         s.add_state_setters(std::move(focused));
 
         // ── P4 StyleTrigger：Disabled 状态终值 ─────────────────────────────
         style::VisualStateSetters disabled;
         disabled.state_name = "Disabled";
-        disabled.setters.push_back({ &TextBox::BackgroundProperty,
-            core::Variant{ Brush::solid(Color{ 0.11f, 0.11f, 0.14f, 0.04f }) } });  // On Surface 4%
-        disabled.setters.push_back({ &TextBox::BorderColorProperty,
+        disabled.setters.push_back({ &TextBox::ForegroundProperty,
             core::Variant{ Brush::solid(Color{ 0.11f, 0.11f, 0.14f, 0.38f }) } });  // On Surface 38%
+        disabled.setters.push_back({ &TextBox::IndicatorBrushProperty,
+            core::Variant{ Brush::solid(Color{ 0.11f, 0.11f, 0.14f, 0.12f }) } });  // On Surface 12%
         s.add_state_setters(std::move(disabled));
 
         return s;
@@ -448,23 +471,29 @@ TextBox::TextBox()
     vsm.define_state("Focused");
     vsm.define_state("Disabled");
 
-    // 过渡动画：边框颜色插值
+    // 过渡动画：指示线颜色和粗细插值
     auto* tb_ptr = this;
     vsm.add_transition("*", "Normal",
         [tb_ptr](animation::Storyboard& sb) {
-            sb.animate_dp(*tb_ptr, TextBox::BorderColorProperty,
+            sb.animate_dp(*tb_ptr, TextBox::IndicatorBrushProperty,
+                          animation::Duration::milliseconds(120.0f),
+                          animation::QuadEaseOut);
+            sb.animate_dp(*tb_ptr, TextBox::IndicatorThicknessProperty,
                           animation::Duration::milliseconds(120.0f),
                           animation::QuadEaseOut);
         });
     vsm.add_transition("*", "Hovered",
         [tb_ptr](animation::Storyboard& sb) {
-            sb.animate_dp(*tb_ptr, TextBox::BorderColorProperty,
+            sb.animate_dp(*tb_ptr, TextBox::IndicatorBrushProperty,
                           animation::Duration::milliseconds(80.0f),
                           animation::QuadEaseOut);
         });
     vsm.add_transition("*", "Focused",
         [tb_ptr](animation::Storyboard& sb) {
-            sb.animate_dp(*tb_ptr, TextBox::BorderColorProperty,
+            sb.animate_dp(*tb_ptr, TextBox::IndicatorBrushProperty,
+                          animation::Duration::milliseconds(120.0f),
+                          animation::QuadEaseOut);
+            sb.animate_dp(*tb_ptr, TextBox::IndicatorThicknessProperty,
                           animation::Duration::milliseconds(120.0f),
                           animation::QuadEaseOut);
         });
@@ -611,6 +640,21 @@ void TextBox::set_font_size(float size_px) noexcept
     invalidate_render();
 }
 
+math::CornerRadii TextBox::corner_radii() const noexcept
+{
+    const core::Variant& v = get_value(CornerRadiusProperty);
+    return v.has<math::CornerRadii>()
+        ? v.get<math::CornerRadii>()
+        : math::CornerRadii::uniform(4.0f);
+}
+
+void TextBox::set_corner_radii(math::CornerRadii radii)
+{
+    set_value(CornerRadiusProperty, core::Variant{ radii });
+    invalidate_arrange();
+    invalidate_render();
+}
+
 // ============================================================================
 // 布局
 // ============================================================================
@@ -695,10 +739,12 @@ void TextBox::on_arrange(math::Rect final_rect)
 {
     FrameworkElement::on_arrange(final_rect);
 
-    // 设置圆角裁剪区，使内容渲染不超出控件边界
+    // 设置圆角裁剪区：使用四角独立半径
     const core::Variant& cr_var = get_value(CornerRadiusProperty);
-    const float radius = cr_var.has<float>() ? cr_var.get<float>() : 4.0f;
-    set_clip_rounded_rect(math::RoundedRect{ final_rect, radius });
+    const math::CornerRadii clip_radii = cr_var.has<math::CornerRadii>()
+        ? cr_var.get<math::CornerRadii>()
+        : math::CornerRadii::uniform(4.0f);
+    set_clip_complex_rounded_rect(math::ComplexRoundedRect{ final_rect, clip_radii });
 }
 
 // ============================================================================
@@ -715,35 +761,48 @@ void TextBox::on_render(paint::Canvas& canvas)
     // 每次渲染前确保滚动偏移在有效范围内
     clamp_scroll_offsets();
 
-    // 读取圆角半径
+    // 读取四角独立圆角半径
     const core::Variant& cr_var = get_value(CornerRadiusProperty);
-    const float radius = cr_var.has<float>() ? cr_var.get<float>() : 4.0f;
-    const math::RoundedRect rrect{ rect, radius };
+    const math::CornerRadii bg_radii = cr_var.has<math::CornerRadii>()
+        ? cr_var.get<math::CornerRadii>()
+        : math::CornerRadii::uniform(4.0f);
+    const math::ComplexRoundedRect bg_crr{ rect, bg_radii };
 
-    // ── 1. 背景填充 ─────────────────────────────────────────────────────────
+    // ── 1. 背景填充（透明）─────────────────────────────────────────────
     const core::Variant& bg_var = get_value(BackgroundProperty);
     const paint::Brush bg = bg_var.has<paint::Brush>()
         ? bg_var.get<paint::Brush>()
-        : paint::Brush::solid_rgb(0xFFFBFE);
-    canvas.fill_rounded_rect(rrect, bg);
-
-    // ── 2. 边框描边 ─────────────────────────────────────────────────────────
-    // 获焦时加粗至 2px（MD3 Filled Text Field 规范），其余状态 1px
-    const core::Variant& bc_var = get_value(BorderColorProperty);
-    const paint::Brush border_brush = bc_var.has<paint::Brush>()
-        ? bc_var.get<paint::Brush>()
-        : paint::Brush::solid_rgb(0x79747E);
-    if (!border_brush.is_transparent()) {
-        paint::Pen pen;
-        pen.width = is_focused_ ? 2.0f : 1.0f;
-        canvas.stroke_rounded_rect(rrect, border_brush, pen);
+        : paint::Brush::solid(math::Color::Transparent);
+    if (!bg.is_transparent()) {
+        canvas.fill_complex_rounded_rect(bg_crr, bg);
     }
 
-    // ── 3. 准备文字绘制区域（减去内边距）──────────────────────────────────
+    // ── 2. 状态层叠加（MD3 Hover State Layer：On Surface 8%）───────────
+    if (is_enabled_ && is_hovered_ && !is_focused_) {
+        canvas.fill_complex_rounded_rect(bg_crr,
+            paint::Brush::solid(math::Color{ 0.11f, 0.11f, 0.14f, 0.08f }));
+    }
+
+    // ── 3. 四边描边（MD3 Outlined Text Field）───────────────────────────
+    const core::Variant& ic_var = get_value(IndicatorBrushProperty);
+    const paint::Brush outline_brush = ic_var.has<paint::Brush>()
+        ? ic_var.get<paint::Brush>()
+        : paint::Brush::solid_rgb(0x79747E);
+
+    const core::Variant& it_var = get_value(IndicatorThicknessProperty);
+    const float outline_w = it_var.has<float>() ? it_var.get<float>() : 1.0f;
+
+    if (!outline_brush.is_transparent() && outline_w > 0.0f) {
+        paint::Pen pen;
+        pen.width = outline_w;
+        canvas.stroke_complex_rounded_rect(bg_crr, outline_brush, pen);
+    }
+
+    // ── 4. 准备文字绘制区域（减去内边距）────────────────────────────────
     const core::Variant& pad_var = get_value(PaddingProperty);
     const math::Thickness pad = pad_var.has<math::Thickness>()
         ? pad_var.get<math::Thickness>()
-        : math::Thickness{ 16.0f, 8.0f, 16.0f, 8.0f };
+        : math::Thickness{ 16.0f, 12.0f, 16.0f, 12.0f };
 
     const float text_x0 = rect.x + pad.left;
     const float text_y0 = rect.y + pad.top;
@@ -952,7 +1011,7 @@ void TextBox::on_visual_state_changed(ControlVisualState old_state,
     Control::on_visual_state_changed(old_state, new_state);
 
     // 注册 AnimationClock（幂等）：
-    //   - 驱动 VSM::tick_animations(dt)（边框颜色过渡 Storyboard）
+    //   - 驱动 VSM::tick_animations(dt)（描边颜色/粗细过渡 Storyboard）
     //   - 驱动光标闪烁（is_focused_ 时每 500ms 翻转 cursor_visible_）
     // tick 回调返回 false 时 AnimationClock 自动移除注册项
     animation::AnimationClock::instance().register_animation(this, &TextBox::anim_tick_callback);
@@ -967,7 +1026,7 @@ bool TextBox::anim_tick_callback(void* handle, float dt) noexcept
     auto* self = static_cast<TextBox*>(handle);
     bool  any_active = false;
 
-    // ── VSM 边框颜色过渡动画 ───────────────────────────────────────────────
+    // ── VSM 描边过渡动画 ─────────────────────────────────────────────────
     if (auto* v = self->vsm()) {
         if (v->tick_animations(dt)) {
             any_active = true;
