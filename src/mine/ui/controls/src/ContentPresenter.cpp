@@ -60,13 +60,15 @@ void ContentPresenter::on_content_changed(DependencyObject*         sender,
     if (new_v.has<containers::InlineString>()) {
         // ── 字符串内容：创建或复用内联 TextBlock ──────────────────────────────
         if (!self->inline_text_block_) {
-            // 首次设置字符串内容：创建内联 TextBlock 并配置字体/颜色/内边距
+            // 首次设置字符串内容：创建内联 TextBlock 并配置字体/颜色/内边距/对齐
             self->inline_text_block_ = MINE_NEW(TextBlock);
             self->inline_text_block_->set_font_face(self->font_face_);
             self->inline_text_block_->set_font_size(self->font_size_px_);
             // 直接传入 Brush（TextBlock 已支持 paint::Brush 前景色）
             self->inline_text_block_->set_foreground(self->foreground_);
             self->inline_text_block_->set_padding(self->padding_cache_);
+            self->inline_text_block_->set_text_alignment(self->text_alignment_cache_);
+            self->inline_text_block_->set_use_ink_alignment(self->use_ink_alignment_cache_);
             // 将 TextBlock 加入视觉子树，后续由视觉树驱动其测量和渲染
             self->add_child(self->inline_text_block_);
         }
@@ -150,6 +152,24 @@ void ContentPresenter::set_foreground(paint::Brush brush) noexcept
         // TextBlock 已支持 paint::Brush 前景色，直接传入
         inline_text_block_->set_foreground(brush);
     } else {
+        invalidate_render();
+    }
+}
+
+void ContentPresenter::set_text_alignment(TextAlignment align) noexcept
+{
+    text_alignment_cache_ = align;
+    if (inline_text_block_) {
+        inline_text_block_->set_text_alignment(align);
+        invalidate_render();
+    }
+}
+
+void ContentPresenter::set_use_ink_alignment(bool enabled) noexcept
+{
+    use_ink_alignment_cache_ = enabled;
+    if (inline_text_block_) {
+        inline_text_block_->set_use_ink_alignment(enabled);
         invalidate_render();
     }
 }

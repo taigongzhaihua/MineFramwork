@@ -63,6 +63,64 @@ static uint32_t next_utf8_boundary(const char* data,
 static constexpr const char  kEllipsis[]  = "\xE2\x80\xA6";
 static constexpr uint32_t    kEllipsisLen = 3u;
 
+/**
+ * @brief 测量单行显示文本的真实墨迹包围盒。
+ *
+ * 对省略号场景，会将正文与省略号的墨迹盒合并成最终可见包围盒。
+ */
+static text::TextInkBounds measure_text_run_ink_bounds(void*         font_face,
+                                                       float         font_size_px,
+                                                       float         char_spacing_px,
+                                                       const char*   data,
+                                                       uint32_t      len,
+                                                       bool          has_ellipsis) noexcept
+{
+    if (font_face == nullptr || data == nullptr) {
+        return {};
+    }
+
+    auto* face = static_cast<text::FontFace*>(font_face);
+    if (!has_ellipsis) {
+        return face->measure_text_ink_bounds(data, len, font_size_px, char_spacing_px);
+    }
+
+    const text::TextInkBounds prefix =
+        face->measure_text_ink_bounds(data, len, font_size_px, char_spacing_px);
+    const text::TextInkBounds ellipsis =
+        face->measure_text_ink_bounds(kEllipsis, kEllipsisLen, font_size_px, 0.0f);
+
+    text::TextInkBounds combined{};
+    combined.advance_width = prefix.advance_width + ellipsis.advance_width;
+
+    const bool prefix_has_ink   = prefix.width > 0.0f && prefix.height > 0.0f;
+    const bool ellipsis_has_ink = ellipsis.width > 0.0f && ellipsis.height > 0.0f;
+    if (!prefix_has_ink && !ellipsis_has_ink) {
+        return combined;
+    }
+    if (!prefix_has_ink) {
+        combined.left   = prefix.advance_width + ellipsis.left;
+        combined.top    = ellipsis.top;
+        combined.width  = ellipsis.width;
+        combined.height = ellipsis.height;
+        return combined;
+    }
+    if (!ellipsis_has_ink) {
+        return prefix;
+    }
+
+    const float left   = std::min(prefix.left, prefix.advance_width + ellipsis.left);
+    const float top    = std::min(prefix.top, ellipsis.top);
+    const float right  = std::max(prefix.left + prefix.width,
+                                  prefix.advance_width + ellipsis.left + ellipsis.width);
+    const float bottom = std::max(prefix.top + prefix.height,
+                                  ellipsis.top + ellipsis.height);
+    combined.left   = left;
+    combined.top    = top;
+    combined.width  = right - left;
+    combined.height = bottom - top;
+    return combined;
+}
+
 // ============================================================================
 // 依赖属性注册
 // ============================================================================
@@ -387,6 +445,17 @@ void TextBlock::set_text_alignment(TextAlignment align)
 {
     text_alignment_ = align;
     set_value(TextAlignmentProperty, core::Variant{ text_alignment_ });
+    invalidate_render();
+}
+
+bool TextBlock::use_ink_alignment() const noexcept { return use_ink_alignment_; }
+
+void TextBlock::set_use_ink_alignment(bool enabled) noexcept
+{
+    if (use_ink_alignment_ == enabled) {
+        return;
+    }
+    use_ink_alignment_ = enabled;
     invalidate_render();
 }
 
@@ -725,11 +794,60 @@ math::Size TextBlock::measure_override(math::Size available)
 
     // 计算期望尺寸
     const float eff_lh  = effective_line_height();
-    const float total_h = eff_lh * static_cast<float>(cached_lines_.size());
+    float total_h = eff_lh * static_cast<float>(cached_lines_.size());
+    const bool  use_single_line_ink_measure = !use_ink_alignment_
+                                           && line_height_px_ <= 0.0f
+                                           && cached_lines_.size() == 1u
+                                           && font_face_ != nullptr;
+    text::TextInkBounds single_line_ink_bounds{};
+
+    // 单行自动高度默认按真实字形墨迹计算，避免背景/内边距看起来被额外行距稀释。
+    if (use_single_line_ink_measure)
+    {
+        const TextLine& line = cached_lines_.front();
+        single_line_ink_bounds = measure_text_run_ink_bounds(
+            font_face_,
+            font_size_px_,
+            char_spacing_px_,
+            text_.data() + line.start,
+            line.disp_length,
+            line.has_ellipsis);
+        if (single_line_ink_bounds.height > 0.0f) {
+            total_h = single_line_ink_bounds.height;
+        }
+    }
+
+    // 单行左对齐时，测量首字形 bearing_x 用于修正起始 X
+    first_glyph_bearing_x_ = 0.0f;
+    if (use_single_line_ink_measure
+        && text_alignment_ == TextAlignment::Left
+        && !text_.empty()
+        && font_face_ != nullptr)
+    {
+        auto* face = static_cast<text::FontFace*>(font_face_);
+        text::GlyphBitmap gb{};
+        const uint32_t first_cp = [this]() -> uint32_t {
+            const auto c0 = static_cast<uint8_t>(text_[0]);
+            if (c0 < 0x80u) return c0;
+            if ((c0 & 0xE0u) == 0xC0u && text_.size() >= 2u)
+                return ((c0 & 0x1Fu) << 6u) | (static_cast<uint8_t>(text_[1]) & 0x3Fu);
+            if ((c0 & 0xF0u) == 0xE0u && text_.size() >= 3u)
+                return ((c0 & 0x0Fu) << 12u) | ((static_cast<uint8_t>(text_[1]) & 0x3Fu) << 6u) | (static_cast<uint8_t>(text_[2]) & 0x3Fu);
+            if ((c0 & 0xF8u) == 0xF0u && text_.size() >= 4u)
+                return ((c0 & 0x07u) << 18u) | ((static_cast<uint8_t>(text_[1]) & 0x3Fu) << 12u) | ((static_cast<uint8_t>(text_[2]) & 0x3Fu) << 6u) | (static_cast<uint8_t>(text_[3]) & 0x3Fu);
+            return 0xFFFDu;
+        }();
+        if (first_cp != 0xFFFDu && face->rasterize(first_cp, gb)) {
+            first_glyph_bearing_x_ = static_cast<float>(gb.metrics.bearing_x);
+        }
+    }
 
     float max_w = 0.0f;
     for (const auto& line : cached_lines_) {
         if (line.disp_width > max_w) max_w = line.disp_width;
+    }
+    if (use_single_line_ink_measure && single_line_ink_bounds.width > 0.0f) {
+        max_w = single_line_ink_bounds.width;
     }
 
     // 返回内容区期望尺寸（不含 Margin）；FrameworkElement::on_measure 会自动加回 Margin 并调用 set_desired_size
@@ -769,7 +887,7 @@ void TextBlock::on_render(paint::Canvas& canvas)
     if (cached_lines_.empty()) return;
 
     // ── 排版参数计算 ──────────────────────────────────────────────────────
-    const float eff_lh        = effective_line_height();
+    const float eff_lh         = effective_line_height();
     const float asc            = static_cast<float>(cached_ascender_);
     const float dsc            = static_cast<float>(cached_descender_);  // 负值
     // 行框内基线垂直居中偏移
@@ -778,11 +896,15 @@ void TextBlock::on_render(paint::Canvas& canvas)
     const float content_right  = rect.x + rect.width - padding_.right;
     const float content_top    = rect.y + padding_.top;
     const float content_w      = rect.width - padding_.horizontal();
+    const float content_h      = rect.height - padding_.vertical();
 
     // 确定可见行数
     const size_t max_visible = (max_lines_ > 0)
         ? std::min(cached_lines_.size(), static_cast<size_t>(max_lines_))
         : cached_lines_.size();
+    const bool  use_single_line_ink_layout = !use_ink_alignment_
+                                          && line_height_px_ <= 0.0f
+                                          && max_visible == 1u;
 
     // ── 逐行渲染（裁剪到内容区，防止文字渲染到 padding 区域或控件之外）──
     canvas.save();
@@ -790,21 +912,58 @@ void TextBlock::on_render(paint::Canvas& canvas)
         content_left,
         content_top,
         content_w,
-        rect.height - padding_.vertical()
+        content_h
     });
 
     for (size_t i = 0u; i < max_visible; ++i) {
         const TextLine& line       = cached_lines_[i];
-        const float     baseline_y = content_top
-                                   + static_cast<float>(i) * eff_lh
-                                   + baseline_off;
+        const float line_top = content_top + static_cast<float>(i) * eff_lh;
+        const bool  need_ink_bounds = use_ink_alignment_
+                                   || use_single_line_ink_layout
+                                   || text_alignment_ == TextAlignment::Center
+                                   || text_alignment_ == TextAlignment::Right;
+        text::TextInkBounds ink_bounds{};
+        if (need_ink_bounds) {
+            ink_bounds = measure_text_run_ink_bounds(
+                font_face_,
+                font_size_px_,
+                char_spacing_px_,
+                text_.data() + line.start,
+                line.disp_length,
+                line.has_ellipsis);
+        }
+
+        float baseline_y = line_top + baseline_off;
+        if ((use_ink_alignment_ || use_single_line_ink_layout) && ink_bounds.height > 0.0f) {
+            baseline_y = line_top + (eff_lh - ink_bounds.height) * 0.5f - ink_bounds.top;
+            if (use_single_line_ink_layout) {
+                baseline_y = content_top + (content_h - ink_bounds.height) * 0.5f - ink_bounds.top;
+            }
+        }
 
         // 根据对齐模式计算行起始 X
         float text_x = content_left;
+        const bool use_horizontal_ink_layout = (use_ink_alignment_ || use_single_line_ink_layout)
+                                            && ink_bounds.width > 0.0f;
         if (text_alignment_ == TextAlignment::Center) {
-            text_x = content_left + (content_w - line.disp_width) * 0.5f;
+            if (use_horizontal_ink_layout) {
+                text_x = content_left + (content_w - ink_bounds.width) * 0.5f - ink_bounds.left;
+            } else {
+                text_x = content_left + (content_w - line.disp_width) * 0.5f;
+            }
         } else if (text_alignment_ == TextAlignment::Right) {
-            text_x = content_right - line.disp_width;
+            if (use_horizontal_ink_layout) {
+                text_x = content_right - ink_bounds.width - ink_bounds.left;
+            } else {
+                text_x = content_right - line.disp_width;
+            }
+        } else if (use_horizontal_ink_layout) {
+            text_x = content_left - ink_bounds.left;
+        }
+        // 单行左对齐再按首字形 bearing 精确修正
+        if (use_single_line_ink_layout && text_alignment_ == TextAlignment::Left
+            && first_glyph_bearing_x_ > 0.0f) {
+            text_x = content_left - first_glyph_bearing_x_;
         }
 
         // 绘制行文字（含字符间距，不含省略号）

@@ -30,6 +30,7 @@
 #include <mine/math/Color.h>
 #include <mine/paint/Brush.h>
 #include <mine/containers/InlineString.h>
+#include <mine/ui/controls/TextBlock.h>   // TextAlignment 枚举
 
 namespace mine::paint { class Canvas; }
 
@@ -101,6 +102,21 @@ public:
      */
     void set_foreground(paint::Brush brush) noexcept;
 
+    /**
+     * @brief 设置文字对齐方式（代理到内联 TextBlock）。
+     *
+     * 若内联 TextBlock 尚未创建，对齐方式会被缓存并在创建时应用。
+     * @param align 文字对齐方式（Left / Center / Right）
+     */
+    void set_text_alignment(TextAlignment align) noexcept;
+
+    /**
+     * @brief 设置是否按真实字形墨迹进行视觉对齐修正。
+     *
+     * 若内联 TextBlock 尚未创建，该设置会先缓存，待创建时再应用。
+     */
+    void set_use_ink_alignment(bool enabled) noexcept;
+
 protected:
     // ── 布局虚方法 ────────────────────────────────────────────────────────
 
@@ -158,6 +174,12 @@ private:
 
     /// 文字前景画刷缓存（默认白色纯色画刷）
     paint::Brush    foreground_{paint::Brush::solid(math::Color::White)};
+
+    /// 文字对齐方式缓存（默认左对齐；inline_text_block_ 未创建时暂存，创建后立即传入）
+    TextAlignment   text_alignment_cache_{TextAlignment::Left};
+
+    /// 是否按真实字形墨迹做视觉对齐修正（默认关闭）
+    bool            use_ink_alignment_cache_{false};
 };
 
 } // namespace mine::ui

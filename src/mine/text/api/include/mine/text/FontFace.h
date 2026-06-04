@@ -48,6 +48,25 @@ struct GlyphBitmap {
 };
 
 /**
+ * @brief 一段文字的可见墨迹包围盒（相对基线起点）。
+ *
+ * 坐标系约定：
+ *   - left/top：相对 draw_text() 基线起点的偏移，top 可为负值
+ *   - width/height：实际可见字形位图的包围盒尺寸
+ *   - advance_width：按字形 advance 累加后的总笔触前进量（含字符间距）
+ *
+ * 若文字仅包含空格等无可见墨迹字符，则 width/height 为 0，
+ * 但 advance_width 仍保留实际笔触前进量。
+ */
+struct TextInkBounds {
+    float left{0.0f};
+    float top{0.0f};
+    float width{0.0f};
+    float height{0.0f};
+    float advance_width{0.0f};
+};
+
+/**
  * @brief 字体面，封装 FreeType FT_Face 对象。
  *
  * 使用示例：
@@ -148,6 +167,27 @@ public:
     [[nodiscard]] float measure_text(const char* utf8,
                                      size_t      len,
                                      float       font_size_px) const;
+
+    /**
+     * @brief 测量一段 UTF-8 文字的实际可见墨迹包围盒。
+     *
+     * 与 measure_text() 的区别：
+     *   - measure_text() 返回笔触前进量（advance）累加宽度
+     *   - 本函数返回最终渲染时真实字形位图的可见边界
+     *
+     * 该结果可用于“视觉居中”场景，避免因 bearing/advance 差异导致
+     * 文字看起来偏右或偏下。
+     *
+     * @param utf8               UTF-8 编码文字缓冲区（无需 null 结尾）
+     * @param len                缓冲区字节数
+     * @param font_size_px       字号（逻辑像素）
+     * @param character_spacing  每个字形 advance 后追加的字符间距（像素）
+     * @return 文字墨迹包围盒及总 advance 宽度
+     */
+    [[nodiscard]] TextInkBounds measure_text_ink_bounds(const char* utf8,
+                                                        size_t      len,
+                                                        float       font_size_px,
+                                                        float       character_spacing = 0.0f) const;
 
     /**
      * @brief 默认构造（仅供内部工厂函数使用，直接构造得到的对象无效）。

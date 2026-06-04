@@ -14,6 +14,7 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
+#include <algorithm>
 #include <cstring>
 
 // Windows 调试输出
@@ -329,6 +330,88 @@ float FontFace::measure_text(const char* utf8,
     }
 
     return total_width;
+}
+
+TextInkBounds FontFace::measure_text_ink_bounds(const char* utf8,
+                                                size_t      len,
+                                                float       font_size_px,
+                                                float       character_spacing) const
+{
+    TextInkBounds bounds{};
+    if (impl_ == nullptr || impl_->face == nullptr || utf8 == nullptr || len == 0) {
+        return bounds;
+    }
+
+    FT_Face face = impl_->face;
+
+    const FT_UInt pixel_h = static_cast<FT_UInt>(font_size_px + 0.5f);
+    if (FT_Set_Pixel_Sizes(face, 0, pixel_h) != 0) {
+        FT_LOG("measure_text_ink_bounds：FT_Set_Pixel_Sizes 失败");
+        return bounds;
+    }
+
+    float pen_x = 0.0f;
+    bool  has_ink = false;
+    float min_x = 0.0f;
+    float min_y = 0.0f;
+    float max_x = 0.0f;
+    float max_y = 0.0f;
+
+    const char* p   = utf8;
+    const char* end = utf8 + len;
+
+    while (p < end) {
+        const uint32_t cp = utf8_decode_one(p, end);
+        if (cp == 0xFFFDu) {
+            continue;
+        }
+
+        const FT_UInt glyph_idx = FT_Get_Char_Index(face, static_cast<FT_ULong>(cp));
+        if (FT_Load_Glyph(face, glyph_idx, FT_LOAD_FORCE_AUTOHINT) != 0) {
+            continue;
+        }
+
+        if (face->glyph->format != FT_GLYPH_FORMAT_BITMAP) {
+            if (FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL) != 0) {
+                continue;
+            }
+        }
+
+        const FT_GlyphSlot slot = face->glyph;
+        const FT_Bitmap& bitmap = slot->bitmap;
+        const float advance_x = static_cast<float>(slot->advance.x >> 6);
+
+        if (bitmap.width > 0 && bitmap.rows > 0) {
+            const float glyph_left   = pen_x + static_cast<float>(slot->bitmap_left);
+            const float glyph_top    = -static_cast<float>(slot->bitmap_top);
+            const float glyph_right  = glyph_left + static_cast<float>(bitmap.width);
+            const float glyph_bottom = glyph_top + static_cast<float>(bitmap.rows);
+
+            if (!has_ink) {
+                min_x = glyph_left;
+                min_y = glyph_top;
+                max_x = glyph_right;
+                max_y = glyph_bottom;
+                has_ink = true;
+            } else {
+                min_x = std::min(min_x, glyph_left);
+                min_y = std::min(min_y, glyph_top);
+                max_x = std::max(max_x, glyph_right);
+                max_y = std::max(max_y, glyph_bottom);
+            }
+        }
+
+        pen_x += advance_x + character_spacing;
+    }
+
+    bounds.advance_width = pen_x;
+    if (has_ink) {
+        bounds.left   = min_x;
+        bounds.top    = min_y;
+        bounds.width  = max_x - min_x;
+        bounds.height = max_y - min_y;
+    }
+    return bounds;
 }
 
 } // namespace mine::text

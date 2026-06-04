@@ -146,6 +146,10 @@ public:
     [[nodiscard]] TextAlignment text_alignment() const noexcept;
     void set_text_alignment(TextAlignment align);
 
+    /** @brief 是否按真实字形墨迹做视觉对齐修正。 */
+    [[nodiscard]] bool use_ink_alignment() const noexcept;
+    void set_use_ink_alignment(bool enabled) noexcept;
+
     [[nodiscard]] TextTrimming text_trimming() const noexcept;
     void set_text_trimming(TextTrimming mode);
 
@@ -221,6 +225,7 @@ private:
     math::Thickness  padding_        = math::Thickness::symmetric(4.0f, 2.0f);
     TextWrapping     text_wrapping_  = TextWrapping::NoWrap;
     TextAlignment    text_alignment_ = TextAlignment::Left;
+    bool             use_ink_alignment_ = false;
     TextTrimming     text_trimming_  = TextTrimming::None;
     float            line_height_px_ = 0.0f;   ///< 0 = 自动
     float            char_spacing_px_= 0.0f;
@@ -232,6 +237,7 @@ private:
     containers::SmallVector<TextLine, 8> cached_lines_;
     int32_t  cached_ascender_  = 0;  ///< 基线上方像素数（正值）
     int32_t  cached_descender_ = 0;  ///< 基线下方像素数（负值）
+    float    first_glyph_bearing_x_ = 0.0f;  ///< 单行文本首字形左 bearing（用于对齐修正）
 
     // ── 私有辅助 ───────────────────────────────────────────────────────────
 

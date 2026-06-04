@@ -482,6 +482,7 @@ TextBox::TextBox()
     add_handler(input::MouseDownEvent(),  &TextBox::on_mouse_down_router,  this);
     add_handler(input::MouseMoveEvent(),  &TextBox::on_mouse_move_router,  this);
     add_handler(input::MouseUpEvent(),    &TextBox::on_mouse_up_router,    this);
+    add_handler(input::MouseWheelEvent(), &TextBox::on_mouse_wheel_router, this);
     add_handler(input::KeyDownEvent(),    &TextBox::on_key_down_router,    this);
     add_handler(input::TextInputEvent(),  &TextBox::on_text_input_router,  this);
     add_handler(input::GotFocusEvent(),   &TextBox::on_got_focus_router,   this);
@@ -528,6 +529,8 @@ void TextBox::set_text(core::StringView text)
     sel_anchor_ = cursor_pos_;  // 设置文字后取消选区
     // 同步 DP（affects_measure/affects_render=true → 自动触发重新测量和重绘）
     set_value(TextProperty, core::Variant{ text_buf_ });
+    // 自动滚动到文本末尾
+    auto_scroll_to_cursor();
 }
 
 core::StringView TextBox::placeholder() const noexcept
@@ -709,6 +712,9 @@ void TextBox::on_render(paint::Canvas& canvas)
         return;
     }
 
+    // 每次渲染前确保滚动偏移在有效范围内
+    clamp_scroll_offsets();
+
     // 读取圆角半径
     const core::Variant& cr_var = get_value(CornerRadiusProperty);
     const float radius = cr_var.has<float>() ? cr_var.get<float>() : 4.0f;
@@ -775,8 +781,8 @@ void TextBox::on_render(paint::Canvas& canvas)
     if (!use_multiline_layout) {
         // ── 4a-pre. 选择高亮（在文字下方渲染）──────────────────────────────
         if (is_focused_ && has_selection() && has_text) {
-            const float x_sel0   = text_x0 + measure_text_width(text_buf_.data(), sel_start());
-            const float x_sel1   = text_x0 + measure_text_width(text_buf_.data(), sel_end());
+            const float x_sel0   = text_x0 - scroll_offset_x_ + measure_text_width(text_buf_.data(), sel_start());
+            const float x_sel1   = text_x0 - scroll_offset_x_ + measure_text_width(text_buf_.data(), sel_end());
             const float sel_top  = text_y0 + (text_h - line_h) * 0.5f;
             canvas.fill_rect(
                 { x_sel0, sel_top, x_sel1 - x_sel0, line_h },
@@ -791,7 +797,7 @@ void TextBox::on_render(paint::Canvas& canvas)
                 : paint::Brush::solid_rgb(0x1C1B1F);
             canvas.draw_text(
                 core::StringView{ text_buf_.data(), text_buf_.size() },
-                { text_x0, baseline_y },
+                { text_x0 - scroll_offset_x_, baseline_y },
                 font_face_,
                 font_size_px_,
                 fg);
@@ -803,7 +809,7 @@ void TextBox::on_render(paint::Canvas& canvas)
                 : paint::Brush::solid(math::Color{ 0.29f, 0.27f, 0.31f, 0.60f });
             canvas.draw_text(
                 core::StringView{ placeholder_buf_.data(), placeholder_buf_.size() },
-                { text_x0, baseline_y },
+                { text_x0 - scroll_offset_x_, baseline_y },
                 font_face_,
                 font_size_px_,
                 ph_fg);
@@ -811,7 +817,7 @@ void TextBox::on_render(paint::Canvas& canvas)
 
         // ── 5. 绘制插入光标 ──────────────────────────────────────────────────
         if (is_focused_ && (cursor_visible_ || is_read_only_)) {
-            float cursor_x = text_x0;
+            float cursor_x = text_x0 - scroll_offset_x_;
             if (cursor_pos_ > 0u && has_text) {
                 cursor_x += measure_text_width(text_buf_.data(), cursor_pos_);
             }
@@ -841,7 +847,7 @@ void TextBox::on_render(paint::Canvas& canvas)
                 : paint::Brush::solid(math::Color{ 0.29f, 0.27f, 0.31f, 0.60f });
             canvas.draw_text(
                 core::StringView{ placeholder_buf_.data(), placeholder_buf_.size() },
-                { text_x0, baseline_y },
+                { text_x0 - scroll_offset_x_, baseline_y },
                 font_face_,
                 font_size_px_,
                 ph_fg);
@@ -860,9 +866,9 @@ void TextBox::on_render(paint::Canvas& canvas)
                         const uint32_t hl_start = sel_s > line.start_offset ? sel_s : line.start_offset;
                         const uint32_t hl_end   = sel_e < line_end ? sel_e : line_end;
                         const char*    line_text = text_buf_.data() + line.start_offset;
-                        const float    x0 = text_x0 + measure_text_width(line_text, hl_start - line.start_offset);
-                        const float    x1 = text_x0 + measure_text_width(line_text, hl_end   - line.start_offset);
-                        const float    y  = text_y0 + static_cast<float>(i) * line_h;
+                        const float    x0 = text_x0 - scroll_offset_x_ + measure_text_width(line_text, hl_start - line.start_offset);
+                        const float    x1 = text_x0 - scroll_offset_x_ + measure_text_width(line_text, hl_end   - line.start_offset);
+                        const float    y  = text_y0 + static_cast<float>(i) * line_h - scroll_offset_y_;
                         canvas.fill_rect(
                             { x0, y, x1 - x0, line_h },
                             paint::Brush::solid(math::Color{ 0.404f, 0.314f, 0.643f, 0.30f }));
@@ -890,7 +896,7 @@ void TextBox::on_render(paint::Canvas& canvas)
                 if (line.byte_length > 0) {
                     canvas.draw_text(
                         core::StringView{ text_buf_.data() + line.start_offset, line.byte_length },
-                        { text_x0, line_baseline_y + static_cast<float>(i) * line_h },
+                        { text_x0 - scroll_offset_x_, line_baseline_y + static_cast<float>(i) * line_h - scroll_offset_y_ },
                         font_face_,
                         font_size_px_,
                         fg);
@@ -906,8 +912,8 @@ void TextBox::on_render(paint::Canvas& canvas)
             if (find_line_by_offset(lines, cursor_pos_, &cursor_line_idx, &cursor_line_offset)) {
                 const LineInfo& cursor_line = lines[cursor_line_idx];
                 const char* line_text = text_buf_.data() + cursor_line.start_offset;
-                const float cursor_x = text_x0 + measure_text_width(line_text, cursor_line_offset);
-                const float cursor_y = text_y0 + static_cast<float>(cursor_line_idx) * line_h;
+                const float cursor_x = text_x0 - scroll_offset_x_ + measure_text_width(line_text, cursor_line_offset);
+                const float cursor_y = text_y0 + static_cast<float>(cursor_line_idx) * line_h - scroll_offset_y_;
                 canvas.fill_rect(
                     { cursor_x, cursor_y, 1.5f, line_h },
                     paint::Brush::solid_rgb(0x6750A4));
@@ -1019,6 +1025,12 @@ void TextBox::on_mouse_up_router(void* /*sender*/, RoutedEventArgs& args, void* 
     static_cast<TextBox*>(ud)->on_mouse_up(mouse_args);
 }
 
+void TextBox::on_mouse_wheel_router(void* /*sender*/, RoutedEventArgs& args, void* ud)
+{
+    auto& mouse_args = static_cast<input::MouseEventArgs&>(args);
+    static_cast<TextBox*>(ud)->on_mouse_wheel(mouse_args);
+}
+
 void TextBox::on_key_down_router(void* /*sender*/, RoutedEventArgs& args, void* ud)
 {
     auto& key_args = static_cast<input::KeyEventArgs&>(args);
@@ -1104,8 +1116,9 @@ void TextBox::on_mouse_down(input::MouseEventArgs& args)
 
     const float text_x0    = bounds_rect().x + pad.left;
     const float text_y0    = bounds_rect().y + pad.top;
-    const float click_rel_x = args.position().x - text_x0;
-    const float click_rel_y = args.position().y - text_y0;
+    // 点击坐标需加回滚动偏移（因文字渲染时已减去 scroll_offset_）
+    const float click_rel_x = args.position().x - text_x0 + scroll_offset_x_;
+    const float click_rel_y = args.position().y - text_y0 + scroll_offset_y_;
 
     const bool use_multiline_layout = accepts_return() || (text_wrapping() != TextWrapping::NoWrap);
 
@@ -1134,6 +1147,7 @@ void TextBox::on_mouse_down(input::MouseEventArgs& args)
     cursor_visible_     = true;
     cursor_blink_accum_ = 0.0f;
     update_ime_position();
+    auto_scroll_to_cursor();
     invalidate_render();
     args.set_handled(true);
 }
@@ -1151,8 +1165,9 @@ void TextBox::on_mouse_move(input::MouseEventArgs& args)
 
     const float text_x0 = bounds_rect().x + pad.left;
     const float text_y0 = bounds_rect().y + pad.top;
-    const float click_rel_x = args.position().x - text_x0;
-    const float click_rel_y = args.position().y - text_y0;
+    // 点击坐标需加回滚动偏移（因文字渲染时已减去 scroll_offset_）
+    const float click_rel_x = args.position().x - text_x0 + scroll_offset_x_;
+    const float click_rel_y = args.position().y - text_y0 + scroll_offset_y_;
     const bool use_multiline_layout = accepts_return() || (text_wrapping() != TextWrapping::NoWrap);
 
     uint32_t new_pos;
@@ -1168,6 +1183,7 @@ void TextBox::on_mouse_move(input::MouseEventArgs& args)
     cursor_visible_     = true;
     cursor_blink_accum_ = 0.0f;
     update_ime_position();
+    auto_scroll_to_cursor();
     invalidate_render();
     args.set_handled(true);
 }
@@ -1178,6 +1194,47 @@ void TextBox::on_mouse_up(input::MouseEventArgs& args)
         is_mouse_selecting_ = false;
         args.set_handled(true);
     }
+}
+
+void TextBox::on_mouse_wheel(input::MouseEventArgs& args)
+{
+    const float delta = args.wheel_delta();
+    if (delta == 0.0f) {
+        return;
+    }
+
+    const math::Size tas = text_area_size();
+    const float content_w = total_content_width();
+    const float content_h = total_content_height();
+    const bool has_h_scroll = (content_w > tas.width  && tas.width  > 0.0f);
+    const bool has_v_scroll = (content_h > tas.height && tas.height > 0.0f);
+
+    // 无需滚动时不做处理，让父级有机会处理滚轮事件
+    if (!has_h_scroll && !has_v_scroll) {
+        return;
+    }
+
+    const float line_h = effective_line_height();
+    // 每格滚轮（WHEEL_DELTA = 120）滚动的像素量
+    constexpr float kScrollLinesPerWheelDelta = 3.0f;
+    const float scroll_amount = (delta / 120.0f) * line_h * kScrollLinesPerWheelDelta;
+
+    // ── 滚动方向决策 ───────────────────────────────────────────────────────
+    // Shift + 滚轮：强制横向滚动
+    // 普通滚轮：
+    //   1. 有纵向溢出 → 纵向滚动（常规行为）
+    //   2. 无纵向溢出但有横向溢出 → 自动重映射为横向滚动（单行 NoWrap 场景）
+    if (args.shift()) {
+        scroll_offset_x_ -= scroll_amount;
+    } else if (has_v_scroll) {
+        scroll_offset_y_ -= scroll_amount;
+    } else {
+        scroll_offset_x_ -= scroll_amount;
+    }
+
+    clamp_scroll_offsets();
+    invalidate_render();
+    args.set_handled(true);
 }
 
 void TextBox::on_key_down(input::KeyEventArgs& args)
@@ -1211,7 +1268,7 @@ void TextBox::on_key_down(input::KeyEventArgs& args)
             move_cursor_left();
             commit_move();
         }
-        reset_blink(); update_ime_position(); invalidate_render(); args.set_handled(true);
+        reset_blink(); update_ime_position(); auto_scroll_to_cursor(); invalidate_render(); args.set_handled(true);
         break;
 
     case input::Key::Right:
@@ -1223,19 +1280,19 @@ void TextBox::on_key_down(input::KeyEventArgs& args)
             move_cursor_right();
             commit_move();
         }
-        reset_blink(); update_ime_position(); invalidate_render(); args.set_handled(true);
+        reset_blink(); update_ime_position(); auto_scroll_to_cursor(); invalidate_render(); args.set_handled(true);
         break;
 
     case input::Key::Home:
         cursor_pos_ = 0u;
         commit_move();
-        reset_blink(); update_ime_position(); invalidate_render(); args.set_handled(true);
+        reset_blink(); update_ime_position(); auto_scroll_to_cursor(); invalidate_render(); args.set_handled(true);
         break;
 
     case input::Key::End:
         cursor_pos_ = sz;
         commit_move();
-        reset_blink(); update_ime_position(); invalidate_render(); args.set_handled(true);
+        reset_blink(); update_ime_position(); auto_scroll_to_cursor(); invalidate_render(); args.set_handled(true);
         break;
 
     case input::Key::Up:
@@ -1243,7 +1300,7 @@ void TextBox::on_key_down(input::KeyEventArgs& args)
         if (use_multiline_layout) {
             move_cursor_up();
             commit_move();
-            reset_blink(); update_ime_position(); invalidate_render(); args.set_handled(true);
+            reset_blink(); update_ime_position(); auto_scroll_to_cursor(); invalidate_render(); args.set_handled(true);
         }
         break;
 
@@ -1252,7 +1309,7 @@ void TextBox::on_key_down(input::KeyEventArgs& args)
         if (use_multiline_layout) {
             move_cursor_down();
             commit_move();
-            reset_blink(); update_ime_position(); invalidate_render(); args.set_handled(true);
+            reset_blink(); update_ime_position(); auto_scroll_to_cursor(); invalidate_render(); args.set_handled(true);
         }
         break;
 
@@ -1363,6 +1420,7 @@ void TextBox::insert_char(uint32_t char_utf32)
     // 插入后光标立即显示（重置闪烁计时）
     cursor_visible_     = true;
     cursor_blink_accum_ = 0.0f;
+    auto_scroll_to_cursor();
     invalidate_render();
 }
 
@@ -1390,6 +1448,7 @@ void TextBox::delete_char_before()
     cursor_visible_     = true;
     cursor_blink_accum_ = 0.0f;
     update_ime_position();
+    auto_scroll_to_cursor();
     invalidate_render();
 }
 
@@ -1417,6 +1476,7 @@ void TextBox::delete_char_after()
     cursor_visible_     = true;
     cursor_blink_accum_ = 0.0f;
     update_ime_position();
+    auto_scroll_to_cursor();
     invalidate_render();
 }
 
@@ -1512,6 +1572,7 @@ void TextBox::delete_selection()
     cursor_visible_     = true;
     cursor_blink_accum_ = 0.0f;
     update_ime_position();
+    auto_scroll_to_cursor();
     invalidate_render();
 }
 
@@ -1654,6 +1715,7 @@ void TextBox::paste_from_clipboard()
     cursor_visible_     = true;
     cursor_blink_accum_ = 0.0f;
     update_ime_position();
+    auto_scroll_to_cursor();
     invalidate_render();
 #endif  // _WIN32
 }
@@ -1821,6 +1883,162 @@ void TextBox::move_cursor_down()
 }
 
 // ============================================================================
+// 滚动辅助方法
+// ============================================================================
+
+math::Size TextBox::text_area_size() const noexcept
+{
+    const math::Rect rect = bounds_rect();
+    const core::Variant& pad_var = get_value(PaddingProperty);
+    const math::Thickness pad = pad_var.has<math::Thickness>()
+        ? pad_var.get<math::Thickness>()
+        : math::Thickness{ 16.0f, 8.0f, 16.0f, 8.0f };
+    return {
+        rect.width  - pad.left - pad.right,
+        rect.height - pad.top  - pad.bottom
+    };
+}
+
+float TextBox::total_content_width() const noexcept
+{
+    if (text_buf_.empty()) {
+        return 0.0f;
+    }
+
+    const bool use_multiline_layout = accepts_return() || (text_wrapping() != TextWrapping::NoWrap);
+    float max_width = 0.0f;
+
+    if (use_multiline_layout) {
+        // 多行模式：对每一行测量宽度，取最大值
+        const math::Size tas = text_area_size();
+        const auto lines = split_lines(
+            text_buf_.data(), text_buf_.size(),
+            text_wrapping() == TextWrapping::NoWrap ? 0.0f : tas.width,
+            font_face_, font_size_px_,
+            text_wrapping());
+        for (const auto& line : lines) {
+            if (line.disp_width > max_width) {
+                max_width = line.disp_width;
+            }
+        }
+    } else {
+        // 单行模式：不换行，测量全部文字宽度
+        max_width = measure_text_width(
+            text_buf_.data(), static_cast<uint32_t>(text_buf_.size()));
+    }
+    return max_width;
+}
+
+float TextBox::total_content_height() const noexcept
+{
+    const bool use_multiline_layout = accepts_return() || (text_wrapping() != TextWrapping::NoWrap);
+    const float line_h = effective_line_height();
+
+    if (!use_multiline_layout) {
+        return line_h;
+    }
+
+    const math::Size tas = text_area_size();
+    const auto lines = split_lines(
+        text_buf_.data(), text_buf_.size(),
+        text_wrapping() == TextWrapping::NoWrap ? 0.0f : tas.width,
+        font_face_, font_size_px_,
+        text_wrapping());
+    return static_cast<float>(lines.size()) * line_h;
+}
+
+void TextBox::clamp_scroll_offsets() noexcept
+{
+    const math::Size tas = text_area_size();
+    const float content_w = total_content_width();
+    const float content_h = total_content_height();
+
+    // 水平滚动范围：[0, max(0, content_w - visible_w)]
+    const float max_sx = content_w > tas.width ? (content_w - tas.width) : 0.0f;
+    if (scroll_offset_x_ < 0.0f) {
+        scroll_offset_x_ = 0.0f;
+    }
+    if (scroll_offset_x_ > max_sx) {
+        scroll_offset_x_ = max_sx;
+    }
+
+    // 垂直滚动范围：[0, max(0, content_h - visible_h)]
+    const float max_sy = content_h > tas.height ? (content_h - tas.height) : 0.0f;
+    if (scroll_offset_y_ < 0.0f) {
+        scroll_offset_y_ = 0.0f;
+    }
+    if (scroll_offset_y_ > max_sy) {
+        scroll_offset_y_ = max_sy;
+    }
+}
+
+void TextBox::auto_scroll_to_cursor() noexcept
+{
+    const math::Size tas = text_area_size();
+    if (tas.width <= 0.0f || tas.height <= 0.0f) {
+        return;
+    }
+
+    const float line_h = effective_line_height();
+    const bool use_multiline_layout = accepts_return() || (text_wrapping() != TextWrapping::NoWrap);
+
+    // ── 横向自动滚动（单行/多行通用）────────────────────────────────────
+    // 计算光标相对于文字区域左边缘的视觉 x 坐标
+    float cursor_visual_x = 0.0f;
+    if (use_multiline_layout) {
+        // 多行：定位光标所在行的 x
+        const auto lines = split_lines(
+            text_buf_.data(), text_buf_.size(),
+            tas.width,
+            font_face_, font_size_px_,
+            text_wrapping());
+        uint32_t line_idx = 0u, line_offset = 0u;
+        if (find_line_by_offset(lines, cursor_pos_, &line_idx, &line_offset)) {
+            const char* line_text = text_buf_.data() + lines[line_idx].start_offset;
+            cursor_visual_x = measure_text_width(line_text, line_offset) - scroll_offset_x_;
+        }
+    } else {
+        // 单行 NoWrap
+        cursor_visual_x = measure_text_width(
+            text_buf_.data(), cursor_pos_) - scroll_offset_x_;
+    }
+
+    // 光标偏左：滚动到让光标出现在左边缘
+    if (cursor_visual_x < 0.0f) {
+        scroll_offset_x_ += cursor_visual_x;  // cursor_visual_x 为负，实际减少 scroll_offset_x_
+    }
+    // 光标偏右：滚动到让光标出现在右边缘（留 2px 余量给光标线宽）
+    else if (cursor_visual_x > tas.width - 2.0f) {
+        scroll_offset_x_ += (cursor_visual_x - tas.width + 2.0f);
+    }
+
+    // ── 纵向自动滚动（仅多行模式）────────────────────────────────────────
+    if (use_multiline_layout) {
+        const auto lines = split_lines(
+            text_buf_.data(), text_buf_.size(),
+            tas.width,
+            font_face_, font_size_px_,
+            text_wrapping());
+        uint32_t line_idx = 0u, line_offset = 0u;
+        if (find_line_by_offset(lines, cursor_pos_, &line_idx, &line_offset)) {
+            const float cursor_visual_y = static_cast<float>(line_idx) * line_h - scroll_offset_y_;
+
+            // 光标偏上：滚动到让光标所在行出现在顶部
+            if (cursor_visual_y < 0.0f) {
+                scroll_offset_y_ += cursor_visual_y;
+            }
+            // 光标偏下：滚动到让光标所在行出现在底部
+            else if (cursor_visual_y + line_h > tas.height) {
+                scroll_offset_y_ += (cursor_visual_y + line_h - tas.height);
+            }
+        }
+    }
+
+    // 最终钳制到合法范围
+    clamp_scroll_offsets();
+}
+
+// ============================================================================
 // IME 支持
 // ============================================================================
 
@@ -1847,6 +2065,9 @@ math::Rect TextBox::get_cursor_rect_in_window() const noexcept
     if (cursor_pos_ > 0 && !text_buf_.empty()) {
         cursor_local_x += measure_text_width(text_buf_.data(), cursor_pos_);
     }
+    // 应用滚动偏移（IME 候选框跟随视觉光标位置）
+    cursor_local_x -= scroll_offset_x_;
+    cursor_local_y -= scroll_offset_y_;
 
     float cursor_h = effective_line_height();
 

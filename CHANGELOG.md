@@ -5,19 +5,53 @@
 ## [Unreleased]
 
 ### Added
-- **sample.01-mvvm-binding：新增 TextBox 双向绑定演示**：
+- **mine.ui.controls：TextBox 新增滚动支持**：
 
-  在 CounterViewModel 中新增 `input_text`（输入文字）和 `echo_text`（回显文字）两个可观察属性，
-  CounterWindow 中新增 TextBox 控件和回显标签：
-  - TextBox.TextProperty 单向绑定到 `vm_.input_text`（ViewModel → View）
-  - TextBox.TextChangedEvent 调用 `vm_.update_input_text()` 回写（View → ViewModel）
-  - ViewModel 内部自动格式化并更新 `echo_text`（业务逻辑在 ViewModel 中）
-  - 回显标签 TextBlock 绑定到 `vm_.echo_text`，自动展示格式化内容
-
-  虽然框架 TwoWay 绑定为 M2 预留，但通过 OneWay + 手动监听 TextChangedEvent
-  实现双向同步，完整演示了 MVVM 分层原则：View 只负责数据流动，业务逻辑在 ViewModel。
+  当文本内容超出控件可视区域时，可通过鼠标滚轮滚动查看被裁剪的内容：
+  - **垂直滚动**：多行模式（AcceptReturn=true 或 TextWrapping≠NoWrap）下，当总行高
+    超过可视高度时，鼠标滚轮默认控制纵向滚动
+  - **横向滚动**：单行 NoWrap 模式下，当文本宽度超出可视宽度时，按住 Shift + 滚轮
+    可横向滚动；多行模式下同样支持 Shift + 滚轮横向滚动
+  - 滚动偏移自动钳制在合法范围，内容完全可见时偏移自动归零
+  - 光标点击定位、选区拖拽、IME 候选框位置均已适配滚动偏移
+  - 新增 `scroll_offset_x_` / `scroll_offset_y_` 字段及相关辅助方法：
+    `text_area_size()`、`total_content_width()`、`total_content_height()`、
+    `clamp_scroll_offsets()`
 
 ### Fixed
+- **samples.01-mvvm-binding：修正计数区视觉结构与代码结构不一致的问题**：
+
+  原实现使用两个独立 `TextBlock` 分别承载主计数与提示文案，
+  但两者设置了相同背景色，视觉上会被误读成一个整体卡片，和代码结构不一致。
+
+  修复内容：
+  - 将计数区重构为 `Border + StackPanel` 的明确卡片容器；
+  - `count_label_` 与 `hint_label_` 改为透明背景，只负责各自文字排版；
+  - 卡片背景统一由容器负责，计数区层次与代码语义保持一致。
+
+- **mine.ui.controls：修复单行 TextBlock 自动布局对内容大小估算偏大，导致文本看起来偏右偏下的问题**：
+
+  根因是单行 `TextBlock` 在自动行高模式下以字体 `line_height` 作为内容高度，
+  同时左对齐起始位置与宽度估算沿用了 `advance` 原点，
+  背景和内边距会把不可见 leading 与首字形左侧 bearing 一并算进去，
+  导致可见文字在块内看起来偏右偏下，且下边距观感小于实际设置值。
+
+  修复内容：
+  - 单行、自动行高、未启用显式墨迹对齐的 `TextBlock` 改为按真实字形墨迹高度与宽度测量；
+  - 同一路径的基线排布与左对齐起始 X 改为按墨迹在内容区内定位，避免背景尺寸与可见文字错位；
+  - 多行文本、显式 `LineHeight` 和按钮专用墨迹对齐路径保持原有语义不变。
+
+- **mine.text / mine.ui.controls：修复 Button 文本视觉中心与实际字形墨迹不一致导致的偏右偏下问题**：
+
+  根因是按钮内容此前只做了行框居中，未按真实字形墨迹做视觉对齐；
+  当字形存在 `bearing_x / bearing_y` 偏移时，文字会看起来偏右偏下。
+
+  修复内容：
+  - `FontFace` 新增 `measure_text_ink_bounds()`，返回文字真实可见墨迹包围盒；
+  - `TextBlock` 新增可控的墨迹视觉对齐开关，开启后按真实字形墨迹修正水平/垂直居中；
+  - `Button -> ContentPresenter -> TextBlock` 链路默认开启该开关，专门修复按钮文字视觉偏移；
+  - 普通左对齐文本、TextBox 与未开启该开关的文本控件仍保持原始排版度量，避免影响正文和输入控件位置。
+
 - **CMake 构建：修复第三方头文件路径传播与 Win32 编译告警处理**：
 
   - FreeType/HarfBuzz 头文件路径对下游可见，避免 `ft2build.h` 与

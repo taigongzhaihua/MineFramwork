@@ -267,6 +267,11 @@ Button::Button()
     // 创建并直接安装 ContentPresenter 作为内部子元素（无 ControlTemplate 机制）
     auto presenter = core::make_owned<ContentPresenter>();
     content_part_ = presenter.get();
+    // Button 文字居中
+    content_part_->set_text_alignment(TextAlignment::Center);
+    // Button 需要以真实字形墨迹为基准做视觉居中，避免文字看起来偏右偏下
+    content_part_->set_use_ink_alignment(true);
+    content_part_->set_vertical_alignment(VerticalAlignment::Center);
 
     // 配置 VisualStateManager（内联原 BuildFn 中的 VSM 配置）
     style::VisualStateManager vsm{ *this };
