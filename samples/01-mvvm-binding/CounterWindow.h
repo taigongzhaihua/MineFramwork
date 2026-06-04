@@ -32,6 +32,7 @@
 
 #include <mine/ui/window/Window.h>
 #include <mine/ui/layout/LayoutAll.h>
+#include <mine/ui/controls/Border.h>
 #include <mine/ui/controls/TextBlock.h>
 #include <mine/ui/controls/Button.h>
 #include <mine/ui/controls/TextBox.h>
@@ -91,6 +92,8 @@ private:
 
     mine::ui::StackPanel body_panel_;       ///< 根垂直排列面板
     mine::ui::TextBlock  header_label_;     ///< 标题栏文字
+    mine::ui::Border     counter_card_;     ///< 计数信息卡片容器
+    mine::ui::StackPanel counter_panel_;    ///< 计数卡片内部垂直面板
     mine::ui::TextBlock  count_label_;      ///< 主计数显示（绑定 count_text）
     mine::ui::TextBlock  hint_label_;       ///< 提示说明（绑定 hint_text）
 

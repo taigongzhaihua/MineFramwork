@@ -85,6 +85,14 @@ void CounterWindow::build_(mine::text::FontFace* font)
     if (font) { header_label_.set_font_face(font); }
     body_panel_.add_child(&header_label_);
 
+    // ── 计数信息卡片 ──────────────────────────────────────────────────────────
+
+    counter_panel_.set_orientation(ui::Orientation::Vertical);
+    counter_card_.set_background(paint::Brush::solid_rgb(0x283593));   // 靛蓝卡片背景
+    counter_card_.set_border_thickness(math::Thickness::uniform(0.0f));
+    counter_card_.set_border_color(paint::Brush::solid(math::Color::Transparent));
+    counter_card_.set_child(&counter_panel_);
+
     // ── 主计数显示（绑定到 vm_.count_text）────────────────────────────────────
     //
     // 注意：此处不调用 set_text()，因为 set_text() 使用 Local(50) 优先级写入，
@@ -94,21 +102,22 @@ void CounterWindow::build_(mine::text::FontFace* font)
     //
     count_label_.set_font_size(42.0f);
     count_label_.set_foreground(paint::Brush::solid_rgb(0xE8EAF6));    // 浅靛蓝文字
-    count_label_.set_background(paint::Brush::solid_rgb(0x283593));    // 靛蓝背景
-    count_label_.set_padding(math::Thickness{ 20.0f, 28.0f, 20.0f, 28.0f });
+    count_label_.set_background(paint::Brush::solid(math::Color::Transparent));
+    count_label_.set_padding(math::Thickness{ 20.0f, 28.0f, 20.0f, 12.0f });
     count_label_.set_margin(math::Thickness{ 0.0f, 0.0f, 0.0f, 0.0f });
     if (font) { count_label_.set_font_face(font); }
-    body_panel_.add_child(&count_label_);
+    counter_panel_.add_child(&count_label_);
 
     // ── 提示文字（绑定到 vm_.hint_text）──────────────────────────────────────
     // 同上：不调用 set_text()，由绑定首次求值写入初始文字。
 
     hint_label_.set_font_size(13.0f);
     hint_label_.set_foreground(paint::Brush::solid_rgb(0x9FA8DA));     // 灰蓝色
-    hint_label_.set_background(paint::Brush::solid_rgb(0x283593));    // 与计数背景一致
+    hint_label_.set_background(paint::Brush::solid(math::Color::Transparent));
     hint_label_.set_padding(math::Thickness{ 20.0f, 0.0f, 20.0f, 16.0f });
     if (font) { hint_label_.set_font_face(font); }
-    body_panel_.add_child(&hint_label_);
+    counter_panel_.add_child(&hint_label_);
+    body_panel_.add_child(&counter_card_);
 
     // ── TextBox 双向绑定演示区 ─────────────────────────────────────────────────
 
@@ -126,7 +135,8 @@ void CounterWindow::build_(mine::text::FontFace* font)
     // 注意：不调用 set_text()，由绑定首次求值（TemplateBind）写入初始文字
     input_box_.set_placeholder("在此输入任意文字（中英文均可）");
     input_box_.set_font_size(16.0f);
-    input_box_.set_margin(math::Thickness{ 20.0f, 0.0f, 20.0f, 0.0f });
+    input_box_.set_margin(math::Thickness{ 20.0f, 10.0f, 20.0f, 10.0f });
+    input_box_.set_text_wrapping(ui::TextWrapping::NoWrap);
     if (font) { input_box_.set_font_face(font); }
     // TwoWay 绑定将在 bind_() 中自动处理双向同步，无需手动监听事件
     body_panel_.add_child(&input_box_);
@@ -137,6 +147,7 @@ void CounterWindow::build_(mine::text::FontFace* font)
     echo_label_.set_foreground(paint::Brush::solid_rgb(0xB39DDB));    // 浅紫色
     echo_label_.set_background(paint::Brush::solid_rgb(0x37474F));
     echo_label_.set_padding(math::Thickness{ 20.0f, 8.0f, 20.0f, 12.0f });
+    echo_label_.set_text_wrapping(ui::TextWrapping::Wrap);
     if (font) { echo_label_.set_font_face(font); }
     body_panel_.add_child(&echo_label_);
 
@@ -147,9 +158,8 @@ void CounterWindow::build_(mine::text::FontFace* font)
     body_panel_.add_child(&btn_row_);
 
     // [+1] 蓝色按钮
-    btn_inc_.set_text("+1  计数");
+    btn_inc_.set_text("+1计数");
     btn_inc_.set_font_size(15.0f);
-    btn_inc_.set_padding(math::Thickness{ 20.0f, 12.0f, 20.0f, 12.0f });
     btn_inc_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
     // set_background 写入 Local(P2)，优先级高于 StyleTrigger(P4)，状态色被遮蔽（符合预期：自定义主题色）
     btn_inc_.set_background(paint::Brush::solid_rgb(0x1565C0));
@@ -159,9 +169,8 @@ void CounterWindow::build_(mine::text::FontFace* font)
     btn_row_.add_child(&btn_inc_);
 
     // [-1] 灰色按钮
-    btn_dec_.set_text("-1  计数");
+    btn_dec_.set_text("-1计数");
     btn_dec_.set_font_size(15.0f);
-    btn_dec_.set_padding(math::Thickness{ 20.0f, 12.0f, 20.0f, 12.0f });
     btn_dec_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
     btn_dec_.set_background(paint::Brush::solid_rgb(0x455A64));
     btn_dec_.set_margin(math::Thickness{ 0.0f, 0.0f, 12.0f, 0.0f });
@@ -169,9 +178,8 @@ void CounterWindow::build_(mine::text::FontFace* font)
     btn_row_.add_child(&btn_dec_);
 
     // [重置] 橙色按钮
-    btn_reset_.set_text("重  置");
+    btn_reset_.set_text("重置");
     btn_reset_.set_font_size(15.0f);
-    btn_reset_.set_padding(math::Thickness{ 20.0f, 12.0f, 20.0f, 12.0f });
     btn_reset_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
     btn_reset_.set_background(paint::Brush::solid_rgb(0xE65100));
     btn_reset_.set_margin(math::Thickness{ 0.0f, 0.0f, 12.0f, 0.0f });
@@ -179,9 +187,8 @@ void CounterWindow::build_(mine::text::FontFace* font)
     btn_row_.add_child(&btn_reset_);
 
     // [退出] 红色按钮
-    btn_quit_.set_text("退  出");
+    btn_quit_.set_text("退出");
     btn_quit_.set_font_size(15.0f);
-    btn_quit_.set_padding(math::Thickness{ 20.0f, 12.0f, 20.0f, 12.0f });
     btn_quit_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
     btn_quit_.set_background(paint::Brush::solid_rgb(0xC62828));
     if (font) { btn_quit_.set_font_face(font); }
