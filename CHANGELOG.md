@@ -18,6 +18,14 @@
   实现双向同步，完整演示了 MVVM 分层原则：View 只负责数据流动，业务逻辑在 ViewModel。
 
 ### Fixed
+- **CMake 构建：修复第三方头文件路径传播与 Win32 编译告警处理**：
+
+  - FreeType/HarfBuzz 头文件路径对下游可见，避免 `ft2build.h` 与
+    `mine/text/FontFace.h` 找不到的问题。
+  - 新增 `MINE_WARNINGS_AS_ERRORS` 开关（默认关闭 /WX），并统一启用
+    `UNICODE/_UNICODE` 宏以稳定 Win32 API 编译。
+  - zlib 下载改为 GitCode 优先并保留多镜像回退。
+
 - **mine.ui.controls：修复 TextBox 两项交互问题**：
 
   1. **空文本时不显示光标**：

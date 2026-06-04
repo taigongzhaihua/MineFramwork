@@ -8,4 +8,6 @@ mine_module("mine.ui.visual"
         mine.paint
         mine.ui.property
         mine.ui.event
+        mine.ui.binding
+        mine.ui.style
 )
