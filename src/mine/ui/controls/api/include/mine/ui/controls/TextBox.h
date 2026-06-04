@@ -246,6 +246,7 @@ private:
     static void on_mouse_down_router (void*, RoutedEventArgs&, void* ud);
     static void on_mouse_move_router (void*, RoutedEventArgs&, void* ud);
     static void on_mouse_up_router   (void*, RoutedEventArgs&, void* ud);
+    static void on_mouse_wheel_router(void*, RoutedEventArgs&, void* ud);
     static void on_key_down_router   (void*, RoutedEventArgs&, void* ud);
     static void on_text_input_router (void*, RoutedEventArgs&, void* ud);
     static void on_got_focus_router  (void*, RoutedEventArgs&, void* ud);
@@ -258,6 +259,7 @@ private:
     void on_mouse_down(input::MouseEventArgs& args);
     void on_mouse_move(input::MouseEventArgs& args);
     void on_mouse_up  (input::MouseEventArgs& args);
+    void on_mouse_wheel(input::MouseEventArgs& args);
     void on_key_down  (input::KeyEventArgs& args);
     void on_text_input(input::TextInputEventArgs& args);
 
@@ -377,6 +379,36 @@ private:
      */
     void paste_from_clipboard();
 
+    // ── 滚动支持 ──────────────────────────────────────────────────────────
+
+    /**
+     * @brief 计算内容区域的可视尺寸（减去内边距后的 text_w × text_h）。
+     */
+    [[nodiscard]] math::Size text_area_size() const noexcept;
+
+    /**
+     * @brief 计算内容的总渲染宽度（单行模式下为全部文字宽度；多行模式下取最长行宽度）。
+     */
+    [[nodiscard]] float total_content_width() const noexcept;
+
+    /**
+     * @brief 计算内容的总渲染高度（行数 × 行高）。
+     */
+    [[nodiscard]] float total_content_height() const noexcept;
+
+    /**
+     * @brief 将 scroll_offset_x_ 和 scroll_offset_y_ 限制在合理范围。
+     */
+    void clamp_scroll_offsets() noexcept;
+
+    /**
+     * @brief 自动调整滚动偏移，确保光标始终在可视区域内。
+     *
+     * 在文本修改或光标移动后调用。若光标已在可视区内则不做任何调整；
+     * 若光标超出可视区，则将滚动偏移调整到恰好让光标可见的位置。
+     */
+    void auto_scroll_to_cursor() noexcept;
+
     // ── IME 支持 ──────────────────────────────────────────────────────────
 
     /**
@@ -415,6 +447,10 @@ private:
 
     void*  font_face_   = nullptr;  ///< 字体（text::FontFace*，可为 nullptr）
     float  font_size_px_ = 14.0f;   ///< 字号（逻辑像素）
+
+    // ── 滚动偏移 ──────────────────────────────────────────────────────────
+    float  scroll_offset_x_ = 0.0f;  ///< 水平滚动偏移（像素，正值 = 内容左移）
+    float  scroll_offset_y_ = 0.0f;  ///< 垂直滚动偏移（像素，正值 = 内容上移）
 };
 
 } // namespace mine::ui
