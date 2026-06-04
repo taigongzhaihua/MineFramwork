@@ -1,9 +1,10 @@
 # 02-controls-demo 示例
 # 控件演示
 
-add_executable(sample.02-controls-demo
-    main.cpp
-)
+# 自动收集所有源文件
+file(GLOB SAMPLE_SOURCES *.cpp)
+
+add_executable(sample.02-controls-demo ${SAMPLE_SOURCES})
 
 target_link_libraries(sample.02-controls-demo PRIVATE
     mine.ui.app

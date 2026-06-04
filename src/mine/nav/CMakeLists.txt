@@ -5,5 +5,6 @@ mine_module("mine.nav"
     DEPENDENCIES 
         mine.ui.app
         mine.ui.window
+        mine.ui.controls
         mine.containers
 )

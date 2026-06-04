@@ -1,9 +1,10 @@
 # 03-custom-chrome 示例
 # 自定义窗口样式演示
 
-add_executable(sample.03-custom-chrome
-    main.cpp
-)
+# 自动收集所有源文件
+file(GLOB SAMPLE_SOURCES *.cpp)
+
+add_executable(sample.03-custom-chrome ${SAMPLE_SOURCES})
 
 target_link_libraries(sample.03-custom-chrome PRIVATE
     mine.ui.app

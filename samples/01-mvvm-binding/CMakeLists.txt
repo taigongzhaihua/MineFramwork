@@ -1,9 +1,10 @@
 # 01-mvvm-binding 示例
 # MVVM 数据绑定演示
 
-add_executable(sample.01-mvvm-binding
-    main.cpp
-)
+# 自动收集所有源文件
+file(GLOB SAMPLE_SOURCES *.cpp)
+
+add_executable(sample.01-mvvm-binding ${SAMPLE_SOURCES})
 
 target_link_libraries(sample.01-mvvm-binding PRIVATE
     mine.ui.app

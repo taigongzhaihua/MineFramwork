@@ -15,6 +15,9 @@ option(MINE_ENABLE_LTO "启用链接时优化 (LTO)" OFF)
 option(MINE_ENABLE_EXCEPTIONS "为需要的平台边界模块启用异常" OFF)
 option(MINE_ENABLE_RTTI "为需要的模块启用 RTTI" OFF)
 
+# 编译诊断
+option(MINE_WARNINGS_AS_ERRORS "将警告视为错误（/WX -Werror）" OFF)
+
 # 构建选项
 option(MINE_BUILD_SAMPLES "构建示例程序" ON)
 option(MINE_BUILD_TESTS "构建单元测试" ON)

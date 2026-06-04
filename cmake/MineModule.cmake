@@ -100,19 +100,32 @@ function(mine_add_module)
         endif()
         
         # 创建库目标
-        add_library(${ARG_NAME} ${MINE_LIBRARY_TYPE} ${SOURCE_FILES})
-        
-        # 设置输出名称（去掉 mine. 前缀）
-        string(REPLACE "mine." "" output_name "${ARG_NAME}")
-        set_target_properties(${ARG_NAME} PROPERTIES
-            OUTPUT_NAME ${output_name}
-            POSITION_INDEPENDENT_CODE ON
-        )
+        if(SOURCE_FILES)
+            # 有源文件：创建普通库
+            add_library(${ARG_NAME} ${MINE_LIBRARY_TYPE} ${SOURCE_FILES})
+            
+            # 设置输出名称（去掉 mine. 前缀）
+            string(REPLACE "mine." "" output_name "${ARG_NAME}")
+            set_target_properties(${ARG_NAME} PROPERTIES
+                OUTPUT_NAME ${output_name}
+                POSITION_INDEPENDENT_CODE ON
+            )
+        else()
+            # 没有源文件：创建纯头文件库（INTERFACE）
+            add_library(${ARG_NAME} INTERFACE)
+            message(STATUS "  模块 ${ARG_NAME} 为纯头文件库（无源文件）")
+        endif()
         
         # 添加公开头文件目录
+        if(SOURCE_FILES)
+            set(_SCOPE PUBLIC)
+        else()
+            set(_SCOPE INTERFACE)
+        endif()
+        
         if(ARG_PUBLIC_HEADERS)
             foreach(header_dir ${ARG_PUBLIC_HEADERS})
-                target_include_directories(${ARG_NAME} PUBLIC
+                target_include_directories(${ARG_NAME} ${_SCOPE}
                     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/${header_dir}>
                     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
                 )
@@ -120,52 +133,60 @@ function(mine_add_module)
         else()
             # 默认使用 api/include
             if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/api/include)
-                target_include_directories(${ARG_NAME} PUBLIC
+                target_include_directories(${ARG_NAME} ${_SCOPE}
                     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/api/include>
                     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
                 )
             endif()
         endif()
         
-        # 添加私有头文件目录
-        if(ARG_PRIVATE_HEADERS)
-            foreach(header_dir ${ARG_PRIVATE_HEADERS})
-                target_include_directories(${ARG_NAME} PRIVATE
-                    ${CMAKE_CURRENT_SOURCE_DIR}/${header_dir}
-                )
-            endforeach()
-        else()
-            # 默认使用 src
-            if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src)
-                target_include_directories(${ARG_NAME} PRIVATE
-                    ${CMAKE_CURRENT_SOURCE_DIR}/src
-                )
+        # 添加私有头文件目录（仅对有源文件的库）
+        if(SOURCE_FILES)
+            if(ARG_PRIVATE_HEADERS)
+                foreach(header_dir ${ARG_PRIVATE_HEADERS})
+                    target_include_directories(${ARG_NAME} PRIVATE
+                        ${CMAKE_CURRENT_SOURCE_DIR}/${header_dir}
+                    )
+                endforeach()
+            else()
+                # 默认使用 src
+                if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src)
+                    target_include_directories(${ARG_NAME} PRIVATE
+                        ${CMAKE_CURRENT_SOURCE_DIR}/src
+                    )
+                endif()
             endif()
         endif()
         
         # 添加依赖
         if(ARG_DEPENDENCIES)
-            target_link_libraries(${ARG_NAME} PUBLIC ${ARG_DEPENDENCIES})
+            target_link_libraries(${ARG_NAME} ${_SCOPE} ${ARG_DEPENDENCIES})
         endif()
         
         if(ARG_EXTERNAL_DEPS)
-            target_link_libraries(${ARG_NAME} PRIVATE ${ARG_EXTERNAL_DEPS})
+            if(SOURCE_FILES)
+                target_link_libraries(${ARG_NAME} PRIVATE ${ARG_EXTERNAL_DEPS})
+            else()
+                target_link_libraries(${ARG_NAME} INTERFACE ${ARG_EXTERNAL_DEPS})
+            endif()
         endif()
         
-        # 添加编译定义
-        if(ARG_COMPILE_DEFINITIONS)
+        # 添加编译定义（仅对有源文件的库）
+        if(SOURCE_FILES AND ARG_COMPILE_DEFINITIONS)
             target_compile_definitions(${ARG_NAME} PRIVATE ${ARG_COMPILE_DEFINITIONS})
         endif()
         
-        # 应用通用编译器标志
-        mine_set_compiler_flags(${ARG_NAME})
+        # 应用通用编译器标志（仅对有源文件的库）
+        if(SOURCE_FILES)
+            mine_set_compiler_flags(${ARG_NAME})
+        endif()
         
-        # 导出符号定义
-        if(MINE_BUILD_SHARED)
+        # 导出符号定义 - 确保所有消费者也使用 dllexport（静态库中无害，dllimport 有害）
+        if(SOURCE_FILES)
             string(TOUPPER "${ARG_NAME}" MODULE_UPPER)
             string(REPLACE "." "_" MODULE_UPPER "${MODULE_UPPER}")
-            target_compile_definitions(${ARG_NAME} PRIVATE
-                ${MODULE_UPPER}_EXPORTS=1
+            target_compile_definitions(${ARG_NAME} PUBLIC
+                MINE_BUILDING_${MODULE_UPPER}=1
             )
         endif()
     endif()
@@ -239,6 +260,13 @@ function(mine_add_module)
             # 链接 doctest
             if(DOCTEST_INCLUDE_DIR)
                 target_include_directories(${test_target} PRIVATE ${DOCTEST_INCLUDE_DIR})
+            endif()
+            
+            # 例外处理：异常禁用时定义 DOCTEST_CONFIG_NO_EXCEPTIONS_BUT_WITH_ALL_ASSERTS
+            if(NOT MINE_ENABLE_EXCEPTIONS)
+                target_compile_definitions(${test_target} PRIVATE
+                    DOCTEST_CONFIG_NO_EXCEPTIONS_BUT_WITH_ALL_ASSERTS
+                )
             endif()
             
             # 应用编译器标志

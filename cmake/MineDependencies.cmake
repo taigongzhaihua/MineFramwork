@@ -8,7 +8,7 @@ include(FetchContent)
 # 配置选项
 # ============================================================================
 
-option(MINE_PREFER_SYSTEM_LIBS "优先使用系统已安装的库（find_package）" ON)
+option(MINE_PREFER_SYSTEM_LIBS "优先使用系统已安装的库（find_package）" OFF)
 option(MINE_USE_SHALLOW_CLONE "使用浅克隆加速下载（减少 80% 下载量）" ON)
 option(MINE_OFFLINE_BUILD "离线构建模式（需要预下载 third_party/）" OFF)
 
@@ -29,10 +29,21 @@ message(STATUS "离线构建: ${MINE_OFFLINE_BUILD}")
 
 # 通用依赖获取函数（多镜像源 + 离线支持）
 function(mine_fetch_content name)
-    set(options "")
-    set(oneValueArgs SYSTEM_PACKAGE GIT_TAG)
+    set(options NO_SUBMODULES)
+    set(oneValueArgs SYSTEM_PACKAGE GIT_TAG VALIDATE_FILE)
     set(multiValueArgs GIT_MIRRORS CMAKE_ARGS)
     cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+    
+    # 处理子模块选项（FreeType 有 submodule 但 CMake 不需要）
+    if(ARG_NO_SUBMODULES)
+        set(GIT_SUBMODULES_CMD "GIT_SUBMODULES \"\"")
+    else()
+        set(GIT_SUBMODULES_CMD "")
+    endif()
+
+    if(ARG_VALIDATE_FILE STREQUAL "ARG_VALIDATE_FILE-NOTFOUND")
+        set(ARG_VALIDATE_FILE "")
+    endif()
     
     message(STATUS "配置 ${name}...")
     
@@ -55,11 +66,95 @@ function(mine_fetch_content name)
                 SOURCE_DIR "${local_source}"
             )
             FetchContent_MakeAvailable(${name})
+            if(ARG_VALIDATE_FILE AND NOT EXISTS "${local_source}/${ARG_VALIDATE_FILE}")
+                message(FATAL_ERROR "      ✗ 本地源码校验失败: ${local_source}/${ARG_VALIDATE_FILE}")
+            endif()
             message(STATUS "      ✓ 使用本地源码: third_party/${name}")
             return()
         else()
             message(FATAL_ERROR "      ✗ 离线模式但未找到: ${local_source}\n      请运行: scripts/download_deps.ps1")
         endif()
+    endif()
+
+    # 3. 在线模式：带校验的下载（用于镜像可能误指向的场景）
+    if(ARG_VALIDATE_FILE)
+        list(LENGTH ARG_GIT_MIRRORS mirror_count)
+        if(mirror_count EQUAL 0)
+            message(FATAL_ERROR "      ✗ ${name} 未配置镜像源")
+        endif()
+
+        if(ARG_CMAKE_ARGS)
+            foreach(arg ${ARG_CMAKE_ARGS})
+                set(${name}_${arg} ON CACHE BOOL "" FORCE)
+            endforeach()
+        endif()
+
+        set(fetch_success FALSE)
+        set(mirror_index 1)
+        foreach(mirror_url ${ARG_GIT_MIRRORS})
+            message(STATUS "      尝试镜像 [${mirror_index}/${mirror_count}]: ${mirror_url}")
+
+            set(mirror_name "${name}_mirror_${mirror_index}")
+            if(MINE_USE_SHALLOW_CLONE)
+                FetchContent_Declare(
+                    ${mirror_name}
+                    GIT_REPOSITORY ${mirror_url}
+                    GIT_TAG ${ARG_GIT_TAG}
+                    GIT_SHALLOW TRUE
+                    GIT_PROGRESS TRUE
+                    ${GIT_SUBMODULES_CMD}
+                )
+            else()
+                FetchContent_Declare(
+                    ${mirror_name}
+                    GIT_REPOSITORY ${mirror_url}
+                    GIT_TAG ${ARG_GIT_TAG}
+                    ${GIT_SUBMODULES_CMD}
+                )
+            endif()
+
+            set(FETCHCONTENT_QUIET ON)
+            FetchContent_Populate(${mirror_name})
+            set(FETCHCONTENT_QUIET OFF)
+
+            if(EXISTS "${${mirror_name}_SOURCE_DIR}/${ARG_VALIDATE_FILE}")
+                add_subdirectory(${${mirror_name}_SOURCE_DIR} ${${mirror_name}_BINARY_DIR})
+                set(${name}_SOURCE_DIR "${${mirror_name}_SOURCE_DIR}" PARENT_SCOPE)
+                set(${name}_BINARY_DIR "${${mirror_name}_BINARY_DIR}" PARENT_SCOPE)
+                set(fetch_success TRUE)
+                message(STATUS "      ✓ ${name} 配置完成")
+                break()
+            endif()
+
+            message(STATUS "      ✗ ${name} 校验失败，缺少: ${ARG_VALIDATE_FILE}")
+            if(DEFINED ${mirror_name}_SOURCE_DIR AND EXISTS "${${mirror_name}_SOURCE_DIR}")
+                file(REMOVE_RECURSE "${${mirror_name}_SOURCE_DIR}")
+            endif()
+            if(DEFINED ${mirror_name}_BINARY_DIR AND EXISTS "${${mirror_name}_BINARY_DIR}")
+                file(REMOVE_RECURSE "${${mirror_name}_BINARY_DIR}")
+            endif()
+
+            math(EXPR mirror_index "${mirror_index} + 1")
+        endforeach()
+
+        if(NOT fetch_success)
+            message(FATAL_ERROR 
+                "\n===== ${name} 下载失败 =====\n"
+                "所有镜像源均不可用。请尝试以下方案：\n"
+                "\n方案 1: 使用 vcpkg 安装依赖\n"
+                "  vcpkg install ${name}\n"
+                "  cmake -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake ..\n"
+                "\n方案 2: 离线构建\n"
+                "  1. 运行: scripts/download_deps.ps1\n"
+                "  2. 配置: cmake -DMINE_OFFLINE_BUILD=ON ..\n"
+                "\n方案 3: 手动下载\n"
+                "  git clone ${ARG_GIT_MIRRORS} third_party/${name}\n"
+                "  cmake -DMINE_OFFLINE_BUILD=ON ..\n"
+                "==============================\n"
+            )
+        endif()
+
+        return()
     endif()
     
     # 3. 在线模式：多镜像源自动切换
@@ -90,12 +185,14 @@ function(mine_fetch_content name)
                 GIT_TAG ${ARG_GIT_TAG}
                 GIT_SHALLOW TRUE
                 GIT_PROGRESS TRUE
+                ${GIT_SUBMODULES_CMD}
             )
         else()
             FetchContent_Declare(
                 ${name}
                 GIT_REPOSITORY ${mirror_url}
                 GIT_TAG ${ARG_GIT_TAG}
+                ${GIT_SUBMODULES_CMD}
             )
         endif()
         
@@ -114,6 +211,13 @@ function(mine_fetch_content name)
         # 检测是否成功（通过 SOURCE_DIR 存在性判断）
         FetchContent_GetProperties(${name})
         if(${name}_POPULATED OR EXISTS "${${name}_SOURCE_DIR}")
+            # 将 Source/Binary 目录提升到父作用域，供子目录使用
+            if(DEFINED ${name}_SOURCE_DIR)
+                set(${name}_SOURCE_DIR "${${name}_SOURCE_DIR}" PARENT_SCOPE)
+            endif()
+            if(DEFINED ${name}_BINARY_DIR)
+                set(${name}_BINARY_DIR "${${name}_BINARY_DIR}" PARENT_SCOPE)
+            endif()
             set(fetch_success TRUE)
             message(STATUS "      ✓ ${name} 配置完成")
             break()
@@ -156,15 +260,25 @@ function(mine_setup_dependencies)
     mine_fetch_content(freetype
         SYSTEM_PACKAGE Freetype
         GIT_TAG "master"
+        NO_SUBMODULES
         GIT_MIRRORS
-            "https://gitcode.com/gh_mirrors/fr/freetype.git"
+            "https://gitcode.com/gh_mirrors/free/freetype.git"
             "https://github.com/freetype/freetype.git"
             "https://hub.njuu.cf/freetype/freetype.git"
     )
+
+    if(FREETYPE_INCLUDE_DIRS)
+        set(FREETYPE_INCLUDE_DIRS ${FREETYPE_INCLUDE_DIRS} PARENT_SCOPE)
+    endif()
+    if(FREETYPE_LIBRARIES)
+        set(FREETYPE_LIBRARIES ${FREETYPE_LIBRARIES} PARENT_SCOPE)
+    endif()
     
     if(TARGET freetype)
-        set(FREETYPE_INCLUDE_DIRS ${freetype_SOURCE_DIR}/include PARENT_SCOPE)
-        set(FREETYPE_LIBRARIES freetype PARENT_SCOPE)
+        if(freetype_SOURCE_DIR)
+            set(FREETYPE_INCLUDE_DIRS "${freetype_SOURCE_DIR}/include" CACHE INTERNAL "FreeType 包含目录")
+            set(FREETYPE_LIBRARIES freetype CACHE INTERNAL "FreeType 库")
+        endif()
     endif()
 
     # HarfBuzz（文字整形库）
@@ -181,10 +295,19 @@ function(mine_setup_dependencies)
             "https://github.com/harfbuzz/harfbuzz.git"
             "https://hub.njuu.cf/harfbuzz/harfbuzz.git"
     )
+
+    if(HARFBUZZ_INCLUDE_DIRS)
+        set(HARFBUZZ_INCLUDE_DIRS ${HARFBUZZ_INCLUDE_DIRS} PARENT_SCOPE)
+    endif()
+    if(HARFBUZZ_LIBRARIES)
+        set(HARFBUZZ_LIBRARIES ${HARFBUZZ_LIBRARIES} PARENT_SCOPE)
+    endif()
     
     if(TARGET harfbuzz)
-        set(HARFBUZZ_INCLUDE_DIRS ${harfbuzz_SOURCE_DIR}/src PARENT_SCOPE)
-        set(HARFBUZZ_LIBRARIES harfbuzz PARENT_SCOPE)
+        if(harfbuzz_SOURCE_DIR)
+            set(HARFBUZZ_INCLUDE_DIRS "${harfbuzz_SOURCE_DIR}/src" CACHE INTERNAL "HarfBuzz 包含目录")
+            set(HARFBUZZ_LIBRARIES harfbuzz CACHE INTERNAL "HarfBuzz 库")
+        endif()
     endif()
 
     # utf8cpp（UTF-8 编码处理）
@@ -225,16 +348,17 @@ function(mine_setup_dependencies)
     find_package(ZLIB QUIET)
     if(NOT ZLIB_FOUND)
         message(STATUS "      下载 zlib...")
-        FetchContent_Declare(
-            zlib
-            GIT_REPOSITORY https://github.com/madler/zlib.git
-            GIT_TAG master
-            GIT_SHALLOW TRUE
-            GIT_PROGRESS TRUE
+        mine_fetch_content(zlib
+            GIT_TAG "master"
+            GIT_MIRRORS
+                "https://gitcode.com/gh_mirrors/zl/zlib.git"
+                "https://github.com/madler/zlib.git"
+                "https://hub.njuu.cf/madler/zlib.git"
         )
-        FetchContent_MakeAvailable(zlib)
-        set(ZLIB_LIBRARY zlib)
-        set(ZLIB_INCLUDE_DIR ${zlib_SOURCE_DIR})
+        if(TARGET zlib)
+            set(ZLIB_LIBRARY zlib)
+            set(ZLIB_INCLUDE_DIR ${zlib_SOURCE_DIR})
+        endif()
     endif()
     
     mine_fetch_content(libpng
@@ -247,8 +371,10 @@ function(mine_setup_dependencies)
     )
     
     if(TARGET png_static)
-        set(LIBPNG_INCLUDE_DIRS ${libpng_SOURCE_DIR} ${libpng_BINARY_DIR} PARENT_SCOPE)
-        set(LIBPNG_LIBRARIES png_static PARENT_SCOPE)
+        if(libpng_SOURCE_DIR AND libpng_BINARY_DIR)
+            set(LIBPNG_INCLUDE_DIRS "${libpng_SOURCE_DIR};${libpng_BINARY_DIR}" CACHE INTERNAL "libpng 包含目录")
+            set(LIBPNG_LIBRARIES png_static CACHE INTERNAL "libpng 库")
+        endif()
     endif()
 
     # SQLite（嵌入式数据库）
@@ -327,8 +453,10 @@ function(mine_setup_dependencies)
                 "https://hub.njuu.cf/doctest/doctest.git"
         )
         
-        if(doctest_POPULATED)
-            set(DOCTEST_INCLUDE_DIR ${doctest_SOURCE_DIR} PARENT_SCOPE)
+        # doctest 的源目录已经通过 mine_fetch_content 传播到当前作用域
+        if(doctest_SOURCE_DIR AND EXISTS "${doctest_SOURCE_DIR}")
+            set(DOCTEST_INCLUDE_DIR "${doctest_SOURCE_DIR}" CACHE INTERNAL "doctest 包含目录")
+            message(STATUS "      DOCTEST_INCLUDE_DIR = ${DOCTEST_INCLUDE_DIR}")
         endif()
     endif()
     

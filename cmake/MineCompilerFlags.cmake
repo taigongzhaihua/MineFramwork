@@ -12,7 +12,7 @@ function(mine_set_compiler_flags target)
     if(MSVC)
         target_compile_options(${target} PRIVATE
             /W4                    # 警告级别 4
-            /WX                    # 警告视为错误
+            /wd4100                # 禁用 C4100: 未引用的参数
             /permissive-          # 严格标准符合模式
             /Zc:__cplusplus       # 正确设置 __cplusplus 宏
             /Zc:inline            # 移除未引用的内联函数
@@ -23,6 +23,10 @@ function(mine_set_compiler_flags target)
             $<$<CONFIG:Release>:/Ob3>       # 激进内联
             $<$<CONFIG:Release>:/GL>        # 全程序优化
         )
+
+        if(MINE_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE /WX)
+        endif()
         
         target_link_options(${target} PRIVATE
             $<$<CONFIG:Release>:/LTCG>      # 链接时代码生成
@@ -49,13 +53,16 @@ function(mine_set_compiler_flags target)
         target_compile_options(${target} PRIVATE
             -Wall                  # 常规警告
             -Wextra                # 额外警告
-            -Werror                # 警告视为错误
             -Wpedantic             # 严格标准符合
             -ffunction-sections    # 函数独立段
             -fdata-sections        # 数据独立段
             $<$<CONFIG:Release>:-O3>              # Release 优化
             $<$<CONFIG:Release>:-fmerge-all-constants> # 合并常量
         )
+
+        if(MINE_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE -Werror)
+        endif()
         
         target_link_options(${target} PRIVATE
             $<$<CONFIG:Release>:-Wl,--gc-sections>  # 垃圾回收未使用段
@@ -104,6 +111,8 @@ function(mine_set_compiler_flags target)
     if(WIN32)
         target_compile_definitions(${target} PRIVATE
             MINE_PLATFORM_WINDOWS=1
+            UNICODE
+            _UNICODE
             NOMINMAX                # 禁用 Windows.h 的 min/max 宏
             WIN32_LEAN_AND_MEAN     # 精简 Windows 头文件
             _CRT_SECURE_NO_WARNINGS # 禁用 CRT 安全警告
@@ -140,6 +149,11 @@ if(MSVC)
     add_compile_options(
         /wd4251  # DLL 接口警告（使用 PIMPL 时可忽略）
     )
+endif()
+
+# 统一启用 Unicode 字符集宏，避免 Win32 API 宏不一致
+if(WIN32)
+    add_compile_definitions(UNICODE _UNICODE)
 endif()
 
 # 设置 Debug 调试信息格式

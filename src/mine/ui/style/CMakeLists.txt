@@ -5,5 +5,6 @@ mine_module("mine.ui.style"
     DEPENDENCIES 
         mine.ui.visual
         mine.ui.property
+        mine.ui.animation
         mine.containers
 )
