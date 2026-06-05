@@ -79,13 +79,13 @@ const DependencyProperty& Button::BorderColorProperty =
             .changed        = &Button::on_border_color_changed,
         });
 
-// Button::StateLayerColorProperty — State Layer 蒙版画刷（MD3 hover/press 反馈层）
+// Button::StateLayerBrushProperty — State Layer 蒙版画刷（MD3 hover/press 反馈层）
 // 默认白色全透明 Color{1,1,1,0}（避免与非透明白插值时 RGB 由 0 渐变导致中途偏暗）。
 // 状态终值由默认样式 StyleTrigger 写入，VSM Storyboard 插值缓动；
 // 经 bind_property 同步到独立的 State Layer Border 背景，由该 Border 基元真正绘制。
-const DependencyProperty& Button::StateLayerColorProperty =
+const DependencyProperty& Button::StateLayerBrushProperty =
     register_property<Button>(
-        "StateLayerColor",
+        "StateLayerBrush",
         core::Variant{ paint::Brush::solid(math::Color{ 1.0f, 1.0f, 1.0f, 0.0f }) },
         PropertyMetadata{
             .affects_render = true,
@@ -152,20 +152,20 @@ static style::Style& default_button_style()
                        core::Variant{ Brush::solid(Color::White) } });           // MD3 On Primary
         s.add_setter({ &Button::BorderColorProperty,
                        core::Variant{ Brush::solid(Color::Transparent) } });
-        s.add_setter({ &Button::StateLayerColorProperty,
+        s.add_setter({ &Button::StateLayerBrushProperty,
                        core::Variant{ Brush::solid(Color{ 1.0f, 1.0f, 1.0f, 0.0f }) } });  // 白色全透明
 
         // ── P4 StyleTrigger：Hovered 的 State Layer 终值（On Primary 8% 白）─────────────
         style::VisualStateSetters hovered;
         hovered.state_name = "Hovered";
-        hovered.setters.push_back({ &Button::StateLayerColorProperty,
+        hovered.setters.push_back({ &Button::StateLayerBrushProperty,
             core::Variant{ Brush::solid(Color{ 1.0f, 1.0f, 1.0f, 0.08f }) } });
         s.add_state_setters(std::move(hovered));
 
         // ── P4 StyleTrigger：Pressed 的 State Layer 终值（On Primary 12% 白）────────────
         style::VisualStateSetters pressed;
         pressed.state_name = "Pressed";
-        pressed.setters.push_back({ &Button::StateLayerColorProperty,
+        pressed.setters.push_back({ &Button::StateLayerBrushProperty,
             core::Variant{ Brush::solid(Color{ 1.0f, 1.0f, 1.0f, 0.12f }) } });
         s.add_state_setters(std::move(pressed));
 
@@ -338,7 +338,7 @@ Button::Button()
     interaction->set_content(std::move(content));
 
     // 3) StateLayerBorder（State Layer 半透明白叠加层，其 child 为 interaction）
-    //    背景色由 VSM 驱动的 StateLayerColor 经 bind_property 同步，实现状态机动画缓动。
+    //    背景色由 VSM 驱动的 StateLayerBrush 经 bind_property 同步，实现状态机动画缓动。
     auto state_border = core::make_owned<Border>();
     state_border->set_border_thickness(math::Thickness::uniform(0.0f));  // 纯叠加层，无边框
     state_border_ = state_border.get();
@@ -369,36 +369,37 @@ Button::Button()
 
     auto* btn_ptr = this;
     // 每个过渡的 Storyboard 同时驱动两个属性：
-    //   - StateLayerColor：hover/press 反馈的核心（缓动 0↔8%↔12% 白），经 bind 同步给 state_border_
+    //   - StateLayerBrush：hover/press 反馈的核心（缓动 0↔8%↔12% 白），经 bind 同步给 state_border_
     //   - Background：仅 Disabled→Normal 时从禁用灰 P60 缓动回基线色；Hovered/Pressed 因
     //     背景无 StyleTrigger 终值故 from==to 无变化（背景色恒定，符合 MD3）
     vsm.add_transition("*", "Hovered",
         [btn_ptr](animation::Storyboard& sb) {
-            sb.animate_dp(*btn_ptr, Button::StateLayerColorProperty,
-                          animation::Duration::milliseconds(2400.0f),
+            sb.animate_dp(*btn_ptr, Button::StateLayerBrushProperty,
+                          animation::Duration::milliseconds(120.0f),
                           animation::QuadEaseOut);
             sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
-                          animation::Duration::milliseconds(2400.0f),
+                          animation::Duration::milliseconds(120.0f),
                           animation::QuadEaseOut);
         });
     vsm.add_transition("*", "Normal",
         [btn_ptr](animation::Storyboard& sb) {
-            sb.animate_dp(*btn_ptr, Button::StateLayerColorProperty,
-                          animation::Duration::milliseconds(2000.0f),
+            sb.animate_dp(*btn_ptr, Button::StateLayerBrushProperty,
+                          animation::Duration::milliseconds(100.0f),
                           animation::QuadEaseOut);
             sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
-                          animation::Duration::milliseconds(2000.0f),
+                          animation::Duration::milliseconds(100.0f),
                           animation::QuadEaseOut);
         });
     vsm.add_transition("*", "Pressed",
         [btn_ptr](animation::Storyboard& sb) {
-            sb.animate_dp(*btn_ptr, Button::StateLayerColorProperty,
-                          animation::Duration::milliseconds(1200.0f),
+            sb.animate_dp(*btn_ptr, Button::StateLayerBrushProperty,
+                          animation::Duration::milliseconds(60.0f),
                           animation::QuadEaseIn);
             sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
-                          animation::Duration::milliseconds(1200.0f),
+                          animation::Duration::milliseconds(60.0f),
                           animation::QuadEaseIn);
         });
+
 
     // 连接样式层（若用户已通过 set_vsm_style 指定自定义样式则使用该样式）
     style::Style& active_style = vsm_style_ ? *vsm_style_ : default_button_style();
@@ -417,9 +418,9 @@ Button::Button()
     //   边框画刷 → Border（边框粗细由 on_border_color_changed 按透明与否推导）
     border_part_->bind_property(Border::BorderBrushProperty,
                                 *this, Button::BorderColorProperty);
-    //   State Layer 蒙版色 → StateLayerBorder 背景（VSM 缓动 Button.StateLayerColor 实时同步）
+    //   State Layer 蒙版色 → StateLayerBorder 背景（VSM 缓动 Button.StateLayerBrush 实时同步）
     state_border_->bind_property(Border::BackgroundProperty,
-                                 *this, Button::StateLayerColorProperty);
+                                 *this, Button::StateLayerBrushProperty);
     //   内容/内边距/前景 → ContentPresenter
     content_part_->bind_property(ContentPresenter::ContentProperty,
                                  *this, ContentControl::ContentProperty);

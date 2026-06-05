@@ -31,14 +31,14 @@
   做成一个独立的 Border 叠加层，用 VSM 状态机动画驱动其背景色，真正组合化，并天然
   绕开 `has_local` 导致 `from==to` 的根因（State Layer 色是独立属性，用户从不 `set`，
   永远走 StyleTrigger 分支正常缓动）。
-  - 新增 `StateLayerColorProperty`（默认白色全透明 `Color{1,1,1,0}`，避免与非透明白
+  - 新增 `StateLayerBrushProperty`（默认白色全透明 `Color{1,1,1,0}`，避免与非透明白
     插值时 RGB 由 0 渐变导致中途偏暗）
   - 视觉树插入 State Layer Border：`Border(背景+圆角+边框) → StateLayerBorder(半透明白)
     → InteractionLayer(Ripple) → ContentPresenter(文字)`；构造函数 `bind_property`
-    （Button.StateLayerColor → StateLayerBorder.Background）；`on_arrange` 同步胶囊圆角
+    （Button.StateLayerBrush → StateLayerBorder.Background）；`on_arrange` 同步胶囊圆角
   - 默认样式回归更纯正 MD3：**背景色不再随 hover/press 变化**，交互反馈完全交给
     State Layer（Hovered StyleTrigger=8% 白、Pressed=12% 白）；仅 Disabled 置灰背景/前景
-  - VSM 三条过渡同时 `animate_dp` StateLayerColor 与 Background（后者仅 Disabled→Normal
+  - VSM 三条过渡同时 `animate_dp` StateLayerBrush 与 Background（后者仅 Disabled→Normal
     从禁用灰 P60 缓动回基线；Hovered/Pressed 背景无 StyleTrigger 终值故 from==to 不变）
   - 移除手画蒙版与手动 alpha 缓动：删除 `render_interaction` 的 State Layer 段（只剩
     Ripple）、`anim_tick_callback` 的淡入淡出段、`state_layer_` 成员与 `on_visual_state_changed`
