@@ -71,6 +71,22 @@ public:
      */
     static const DependencyProperty& PaddingProperty;
 
+    /**
+     * @brief 前景画刷属性（Variant 存储 paint::Brush），默认白色纯色画刷。
+     *
+     * DP 化后可被 bind_property 从宿主控件（如 Button.Foreground）单向/双向驱动，
+     * 变更时自动同步给内联 TextBlock 的前景色。
+     */
+    static const DependencyProperty& ForegroundProperty;
+
+    /**
+     * @brief 字号属性（Variant 存储 float，逻辑像素），默认 14.0f。
+     *
+     * DP 化后可被 bind_property 从宿主控件（如 Button.FontSize）驱动，
+     * 变更时自动同步给内联 TextBlock 的字号并触发重新测量。
+     */
+    static const DependencyProperty& FontSizeProperty;
+
     // ── 生命周期 ──────────────────────────────────────────────────────────
 
     ContentPresenter();
@@ -91,16 +107,26 @@ public:
 
     /**
      * @brief 设置文字渲染字号（逻辑像素，默认 14.0f）。
+     *
+     * 内部写入 FontSizeProperty 的 Local 槽（向后兼容入口）；
+     * 等价于 set_value(FontSizeProperty, size_px)。
      */
     void set_font_size(float size_px) noexcept;
+
+    /// @brief 读取当前字号（从 FontSizeProperty 的最高优先级值取）。
+    float font_size() const noexcept;
 
     /**
      * @brief 设置文字前景画刷（默认为白色纯色画刷）。
      *
+     * 内部写入 ForegroundProperty 的 Local 槽（向后兼容入口）；
      * 仅支持纯色画刷（SolidColor）的文字渲染（当前文字渲染层限制）。
      * 渐变、亚克力等非纯色画刷降级为白色。
      */
     void set_foreground(paint::Brush brush) noexcept;
+
+    /// @brief 读取当前前景画刷（从 ForegroundProperty 的最高优先级值取）。
+    paint::Brush foreground() const noexcept;
 
     /**
      * @brief 设置文字对齐方式（代理到内联 TextBlock）。
@@ -154,6 +180,22 @@ private:
                                    const core::Variant&      old_v,
                                    const core::Variant&      new_v) noexcept;
 
+    /**
+     * @brief ForegroundProperty 变更时把前景画刷同步给内联 TextBlock。
+     */
+    static void on_foreground_changed(DependencyObject*         sender,
+                                      const DependencyProperty& prop,
+                                      const core::Variant&      old_v,
+                                      const core::Variant&      new_v) noexcept;
+
+    /**
+     * @brief FontSizeProperty 变更时把字号同步给内联 TextBlock 并重新测量。
+     */
+    static void on_font_size_changed(DependencyObject*         sender,
+                                     const DependencyProperty& prop,
+                                     const core::Variant&      old_v,
+                                     const core::Variant&      new_v) noexcept;
+
     // ── 内部状态 ───────────────────────────────────────────────────────────
 
     /// 内联 TextBlock（content 为字符串时自动创建并由 ContentPresenter 拥有）。
@@ -168,12 +210,6 @@ private:
 
     /// 字体对象缓存（inline_text_block_ 未创建时暂存，创建后立即传入）
     void*           font_face_{nullptr};
-
-    /// 文字字号缓存（逻辑像素，默认 14.0f）
-    float           font_size_px_{14.0f};
-
-    /// 文字前景画刷缓存（默认白色纯色画刷）
-    paint::Brush    foreground_{paint::Brush::solid(math::Color::White)};
 
     /// 文字对齐方式缓存（默认左对齐；inline_text_block_ 未创建时暂存，创建后立即传入）
     TextAlignment   text_alignment_cache_{TextAlignment::Left};

@@ -331,6 +331,52 @@ TEST_CASE("controls_ContentPresenter_无内容时Canvas无绘制命令")
     CHECK(canvas.cmd_count() <= 3u);
 }
 
+TEST_CASE("controls_ContentPresenter_前景与字号经依赖属性读写一致")
+{
+    ContentPresenter presenter;
+
+    // 默认值：字号 14、前景白色
+    CHECK(presenter.font_size() == doctest::Approx(14.0f));
+    CHECK(presenter.foreground().color().r == doctest::Approx(1.0f));
+
+    // 经便捷 setter 写入，再经依赖属性读回（单一真相源）
+    presenter.set_font_size(20.0f);
+    presenter.set_foreground(mine::paint::Brush::solid_rgb(0x336699));
+
+    CHECK(presenter.font_size() == doctest::Approx(20.0f));
+
+    const auto& fs = presenter.get_value(ContentPresenter::FontSizeProperty);
+    CHECK(fs.has<float>());
+    CHECK(fs.get<float>() == doctest::Approx(20.0f));
+
+    const auto& fg = presenter.get_value(ContentPresenter::ForegroundProperty);
+    CHECK(fg.has<mine::paint::Brush>());
+    CHECK(fg.get<mine::paint::Brush>().color().b == doctest::Approx(presenter.foreground().color().b));
+}
+
+TEST_CASE("controls_ContentPresenter_bind_property_前景与字号随源同步")
+{
+    // 模拟宿主控件（Button）以 DP↔DP 绑定驱动 ContentPresenter 外观
+    Border host;                 // 任取一个带 DP 的元素充当源
+    ContentPresenter presenter;
+
+    // 用 Border 的 Background 作为前景画刷源（均为 paint::Brush DP）
+    host.set_background(mine::paint::Brush::solid_rgb(0xAABBCC));
+    presenter.bind_property(ContentPresenter::ForegroundProperty,
+                            host, Border::BackgroundProperty);
+
+    // 初始同步：presenter 前景取得 host 当前背景
+    CHECK(presenter.foreground().color().r ==
+          doctest::Approx(host.background().color().r));
+
+    // 源变更 → 目标自动更新
+    host.set_background(mine::paint::Brush::solid_rgb(0x102030));
+    CHECK(presenter.foreground().color().g ==
+          doctest::Approx(host.background().color().g));
+    CHECK(presenter.foreground().color().b ==
+          doctest::Approx(host.background().color().b));
+}
+
 TEST_CASE("controls_Button_测量委托给内部ContentPresenter")
 {
     Button button;

@@ -46,6 +46,29 @@ const DependencyProperty& ContentPresenter::PaddingProperty =
             .changed         = &ContentPresenter::on_padding_changed,
         });
 
+// ContentPresenter::ForegroundProperty
+// 值类型：paint::Brush；默认白色纯色画刷
+const DependencyProperty& ContentPresenter::ForegroundProperty =
+    register_property<ContentPresenter>(
+        "Foreground",
+        core::Variant{ paint::Brush::solid(math::Color::White) },
+        PropertyMetadata{
+            .affects_render = true,
+            .changed        = &ContentPresenter::on_foreground_changed,
+        });
+
+// ContentPresenter::FontSizeProperty
+// 值类型：float（逻辑像素）；默认 14.0f
+const DependencyProperty& ContentPresenter::FontSizeProperty =
+    register_property<ContentPresenter>(
+        "FontSize",
+        core::Variant{ 14.0f },
+        PropertyMetadata{
+            .affects_measure = true,
+            .affects_render  = true,
+            .changed         = &ContentPresenter::on_font_size_changed,
+        });
+
 // ============================================================================
 // 依赖属性变更回调
 // ============================================================================
@@ -63,9 +86,10 @@ void ContentPresenter::on_content_changed(DependencyObject*         sender,
             // 首次设置字符串内容：创建内联 TextBlock 并配置字体/颜色/内边距/对齐
             self->inline_text_block_ = MINE_NEW(TextBlock);
             self->inline_text_block_->set_font_face(self->font_face_);
-            self->inline_text_block_->set_font_size(self->font_size_px_);
+            // 字号/前景从 DP 读取（单一真相源），避免 plain 成员与 DP 不一致
+            self->inline_text_block_->set_font_size(self->font_size());
             // 直接传入 Brush（TextBlock 已支持 paint::Brush 前景色）
-            self->inline_text_block_->set_foreground(self->foreground_);
+            self->inline_text_block_->set_foreground(self->foreground());
             self->inline_text_block_->set_padding(self->padding_cache_);
             self->inline_text_block_->set_text_alignment(self->text_alignment_cache_);
             self->inline_text_block_->set_use_ink_alignment(self->use_ink_alignment_cache_);
@@ -104,6 +128,30 @@ void ContentPresenter::on_padding_changed(DependencyObject*         sender,
     }
 }
 
+void ContentPresenter::on_foreground_changed(DependencyObject*         sender,
+                                             const DependencyProperty& /*prop*/,
+                                             const core::Variant&      /*old_v*/,
+                                             const core::Variant&      new_v) noexcept
+{
+    auto* self = static_cast<ContentPresenter*>(sender);
+    if (new_v.has<paint::Brush>() && self->inline_text_block_) {
+        // 前景画刷同步到内联 TextBlock（affects_render 已触发重绘）
+        self->inline_text_block_->set_foreground(new_v.get<paint::Brush>());
+    }
+}
+
+void ContentPresenter::on_font_size_changed(DependencyObject*         sender,
+                                            const DependencyProperty& /*prop*/,
+                                            const core::Variant&      /*old_v*/,
+                                            const core::Variant&      new_v) noexcept
+{
+    auto* self = static_cast<ContentPresenter*>(sender);
+    if (new_v.has<float>() && self->inline_text_block_) {
+        // 字号同步到内联 TextBlock（TextBlock::set_font_size 内部触发 invalidate_measure）
+        self->inline_text_block_->set_font_size(new_v.get<float>());
+    }
+}
+
 // ============================================================================
 // 生命周期
 // ============================================================================
@@ -136,24 +184,31 @@ void ContentPresenter::set_font_face(void* font_face) noexcept
 
 void ContentPresenter::set_font_size(float size_px) noexcept
 {
-    font_size_px_ = size_px;
-    if (inline_text_block_) {
-        // TextBlock::set_font_size 内部已调用 invalidate_measure
-        inline_text_block_->set_font_size(size_px);
-    } else {
-        invalidate_measure();
-    }
+    // 向后兼容入口：写入 FontSizeProperty 的 Local 槽。
+    // affects_measure=true → set_value 自动触发 invalidate_measure；
+    // on_font_size_changed 回调负责同步内联 TextBlock。
+    set_value(FontSizeProperty, core::Variant{ size_px }, ValuePriority::Local);
+}
+
+float ContentPresenter::font_size() const noexcept
+{
+    const core::Variant& v = get_value(FontSizeProperty);
+    return v.has<float>() ? v.get<float>() : 14.0f;
 }
 
 void ContentPresenter::set_foreground(paint::Brush brush) noexcept
 {
-    foreground_ = brush;
-    if (inline_text_block_) {
-        // TextBlock 已支持 paint::Brush 前景色，直接传入
-        inline_text_block_->set_foreground(brush);
-    } else {
-        invalidate_render();
-    }
+    // 向后兼容入口：写入 ForegroundProperty 的 Local 槽。
+    // affects_render=true → set_value 自动触发 invalidate_render；
+    // on_foreground_changed 回调负责同步内联 TextBlock。
+    set_value(ForegroundProperty, core::Variant{ brush }, ValuePriority::Local);
+}
+
+paint::Brush ContentPresenter::foreground() const noexcept
+{
+    const core::Variant& v = get_value(ForegroundProperty);
+    return v.has<paint::Brush>() ? v.get<paint::Brush>()
+                                 : paint::Brush::solid(math::Color::White);
 }
 
 void ContentPresenter::set_text_alignment(TextAlignment align) noexcept

@@ -5,6 +5,23 @@
 ## [Unreleased]
 
 ### Changed
+- **mine.ui.controls：ContentPresenter 前景/字号完成依赖属性化（补齐基元集）**：
+
+  延续 Border 的地基改造（docs/22）。此前 ContentPresenter 的前景画刷与字号为 plain member +
+  代理 setter，无法被 `bind_property` 驱动，复合控件只能用手工 push 同步外观。本次改造：
+  - 新增 2 个外观依赖属性：`ForegroundProperty`（paint::Brush，默认白色）、
+    `FontSizeProperty`（float，默认 14.0f）
+  - 移除 plain member（`foreground_`/`font_size_px_`），DP 成为单一真相源；
+    `set_foreground()`/`set_font_size()` 改为写 DP 的 Local 槽（保持向后兼容），
+    新增 `foreground()`/`font_size()` 读访问器
+  - 新增变更回调 `on_foreground_changed`/`on_font_size_changed`，自动把 DP 值同步给
+    内联 TextBlock；内联 TextBlock 创建时初始值改从 DP 读取（消除成员与 DP 不一致）
+  - 现在 `bind_property` 可把宿主控件（如 Button.Foreground/FontSize）单向/双向同步到
+    ContentPresenter，为复合控件去手工同步样板代码奠定基础
+  - 新增单元测试：`controls_ContentPresenter_前景与字号经依赖属性读写一致`、
+    `controls_ContentPresenter_bind_property_前景与字号随源同步`
+    （controls 测试：47 用例 116 断言全通过）
+
 - **mine.ui.controls：Border 升级为合格基元控件（外观完全 DP 化 + 圆角支持）**：
 
   作为组合式外观架构（docs/22）的地基改造。此前 Border 的边框/背景为 plain member，
