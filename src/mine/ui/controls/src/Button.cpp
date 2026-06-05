@@ -5,6 +5,7 @@
 
 #include <mine/ui/controls/Button.h>
 #include <mine/ui/controls/ContentPresenter.h>
+#include <mine/ui/controls/Border.h>
 
 #include <mine/paint/Canvas.h>
 #include <mine/paint/Brush.h>
@@ -234,6 +235,42 @@ void Button::on_can_execute_changed(ICommand* sender, void* user_data) noexcept
 }
 
 // ============================================================================
+// 交互覆盖层（私有嵌套类）
+// ============================================================================
+
+/**
+ * @brief Button 的交互覆盖层（组合式视觉树中间层）。
+ *
+ * 视觉树层级（自底向上）：
+ *   Border（背景+圆角）→ InteractionLayer（State Layer+Ripple+边框）→ ContentPresenter（文字）
+ *
+ * 继承 Control 以复用 inner_element 委托机制：其 inner_element 为 ContentPresenter，
+ * 测量/排列自动转发；on_render 仅负责绘制交互覆盖（在背景之上、文字之下）。
+ * 作为 Button 的嵌套类，可直接访问 Button 的私有交互状态。
+ */
+class Button::InteractionLayer : public Control {
+public:
+    explicit InteractionLayer(Button* owner) noexcept : owner_(owner) {}
+
+    /// 公开包装：设置内容元素（转发给 protected set_inner_element，支持子类型 OwnedPtr）
+    template <typename TElement>
+    void set_content(core::OwnedPtr<TElement> content) noexcept
+    {
+        set_inner_element(std::move(content));
+    }
+
+protected:
+    /// 在背景之上、文字之下绘制交互覆盖（委托回宿主 Button）
+    void on_render(paint::Canvas& canvas) override
+    {
+        owner_->render_interaction(canvas, bounds_rect());
+    }
+
+private:
+    Button* owner_;  ///< 宿主 Button（不拥有；生命周期覆盖本层）
+};
+
+// ============================================================================
 // 路由事件注册
 // ============================================================================
 
@@ -245,14 +282,35 @@ const RoutedEvent& Button::ClickEvent()
 
 Button::Button()
 {
-    // 创建并直接安装 ContentPresenter 作为内部子元素（无 ControlTemplate 机制）
-    auto presenter = core::make_owned<ContentPresenter>();
-    content_part_ = presenter.get();
-    // Button 文字居中
+    // ── 组合式视觉树装配（自内向外）─────────────────────────────────────────
+    // 目标层级（自底向上）：
+    //   Border（背景+圆角）→ InteractionLayer（State Layer+Ripple+边框）→ ContentPresenter（文字）
+    // Button 自身不再 on_render 手画背景/边框/圆角，全部下沉到基元 Border 与覆盖层。
+
+    // 1) ContentPresenter（文字层，最内）
+    auto content = core::make_owned<ContentPresenter>();
+    content_part_ = content.get();
     content_part_->set_text_alignment(TextAlignment::Center);
     // Button 需要以真实字形墨迹为基准做视觉居中，避免文字看起来偏右偏下
     content_part_->set_use_ink_alignment(true);
     content_part_->set_vertical_alignment(VerticalAlignment::Center);
+
+    // 2) InteractionLayer（State Layer + Ripple + 边框，中间层），其 inner_element 为 content
+    auto interaction = core::make_owned<InteractionLayer>(this);
+    interaction->set_hit_transparent(true);     // 内部实现层不参与命中测试
+    interaction->set_content(std::move(content));
+
+    // 3) Border（背景 + 圆角，最底层基元控件）
+    auto border = core::make_owned<Border>();
+    // 无边框占位（边框描边由 InteractionLayer 叠加绘制，不挤压内容布局）
+    border->set_border_thickness(math::Thickness::uniform(0.0f));
+    border_part_ = border.get();
+    // 把 InteractionLayer 作为 Border 的子元素（Border 转移所有权）
+    {
+        auto deleter = interaction.get_deleter();
+        UIElement* raw = interaction.release();
+        border->set_child(core::OwnedPtr<UIElement>{ raw, deleter });
+    }
 
     // 配置 VisualStateManager（内联原 BuildFn 中的 VSM 配置）
     style::VisualStateManager vsm{ *this };
@@ -265,19 +323,19 @@ Button::Button()
     vsm.add_transition("*", "Hovered",
         [btn_ptr](animation::Storyboard& sb) {
             sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
-                          animation::Duration::milliseconds(120.0f),
+                          animation::Duration::milliseconds(2400.0f),
                           animation::QuadEaseOut);
         });
     vsm.add_transition("*", "Normal",
         [btn_ptr](animation::Storyboard& sb) {
             sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
-                          animation::Duration::milliseconds(100.0f),
+                          animation::Duration::milliseconds(2000.0f),
                           animation::QuadEaseOut);
         });
     vsm.add_transition("*", "Pressed",
         [btn_ptr](animation::Storyboard& sb) {
             sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
-                          animation::Duration::milliseconds(60.0f),
+                          animation::Duration::milliseconds(1200.0f),
                           animation::QuadEaseIn);
         });
 
@@ -289,10 +347,13 @@ Button::Button()
     // 应用 P5 基线值（StyleSetter：Normal 背景色、前景色、边框色）
     active_style.apply(*this);
 
-    // 组合式装配：以 DP↔DP 绑定把宿主外观属性单向同步到 ContentPresenter，
-    // 取代原先散落在 on_content_changed/on_padding_changed/on_foreground_changed
-    // 与构造函数中的手工 push。绑定建立时自动完成一次初始同步；
-    // 绑定生命周期托管于 ContentPresenter 的内置存储（其析构早于本 Button）。
+    // 组合式装配绑定：以 DP↔DP 绑定把宿主外观属性单向同步到子树元素，
+    // 取代手工 push。绑定建立时自动完成一次初始同步；
+    // 生命周期托管于各目标元素的内置存储（其析构均早于本 Button）。
+    //   背景 → Border（VSM 动画改 Button.Background(P1) 会经此绑定实时同步给 Border）
+    border_part_->bind_property(Border::BackgroundProperty,
+                                *this, Button::BackgroundProperty);
+    //   内容/内边距/前景 → ContentPresenter
     content_part_->bind_property(ContentPresenter::ContentProperty,
                                  *this, ContentControl::ContentProperty);
     content_part_->bind_property(ContentPresenter::PaddingProperty,
@@ -300,8 +361,8 @@ Button::Button()
     content_part_->bind_property(ContentPresenter::ForegroundProperty,
                                  *this, Button::ForegroundProperty);
 
-    // 安装 ContentPresenter 到视觉子树（由 Control::set_inner_element 管理生命周期）
-    set_inner_element(std::move(presenter));
+    // 安装 Border 作为 Button 内部元素（由 Control::set_inner_element 管理生命周期）
+    set_inner_element(std::move(border));
 
     // 注册鼠标事件处理器
     add_handler(input::MouseDownEvent(), &Button::on_mouse_down_router, this);
@@ -503,32 +564,23 @@ void Button::on_measure(math::Size available_size)
     Control::on_measure(available_size);
 }
 
-void Button::on_render(paint::Canvas& canvas)
+void Button::render_interaction(paint::Canvas& canvas, const math::Rect& rect)
 {
-    const math::Rect rect = bounds_rect();
     if (rect.empty()) {
         return;
     }
 
-    // 背景画刷通过 DP 优先级链读取：
-    //   Animation(P1) = Storyboard 插値（状态切换动画期间）
-    //   StyleTrigger(P4) = 当前状态终値（动画结束后稳定显示）
-    //   StyleSetter(P5) = Normal 基线値（没有动画且没有状态覆写时）
-    const core::Variant& bg_var = get_value(BackgroundProperty);
-    const paint::Brush fill = bg_var.has<paint::Brush>()
-        ? bg_var.get<paint::Brush>()
-        : paint::Brush::solid_rgb(0x6750A4);  // 回退：MD3 Primary
-
-    // MD3 Filled Button 圆角：默认胶囊形（radius = height / 2），可通过 CornerRadiusProperty 自定义（四角独立）
+    // 与背景/裁剪一致的圆角（MD3 Filled Button 默认胶囊形 = height/2）
     const math::CornerRadii radii = compute_radii(rect.height);
     const math::ComplexRoundedRect crr{ rect, radii };
-    canvas.fill_complex_rounded_rect(crr, fill);
 
-    // MD3 State Layer：当背景色由 set_background()（Local P50）直接指定时，
-    // VSM 颜色动画对该按钮无感知（has_local=true → from==to，颜色不变）。
-    // 改用半透明叠加层提供悬停/按下视觉反馈（符合 MD3 State Layer 规范）：
-    //   Hover   = On Primary 8%  白色叠加 → 颜色略亮
-    //   Pressed = On Primary 12% 白色叠加 → 颜色更亮（配合 Ripple 涟漪）
+    // ── MD3 State Layer ─────────────────────────────────────────────────────
+    // 当背景由 set_background()（Local P50）直接指定时，VSM 颜色动画对该按钮无感知
+    // （Border 背景被 Local 值固定，不随状态变化），改用半透明叠加层提供视觉反馈：
+    //   Hover   = On Primary 8%  白色叠加
+    //   Pressed = On Primary 12% 白色叠加
+    // 当背景来自样式/动画（非 Local）时，VSM 已经驱动 Button.Background 变化并经
+    // bind_property 同步到 Border，背景色本身即提供反馈，故此处不叠加。
     if (is_enabled_ && has_value(BackgroundProperty, ValuePriority::Local)) {
         float state_alpha = 0.0f;
         if (is_pressed_) {
@@ -542,8 +594,9 @@ void Button::on_render(paint::Canvas& canvas)
         }
     }
 
-    // 圆角边框（由 BorderColorProperty 驱动；默认透明则跳过）
-    // 支持自定义模板通过 BorderColorProperty 添加圆角边框，无需额外 Border 元素
+    // ── 圆角边框描边 ─────────────────────────────────────────────────────────
+    // 由 BorderColorProperty 驱动（默认透明则跳过）；描边叠加在背景之上、内容之下，
+    // 不占用布局空间（故 Border 边框粗细设为 0）。
     const core::Variant& bc_var = get_value(BorderColorProperty);
     const paint::Brush border_fill = bc_var.has<paint::Brush>()
         ? bc_var.get<paint::Brush>()
@@ -554,11 +607,10 @@ void Button::on_render(paint::Canvas& canvas)
         canvas.stroke_complex_rounded_rect(crr, border_fill, pen);
     }
 
-    // MD3 Ripple 涟漪动画：在背景之上、文字之下绘制涟漪圆
+    // ── MD3 Ripple 涟漪 ──────────────────────────────────────────────────────
     // elapsed_ms 由 AnimationClock 驱动的 anim_tick_callback 每帧累加
     if (ripple_.active) {
-        // MD3 medium2 = 300ms（md.sys.motion.duration.medium2）
-        constexpr float kRippleDurationMs = 300.0f;
+        constexpr float kRippleDurationMs = 300.0f;  // MD3 medium2
         const float t = ripple_.elapsed_ms / kRippleDurationMs;
         if (t < 1.0f) {
             // 半径：从 0 扩展到按钮对角线的 60%（确保覆盖整个按钮）
@@ -571,7 +623,7 @@ void Button::on_render(paint::Canvas& canvas)
                 rect.x + ripple_.center_x,
                 rect.y + ripple_.center_y,
             };
-            // 裁剪到按钮圆角边界，防止润漪溢出
+            // 裁剪到按钮圆角边界，防止涟漪溢出
             canvas.save();
             canvas.clip_complex_rounded_rect(crr);
             canvas.fill_circle(center, ripple_r,
@@ -580,8 +632,6 @@ void Button::on_render(paint::Canvas& canvas)
         }
         // 若 t >= 1 时 ripple_.active 已被 tick 设为 false，此处无需额外处理
     }
-
-    // ContentPresenter 作为内部子元素由渲染管线自动渲染（无需 Button 显式调用）
 }
 
 void Button::on_arrange(math::Rect final_rect)
@@ -592,10 +642,16 @@ void Button::on_arrange(math::Rect final_rect)
     FrameworkElement::on_arrange(final_rect);
 
     // 设置四角独立圆角裁剪（由 CornerRadiusProperty 驱动），统一驱动：
-    //   1. 渲染裁剪：子元素（ContentPresenter 等）不会溢出边界
+    //   1. 渲染裁剪：子元素（Border/InteractionLayer/ContentPresenter）不会溢出边界
     //   2. 命中测试边界：hit_test_local() 自动使用此形状，无需覆写 hit_test()
     const math::CornerRadii radii = compute_radii(final_rect.height);
     set_clip_complex_rounded_rect(math::ComplexRoundedRect{ final_rect, radii });
+
+    // 同步解析后的胶囊圆角到 Border（bind_property 无法表达 -1 → height/2 的胶囊解析，
+    // 因为它依赖布局结果高度，故在排列阶段显式写入 Border 的圆角属性）。
+    if (border_part_ != nullptr) {
+        border_part_->set_corner_radius(radii);
+    }
 }
 
 ControlVisualState Button::compute_visual_state() const

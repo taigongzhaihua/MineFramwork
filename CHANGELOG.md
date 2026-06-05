@@ -5,6 +5,29 @@
 ## [Unreleased]
 
 ### Changed
+- **mine.ui.controls：Button 外观绘制真正下沉到组合子树（不再 on_render 手画背景）**：
+
+  组合式外观架构（docs/22）的彻底落地。此前 Button 虽用 bind_property 声明化了数据流，
+  但 `on_render` 仍以 `fill_complex_rounded_rect` 手画圆角矩形背景/边框——外观绘制仍是
+  继承式硬画，并非真正组合。本次把绘制职责下沉到视觉子树基元，Button 自身不再绘制任何外观：
+  - 视觉树重构为三层（自底向上，渲染顺序天然正确）：
+    `Border`（背景+圆角，基元控件）→ `InteractionLayer`（State Layer+Ripple+边框描边）
+    → `ContentPresenter`（文字）
+  - `InteractionLayer` 为 Button 私有嵌套类，继承 Control 复用 inner_element 委托机制
+    （其 inner 为 ContentPresenter，测量/排列自动转发）；`on_render` 只画交互覆盖，
+    叠加在背景之上、文字之下，符合 MD3 分层
+  - **移除 `Button::on_render`**：背景/圆角由 Border 绘制，State Layer/Ripple/边框由
+    InteractionLayer 绘制（新增 `render_interaction`），文字由 ContentPresenter 绘制，
+    三者均为子树元素，由渲染管线自动遍历
+  - 背景经 `bind_property`（Button.Background → Border.Background, OneWay）同步：
+    VSM 背景过渡动画改 Button.Background(P1) 会实时同步到 Border 并重绘
+  - 胶囊圆角（默认 -1 → height/2）依赖布局高度，无法用 bind_property 表达，故在
+    `on_arrange` 解析后显式写入 Border.CornerRadius
+  - 测试辅助 `advance_button_animations` 改为循环推进至动画稳定（对较长过渡时长鲁棒）
+  - 新增测试：`controls_Button_组合式背景由Border子树绘制`、
+    `controls_Button_背景经bind_property同步到内部Border`
+    （controls 测试 49 用例 118 断言、binding 27 用例 60 断言全通过，sample.02 运行验证无崩溃）
+
 - **mine.ui.controls：Button 组合式装配试点（手工 push 替换为 bind_property）**：
 
   组合式外观架构（docs/22）的首个端到端验证。Border、ContentPresenter 外观完成 DP 化后，

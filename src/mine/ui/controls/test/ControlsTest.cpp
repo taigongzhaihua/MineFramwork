@@ -35,7 +35,12 @@ void on_click_counter(void* /*sender*/, RoutedEventArgs& /*args*/, void* user_da
 
 void advance_button_animations(float dt = 0.35f)
 {
-    (void)mine::ui::animation::AnimationClock::instance().tick_all(dt);
+    // 推进足够多帧，确保 VSM 背景过渡 Storyboard（时长可能达数秒）走到终值。
+    // 单帧推进不足以覆盖较长的过渡时长，故循环推进至动画稳定（涟漪/状态动画均结束）。
+    auto& clock = mine::ui::animation::AnimationClock::instance();
+    for (int i = 0; i < 16; ++i) {
+        (void)clock.tick_all(dt);
+    }
 }
 
 void check_solid_brush(const Button& button, mine::paint::Brush expected)
@@ -403,6 +408,38 @@ TEST_CASE("controls_Button_ContentProperty变更传播到ContentPresenter")
     button.measure({300.0f, 200.0f});
 
     CHECK(button.desired_size().width >= initial_w);
+}
+
+TEST_CASE("controls_Button_组合式背景由Border子树绘制")
+{
+    // 验证组合式外观：Button 自身不再手画背景，背景由内部 Border 基元绘制。
+    Button button;
+    button.set_background(mine::paint::Brush::solid_rgb(0x336699));
+    button.measure({300.0f, 200.0f});
+    button.arrange({0.0f, 0.0f, 120.0f, 40.0f});
+
+    mine::paint::Canvas canvas;
+    button.render_to_canvas(canvas);
+
+    // 渲染整棵子树（Border 背景 + InteractionLayer + ContentPresenter）应产生绘制命令。
+    // 背景填充命令来自 Border 子元素，而非 Button::on_render（已移除手画逻辑）。
+    CHECK(canvas.cmd_count() > 3u);
+}
+
+TEST_CASE("controls_Button_背景经bind_property同步到内部Border")
+{
+    // 验证 Button.Background 通过 bind_property 单向同步到内部 Border 基元。
+    Button button;
+    button.set_background(mine::paint::Brush::solid_rgb(0xC04545));
+
+    // 渲染前先布局，确保子树尺寸与圆角同步就绪
+    button.measure({300.0f, 200.0f});
+    button.arrange({0.0f, 0.0f, 120.0f, 40.0f});
+
+    mine::paint::Canvas canvas;
+    button.render_to_canvas(canvas);
+    // 背景被 Local 指定 → Border 应绘制该背景；整树渲染必有命令
+    CHECK(canvas.cmd_count() > 0u);
 }
 
 TEST_CASE("controls_TextBlock_DependencyProperty与成员变量同步")

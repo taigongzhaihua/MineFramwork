@@ -34,7 +34,7 @@ namespace mine::ui::input { class MouseEventArgs; }
 namespace mine::ui::style { class Style; }
 
 // 前向声明（完整定义仅在 Button.cpp 中引入）
-namespace mine::ui { class ICommand; class ContentPresenter; }
+namespace mine::ui { class ICommand; class ContentPresenter; class Border; }
 
 namespace mine::ui {
 
@@ -206,7 +206,6 @@ public:
 
 protected:
     void on_measure(math::Size available_size) override;
-    void on_render(paint::Canvas& canvas) override;
     void on_arrange(math::Rect final_rect) override;
     [[nodiscard]] ControlVisualState compute_visual_state() const override;
     /**
@@ -223,7 +222,7 @@ private:
 
     /// 重写 ContentControl::on_content_changed，同步 text_ 成员缓存
     void on_content_changed(const core::Variant& old_v,
-                             const core::Variant& new_v) noexcept override;
+                            const core::Variant& new_v) noexcept override;
 
     // ── 依赖属性变更回调 ───────────────────────────────────────────────────
 
@@ -253,6 +252,26 @@ private:
     static void on_can_execute_changed(ICommand* sender, void* user_data) noexcept;
 
     // ── 辅助函数 ────────────────────────────────────────────────────────────
+
+    /**
+     * @brief 交互覆盖层内部元素（组合式视觉树中介于 Border 背景与 ContentPresenter
+     *        文字之间的一层），负责绘制 MD3 State Layer、Ripple 涟漪与边框描边。
+     *
+     * 作为 Button 的私有嵌套类，可访问 Button 的交互状态成员（ripple_/is_hovered_ 等）。
+     * 完整定义在 Button.cpp 中。
+     */
+    class InteractionLayer;
+
+    /**
+     * @brief 绘制交互覆盖层内容（由 InteractionLayer::on_render 转发调用）。
+     *
+     * 在背景之上、文字之下绘制：State Layer 半透明叠加、圆角边框描边、Ripple 涟漪。
+     * 全部裁剪到按钮圆角形状。
+     *
+     * @param canvas 画布
+     * @param rect   覆盖层局部矩形（等于按钮内容矩形）
+     */
+    void render_interaction(paint::Canvas& canvas, const math::Rect& rect);
 
     /**
      * @brief 根据 CornerRadiusProperty 和当前高度计算实际渲染的 CornerRadii。
@@ -306,7 +325,8 @@ private:
         bool  active     = false; ///< 是否正在播放
     };
     RippleState ripple_;  ///< 当前涟漪状态
-    ContentPresenter*        content_part_           = nullptr;  ///< 模板子元素指针（on_apply_template 中填充）
+    ContentPresenter*        content_part_           = nullptr;  ///< 文字层（组合式视觉树最内层，bind_property 目标）
+    Border*                  border_part_            = nullptr;  ///< 背景/圆角基元层（组合式视觉树最底层，圆角同步目标）
     style::Style*            vsm_style_              = nullptr;  ///< 用户指定的 VSM 样式（nullptr 则用 default_button_style）
 };
 
