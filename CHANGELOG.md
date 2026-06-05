@@ -21,8 +21,32 @@
   - 效果：自定义背景按钮 Hover/Press 蒙版平滑淡入淡出；无 Local 背景按钮仍走背景色渐变；
     Disabled→Normal 维持原背景色缓动。三处状态过渡均不再瞬时
   - controls 测试 49 用例 118 断言通过，sample.01-mvvm-binding 构建通过
+  - 注：本条的"手画蒙版 + 手动 alpha 缓动"实现已被下方 Changed 条目（State Layer
+    独立为 Border 基元 + 状态机动画）彻底取代，根因诊断仍保留以备查。
 
 ### Changed
+- **mine.ui.controls：State Layer 蒙版独立为 Border 基元，hover/press 反馈改由状态机动画驱动**：
+
+  承接上一条 Fixed（手动 alpha 缓动）的彻底重构——把"手画 + 手动缓动"的 State Layer
+  做成一个独立的 Border 叠加层，用 VSM 状态机动画驱动其背景色，真正组合化，并天然
+  绕开 `has_local` 导致 `from==to` 的根因（State Layer 色是独立属性，用户从不 `set`，
+  永远走 StyleTrigger 分支正常缓动）。
+  - 新增 `StateLayerColorProperty`（默认白色全透明 `Color{1,1,1,0}`，避免与非透明白
+    插值时 RGB 由 0 渐变导致中途偏暗）
+  - 视觉树插入 State Layer Border：`Border(背景+圆角+边框) → StateLayerBorder(半透明白)
+    → InteractionLayer(Ripple) → ContentPresenter(文字)`；构造函数 `bind_property`
+    （Button.StateLayerColor → StateLayerBorder.Background）；`on_arrange` 同步胶囊圆角
+  - 默认样式回归更纯正 MD3：**背景色不再随 hover/press 变化**，交互反馈完全交给
+    State Layer（Hovered StyleTrigger=8% 白、Pressed=12% 白）；仅 Disabled 置灰背景/前景
+  - VSM 三条过渡同时 `animate_dp` StateLayerColor 与 Background（后者仅 Disabled→Normal
+    从禁用灰 P60 缓动回基线；Hovered/Pressed 背景无 StyleTrigger 终值故 from==to 不变）
+  - 移除手画蒙版与手动 alpha 缓动：删除 `render_interaction` 的 State Layer 段（只剩
+    Ripple）、`anim_tick_callback` 的淡入淡出段、`state_layer_` 成员与 `on_visual_state_changed`
+    的 target_alpha 设置
+  - 效果：无论自定义背景与否，hover/press 的 State Layer 均经状态机动画平滑缓动；
+    与背景色动画、Ripple 共用同一 VSM/AnimationClock 机制，统一且无瞬时跳变
+  - controls 测试 49 用例 118 断言、binding 27 用例 60 断言全通过，sample.01/02 构建通过
+
 - **mine.ui.controls：Button 边框描边下沉到 Border 基元（彻底交由组合子树绘制）**：
 
   承接「外观下沉」改造的收尾。此前 Button 背景/圆角已交给 Border，但边框描边仍由

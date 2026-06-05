@@ -93,6 +93,17 @@ public:
     static const DependencyProperty& BorderColorProperty;
 
     /**
+     * @brief State Layer 蒙版画刷（Variant 存储 paint::Brush）。
+     *
+     * MD3 Filled Button 的 hover/press 交互反馈层：半透明白色蒙版叠加在背景之上。
+     * Default = Brush::solid(Color{1,1,1,0})（白色全透明，避免与非透明色插值时 RGB 偏暗）。
+     * 状态终值（Hovered 8% / Pressed 12%）由样式 StyleTrigger(P4) 写入，VSM Storyboard
+     * 以 Animation(P1) 插值缓动；经 bind_property 同步到独立的 State Layer Border 背景。
+     * 由于用户从不 set 本属性（无 Local 覆盖），动画恒走 StyleTrigger 分支，缓动始终生效。
+     */
+    static const DependencyProperty& StateLayerColorProperty;
+
+    /**
      * @brief 命令属性（Variant 存储 ICommand*）。
      *
      * 等价于 WPF 的 Button.CommandProperty。
@@ -261,10 +272,10 @@ private:
     // ── 辅助函数 ────────────────────────────────────────────────────────────
 
     /**
-     * @brief 交互覆盖层内部元素（组合式视觉树中介于 Border 背景与 ContentPresenter
-     *        文字之间的一层），负责绘制 MD3 State Layer、Ripple 涟漪与边框描边。
+     * @brief 交互覆盖层内部元素（组合式视觉树中介于 State Layer 蒙版与
+     *        ContentPresenter 文字之间的一层），仅负责绘制 MD3 Ripple 涟漪。
      *
-     * 作为 Button 的私有嵌套类，可访问 Button 的交互状态成员（ripple_/is_hovered_ 等）。
+     * 作为 Button 的私有嵌套类，可访问 Button 的交互状态成员（ripple_ 等）。
      * 完整定义在 Button.cpp 中。
      */
     class InteractionLayer;
@@ -272,8 +283,8 @@ private:
     /**
      * @brief 绘制交互覆盖层内容（由 InteractionLayer::on_render 转发调用）。
      *
-     * 在背景之上、文字之下绘制：State Layer 半透明叠加、圆角边框描边、Ripple 涟漪。
-     * 全部裁剪到按钮圆角形状。
+     * 仅绘制 Ripple 涟漪（背景、State Layer 蒙版、边框均已下沉到各自的 Border 基元）。
+     * 涟漪裁剪到按钮圆角形状。
      *
      * @param canvas 画布
      * @param rect   覆盖层局部矩形（等于按钮内容矩形）
@@ -333,16 +344,9 @@ private:
     };
     RippleState ripple_;  ///< 当前涟漪状态
 
-    /// MD3 State Layer 缓动状态：Hover/Press 半透明蒙版的 alpha 做淡入淡出，
-    /// 避免状态切换时整层蒙版瞬时突现/突隐（仅当背景为 Local 色、背景色动画无变化时启用）。
-    struct StateLayerState {
-        float current_alpha = 0.0f;  ///< 当前渲染用 alpha（由 tick 每帧朝 target 缓动）
-        float target_alpha  = 0.0f;  ///< 目标 alpha（Hover=0.08 / Press=0.12 / 其他=0）
-    };
-    StateLayerState state_layer_;  ///< 当前 State Layer 蒙版缓动状态
-
     ContentPresenter*        content_part_           = nullptr;  ///< 文字层（组合式视觉树最内层，bind_property 目标）
     Border*                  border_part_            = nullptr;  ///< 背景/圆角基元层（组合式视觉树最底层，圆角同步目标）
+    Border*                  state_border_           = nullptr;  ///< State Layer 蒙版层（叠在背景之上，背景色由 VSM 驱动缓动）
     style::Style*            vsm_style_              = nullptr;  ///< 用户指定的 VSM 样式（nullptr 则用 default_button_style）
 };
 

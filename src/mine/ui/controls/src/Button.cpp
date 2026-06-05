@@ -79,6 +79,18 @@ const DependencyProperty& Button::BorderColorProperty =
             .changed        = &Button::on_border_color_changed,
         });
 
+// Button::StateLayerColorProperty — State Layer 蒙版画刷（MD3 hover/press 反馈层）
+// 默认白色全透明 Color{1,1,1,0}（避免与非透明白插值时 RGB 由 0 渐变导致中途偏暗）。
+// 状态终值由默认样式 StyleTrigger 写入，VSM Storyboard 插值缓动；
+// 经 bind_property 同步到独立的 State Layer Border 背景，由该 Border 基元真正绘制。
+const DependencyProperty& Button::StateLayerColorProperty =
+    register_property<Button>(
+        "StateLayerColor",
+        core::Variant{ paint::Brush::solid(math::Color{ 1.0f, 1.0f, 1.0f, 0.0f }) },
+        PropertyMetadata{
+            .affects_render = true,
+        });
+
 // Button::CommandProperty — 命令（Variant 存储 ICommand*，默认为空）
 // 属性变更时通过 on_command_changed 自动管理 can_execute_changed 订阅并刷新 is_enabled_。
 const DependencyProperty& Button::CommandProperty =
@@ -116,9 +128,11 @@ const DependencyProperty& Button::CornerRadiusProperty =
 /**
  * @brief 构建默认 Button 样式对象（Construct On First Use，避免静态初始化顺序问题）。
  *
- * 层 P5 StyleSetter：Normal 状态的基线外观值（背景色、前景色、边框色）。
- * 层 P4 StyleTrigger：Hovered/Pressed/Disabled 状态的终值（由 VSM go_to_state 自动写入）。
+ * 层 P5 StyleSetter：Normal 状态的基线外观值（背景色、前景色、边框色、State Layer 透明）。
+ * 层 P4 StyleTrigger：Hovered/Pressed 的 State Layer 终值、Disabled 的背景/前景终值。
  *
+ * MD3 Filled Button 语义：背景色不随 hover/press 变化，交互反馈完全交给 State Layer
+ * （半透明白色蒙版叠加）；仅 Disabled 状态置灰背景/前景。
  * 注意：状态 setter 只写终值，不描述动画曲线（动画曲线在模板的 VSM 过渡中配置）。
  */
 static style::Style& default_button_style()
@@ -138,19 +152,21 @@ static style::Style& default_button_style()
                        core::Variant{ Brush::solid(Color::White) } });           // MD3 On Primary
         s.add_setter({ &Button::BorderColorProperty,
                        core::Variant{ Brush::solid(Color::Transparent) } });
+        s.add_setter({ &Button::StateLayerColorProperty,
+                       core::Variant{ Brush::solid(Color{ 1.0f, 1.0f, 1.0f, 0.0f }) } });  // 白色全透明
 
-        // ── P4 StyleTrigger：Hovered 状态终值 ───────────────────────────────────
+        // ── P4 StyleTrigger：Hovered 的 State Layer 终值（On Primary 8% 白）─────────────
         style::VisualStateSetters hovered;
         hovered.state_name = "Hovered";
-        hovered.setters.push_back({ &Button::BackgroundProperty,
-            core::Variant{ Brush::solid_rgb(0x8876C0) } });  // 悬停：较 Normal 亮约 20%，明显变亮
+        hovered.setters.push_back({ &Button::StateLayerColorProperty,
+            core::Variant{ Brush::solid(Color{ 1.0f, 1.0f, 1.0f, 0.08f }) } });
         s.add_state_setters(std::move(hovered));
 
-        // ── P4 StyleTrigger：Pressed 状态终值 ───────────────────────────────────
+        // ── P4 StyleTrigger：Pressed 的 State Layer 终值（On Primary 12% 白）────────────
         style::VisualStateSetters pressed;
         pressed.state_name = "Pressed";
-        pressed.setters.push_back({ &Button::BackgroundProperty,
-            core::Variant{ Brush::solid_rgb(0x5743A0) } });  // 按下：较 Normal 暗约 15%，明显变暗
+        pressed.setters.push_back({ &Button::StateLayerColorProperty,
+            core::Variant{ Brush::solid(Color{ 1.0f, 1.0f, 1.0f, 0.12f }) } });
         s.add_state_setters(std::move(pressed));
 
         // ── P4 StyleTrigger：Disabled 状态终值（无动画——直接跳变） ─────────────────
@@ -304,8 +320,9 @@ Button::Button()
 {
     // ── 组合式视觉树装配（自内向外）─────────────────────────────────────────
     // 目标层级（自底向上）：
-    //   Border（背景+圆角+边框）→ InteractionLayer（State Layer+Ripple）→ ContentPresenter（文字）
-    // Button 自身不再 on_render 手画背景/边框/圆角，全部下沉到基元 Border 与覆盖层。
+    //   Border（背景+圆角+边框）→ StateLayerBorder（半透明白叠加）
+    //     → InteractionLayer（Ripple）→ ContentPresenter（文字）
+    // Button 自身不再 on_render 手画背景/边框/圆角/蒙版，全部下沉到基元 Border 与覆盖层。
 
     // 1) ContentPresenter（文字层，最内）
     auto content = core::make_owned<ContentPresenter>();
@@ -315,20 +332,31 @@ Button::Button()
     content_part_->set_use_ink_alignment(true);
     content_part_->set_vertical_alignment(VerticalAlignment::Center);
 
-    // 2) InteractionLayer（State Layer + Ripple，中间层），其 inner_element 为 content
+    // 2) InteractionLayer（仅 Ripple，中间层），其 inner_element 为 content
     auto interaction = core::make_owned<InteractionLayer>(this);
     interaction->set_hit_transparent(true);     // 内部实现层不参与命中测试
     interaction->set_content(std::move(content));
 
-    // 3) Border（背景 + 圆角 + 边框，最底层基元控件）
+    // 3) StateLayerBorder（State Layer 半透明白叠加层，其 child 为 interaction）
+    //    背景色由 VSM 驱动的 StateLayerColor 经 bind_property 同步，实现状态机动画缓动。
+    auto state_border = core::make_owned<Border>();
+    state_border->set_border_thickness(math::Thickness::uniform(0.0f));  // 纯叠加层，无边框
+    state_border_ = state_border.get();
+    {
+        auto deleter = interaction.get_deleter();
+        UIElement* raw = interaction.release();
+        state_border->set_child(core::OwnedPtr<UIElement>{ raw, deleter });
+    }
+
+    // 4) Border（背景 + 圆角 + 边框，最底层基元控件），其 child 为 state_border
     auto border = core::make_owned<Border>();
     // 边框粗细默认 0（不占布局）；当 BorderColor 非透明时由 on_border_color_changed 推导为 2dp
     border->set_border_thickness(math::Thickness::uniform(0.0f));
     border_part_ = border.get();
-    // 把 InteractionLayer 作为 Border 的子元素（Border 转移所有权）
+    // 把 StateLayerBorder 作为背景 Border 的子元素（Border 转移所有权）
     {
-        auto deleter = interaction.get_deleter();
-        UIElement* raw = interaction.release();
+        auto deleter = state_border.get_deleter();
+        UIElement* raw = state_border.release();
         border->set_child(core::OwnedPtr<UIElement>{ raw, deleter });
     }
 
@@ -340,20 +368,33 @@ Button::Button()
     vsm.define_state("Disabled");
 
     auto* btn_ptr = this;
+    // 每个过渡的 Storyboard 同时驱动两个属性：
+    //   - StateLayerColor：hover/press 反馈的核心（缓动 0↔8%↔12% 白），经 bind 同步给 state_border_
+    //   - Background：仅 Disabled→Normal 时从禁用灰 P60 缓动回基线色；Hovered/Pressed 因
+    //     背景无 StyleTrigger 终值故 from==to 无变化（背景色恒定，符合 MD3）
     vsm.add_transition("*", "Hovered",
         [btn_ptr](animation::Storyboard& sb) {
+            sb.animate_dp(*btn_ptr, Button::StateLayerColorProperty,
+                          animation::Duration::milliseconds(2400.0f),
+                          animation::QuadEaseOut);
             sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
                           animation::Duration::milliseconds(2400.0f),
                           animation::QuadEaseOut);
         });
     vsm.add_transition("*", "Normal",
         [btn_ptr](animation::Storyboard& sb) {
+            sb.animate_dp(*btn_ptr, Button::StateLayerColorProperty,
+                          animation::Duration::milliseconds(2000.0f),
+                          animation::QuadEaseOut);
             sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
                           animation::Duration::milliseconds(2000.0f),
                           animation::QuadEaseOut);
         });
     vsm.add_transition("*", "Pressed",
         [btn_ptr](animation::Storyboard& sb) {
+            sb.animate_dp(*btn_ptr, Button::StateLayerColorProperty,
+                          animation::Duration::milliseconds(1200.0f),
+                          animation::QuadEaseIn);
             sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
                           animation::Duration::milliseconds(1200.0f),
                           animation::QuadEaseIn);
@@ -376,6 +417,9 @@ Button::Button()
     //   边框画刷 → Border（边框粗细由 on_border_color_changed 按透明与否推导）
     border_part_->bind_property(Border::BorderBrushProperty,
                                 *this, Button::BorderColorProperty);
+    //   State Layer 蒙版色 → StateLayerBorder 背景（VSM 缓动 Button.StateLayerColor 实时同步）
+    state_border_->bind_property(Border::BackgroundProperty,
+                                 *this, Button::StateLayerColorProperty);
     //   内容/内边距/前景 → ContentPresenter
     content_part_->bind_property(ContentPresenter::ContentProperty,
                                  *this, ContentControl::ContentProperty);
@@ -597,20 +641,8 @@ void Button::render_interaction(paint::Canvas& canvas, const math::Rect& rect)
     const math::CornerRadii radii = compute_radii(rect.height);
     const math::ComplexRoundedRect crr{ rect, radii };
 
-    // ── MD3 State Layer（半透明蒙版，淡入淡出缓动）─────────────────────────────
-    // 当背景由 set_background()（Local P50）直接指定时，VSM 背景色动画的 from==to
-    // （终值取最高优先级 = Local 色），背景色本身不变化，视觉反馈全靠本蒙版：
-    //   Hover   = On Primary 8%  白色叠加
-    //   Pressed = On Primary 12% 白色叠加
-    // alpha 由 anim_tick_callback 每帧朝 state_layer_.target_alpha 缓动（淡入淡出），
-    // 避免状态切换时整层蒙版瞬时突现/突隐。target_alpha 仅在背景为 Local 色时置非零
-    // （见 on_visual_state_changed）；背景来自样式/动画时由背景色过渡本身提供反馈。
-    if (state_layer_.current_alpha > 0.001f) {
-        canvas.fill_complex_rounded_rect(crr,
-            paint::Brush::solid(math::Color::White.with_alpha(state_layer_.current_alpha)));
-    }
-
-    // ── MD3 Ripple 涟漪 ──────────────────────────────────────────────────────
+    // ── MD3 Ripple 涟漪 ─────────────────────────────────────────────
+    // State Layer 蒙版、背景、边框均已下沉到各自的 Border 基元，此处只绘涟漪。
     // elapsed_ms 由 AnimationClock 驱动的 anim_tick_callback 每帧累加
     if (ripple_.active) {
         constexpr float kRippleDurationMs = 300.0f;  // MD3 medium2
@@ -650,10 +682,13 @@ void Button::on_arrange(math::Rect final_rect)
     const math::CornerRadii radii = compute_radii(final_rect.height);
     set_clip_complex_rounded_rect(math::ComplexRoundedRect{ final_rect, radii });
 
-    // 同步解析后的胶囊圆角到 Border（bind_property 无法表达 -1 → height/2 的胶囊解析，
-    // 因为它依赖布局结果高度，故在排列阶段显式写入 Border 的圆角属性）。
+    // 同步解析后的胶囊圆角到各 Border（bind_property 无法表达 -1 → height/2 的胶囊解析，
+    // 因为它依赖布局结果高度，故在排列阶段显式写入背景 Border 与 State Layer Border 的圆角）。
     if (border_part_ != nullptr) {
         border_part_->set_corner_radius(radii);
+    }
+    if (state_border_ != nullptr) {
+        state_border_->set_corner_radius(radii);
     }
 }
 
@@ -775,28 +810,6 @@ bool Button::anim_tick_callback(void* user_data, float dt) noexcept
     auto* self = static_cast<Button*>(user_data);
     bool  any_active = false;
 
-    // ── MD3 State Layer 蒙版淡入淡出 ─────────────────────────────────────────
-    // 每帧朝 target_alpha 线性逼近（约 120ms 走完 0↔0.12 全程），消除瞬时跳变。
-    {
-        const float target = self->state_layer_.target_alpha;
-        float&      cur    = self->state_layer_.current_alpha;
-        if (cur != target) {
-            constexpr float kFadeRatePerSec = 1.0f / 0.12f;  // alpha/秒
-            const float     step            = kFadeRatePerSec * dt;
-            if (cur < target) {
-                cur += step;
-                if (cur > target) { cur = target; }
-            } else {
-                cur -= step;
-                if (cur < target) { cur = target; }
-            }
-            self->invalidate_render();
-            if (cur != target) {
-                any_active = true;
-            }
-        }
-    }
-
     // ── Ripple 涟漪动画 ─────────────────────────────────────────────────────
     if (self->ripple_.active) {
         constexpr float kRippleDurationMs = 300.0f;  // MD3 medium2
@@ -835,20 +848,6 @@ void Button::on_visual_state_changed(ControlVisualState old_state,
     //        b) apply_state(P4)        — 将状态终值写入 BackgroundProperty / ForegroundProperty
     //        c) resolve_and_begin()    — 创建 Storyboard，启动插值
     Control::on_visual_state_changed(old_state, new_state);
-
-    // 更新 State Layer 蒙版目标 alpha（Hover=0.08 / Press=0.12 / 其他=0）。
-    // 仅当背景为 Local 色（背景色动画 from==to 无变化）时启用蒙版反馈；
-    // 背景来自样式/动画时 target 恒 0，由背景色过渡本身提供反馈，避免双重叠加偏色。
-    // 实际 alpha 由 anim_tick_callback 每帧朝此目标缓动，呈现淡入淡出。
-    float target_alpha = 0.0f;
-    if (is_enabled_ && has_value(BackgroundProperty, ValuePriority::Local)) {
-        if (is_pressed_) {
-            target_alpha = 0.12f;
-        } else if (is_hovered_) {
-            target_alpha = 0.08f;
-        }
-    }
-    state_layer_.target_alpha = target_alpha;
 
     // 注册 AnimationClock（幂等）：
     //   - 驱动 VSM::tick_animations(dt)（背景色过渡 Storyboard）
