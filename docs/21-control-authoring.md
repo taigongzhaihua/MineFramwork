@@ -7,6 +7,12 @@
 > 前置阅读：[09-property-binding.md](09-property-binding.md)、
 > [20-style-template.md](20-style-template.md)
 
+> ⚠️ **架构变更提示（2026-06）**：本文涉及的 `ControlTemplate` / `TemplateRegistry` /
+> `bind_template` / `find_template_child` / `on_apply_template` 等运行时模板机制**已废弃**。
+> 控件外观的最终架构请以 [22-appearance-architecture.md](22-appearance-architecture.md) 为准
+> （继承式基元绘制 + 组合式装配 + DP↔DP 绑定）。本文关于 DP 声明、事件处理、
+> 视觉状态计算的范式仍然有效；“模板层”相关描述请改读本文§22.5 的组合范式。
+
 ---
 
 ## 21.1 核心问题与设计目标

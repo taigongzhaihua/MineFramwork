@@ -4,6 +4,12 @@
 > 控件系统是 **属性系统 / 样式系统 / 动画系统 / 事件系统 / 渲染系统 / 布局系统** 的集成点，  
 > 本文统一定义各子系统的职责边界、数据存储规范、调用链路和开发接口规范。
 
+> ⚠️ **架构变更提示（2026-06）**：本文涉及的 `ControlTemplate` / `TemplateRegistry` /
+> `bind_template` / `find_template_child` / `on_apply_template` 等运行时模板机制**已废弃**。
+> 控件外观的最终架构请以 [22-appearance-architecture.md](22-appearance-architecture.md) 为准
+> （继承式基元绘制 + 组合式装配 + DP↔DP 绑定）。本文其余关于属性系统、事件、
+> VSM、Style 的内容仍然有效。
+
 ---
 
 ## 21.1 设计目标与核心原则

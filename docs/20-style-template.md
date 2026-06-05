@@ -4,6 +4,11 @@
 > [03-mml-language.md](03-mml-language.md)（§3.7 样式与模板）的完整架构细节。
 > 与 WPF/WinUI 的核心差异：**AOT 优先、无运行时 XAML 解析、无 RTTI 依赖**。
 
+> ⚠️ **架构变更提示（2026-06）**：本文的 **Style / ResourceDictionary / 主题 / VisualStateManager**
+> 部分仍然有效；但 **ControlTemplate 运行时模板方案已废弃**。控件外观的最终架构请以
+> [22-appearance-architecture.md](22-appearance-architecture.md) 为准（继承式基元绘制 +
+> 组合式装配 + DP↔DP 绑定），本文中 `ControlTemplate` 相关内容仅作历史参考。
+
 ---
 
 ## 20.1 设计目标与约束

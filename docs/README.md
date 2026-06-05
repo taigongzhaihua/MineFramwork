@@ -34,6 +34,7 @@
 | 19 | [19-roadmap.md](19-roadmap.md) | 路线图与里程碑 |
 | 20 | [20-style-template.md](20-style-template.md) | 样式、模板与主题系统设计 |
 | 21 | [21-core-api.md](21-core-api.md) | mine.core 模块 API 文档 |
+| 22 | [22-appearance-architecture.md](22-appearance-architecture.md) | 控件外观架构（基元绘制 + 组合装配 + DP↔DP 绑定） |
 
 ## 一句话定位
 
