@@ -90,6 +90,7 @@ private:
 
     // ── UI 元素（构成视觉树，由 build_() 组装）──────────────────────────────
 
+    mine::ui::Border     root_bg_;           ///< 根背景 Border（白色，包裹全部内容）
     mine::ui::StackPanel body_panel_;       ///< 根垂直排列面板
     mine::ui::TextBlock  header_label_;     ///< 标题栏文字
     mine::ui::Border     counter_card_;     ///< 计数信息卡片容器

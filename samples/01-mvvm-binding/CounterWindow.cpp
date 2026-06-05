@@ -195,9 +195,11 @@ void CounterWindow::build_(mine::text::FontFace* font)
     btn_quit_.add_handler(ui::Button::ClickEvent(), &CounterWindow::s_on_click_quit, this);
     btn_row_.add_child(&btn_quit_);
 
-    // ── 挂载根面板到窗口内容区，并注入数据上下文 ─────────────────────────────
-
-    set_content(&body_panel_);
+    // ── 挂载根面板到窗口内容区，用白色 Border 包裹全部内容 ─────────────────
+    root_bg_.set_background(paint::Brush::solid_rgb(0xF5F5F5));  // 亮灰窗口底色
+    root_bg_.set_border_thickness(math::Thickness::uniform(0.0f));
+    root_bg_.set_child(&body_panel_);
+    set_content(&root_bg_);
 
     // 将 ViewModel 指针注入到窗口的 DataContextProperty（inherits=true）。
     // Window::set_data_context() 会立即将此值推到内容根的 Inherited 槽，
