@@ -232,6 +232,13 @@ private:
                                    const core::Variant&      old_v,
                                    const core::Variant&      new_v) noexcept;
 
+    /// BorderColorProperty 变更时按是否透明推导内部 Border 的边框粗细
+    /// （透明 → 0 不占布局；非透明 → 2dp）；边框画刷本身经 bind_property 同步
+    static void on_border_color_changed(DependencyObject*         sender,
+                                        const DependencyProperty& prop,
+                                        const core::Variant&      old_v,
+                                        const core::Variant&      new_v) noexcept;
+
     /**
      * @brief CommandProperty 变更回调。
      *

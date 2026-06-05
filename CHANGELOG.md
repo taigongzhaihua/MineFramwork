@@ -5,6 +5,22 @@
 ## [Unreleased]
 
 ### Changed
+- **mine.ui.controls：Button 边框描边下沉到 Border 基元（彻底交由组合子树绘制）**：
+
+  承接「外观下沉」改造的收尾。此前 Button 背景/圆角已交给 Border，但边框描边仍由
+  `InteractionLayer::render_interaction` 用 `stroke_complex_rounded_rect` 手画——
+  边框这一外观要素仍是覆盖层硬画。本次把边框彻底交给基元 Border 绘制：
+  - 构造函数新增 `bind_property`（Button.BorderColor → Border.BorderBrush, OneWay），
+    边框画刷声明式同步给 Border，由 Border 的 `on_render` 真正描边
+  - 新增 `on_border_color_changed` 回调：按 BorderColor 是否透明推导 Border 边框粗细
+    （透明 → `Thickness::uniform(0)` 不占布局；非透明 → `uniform(2)`），保持
+    「设色即显示 2dp 边框、默认透明无边框且不挤压内容布局」的便捷语义
+  - 从 `render_interaction` 移除边框描边段，覆盖层只剩 State Layer 与 Ripple；
+    更新视觉树注释为 `Border（背景+圆角+边框）→ InteractionLayer（State Layer+Ripple）→ ContentPresenter`
+  - 至此 Button 全部外观要素（背景、圆角、边框、文字）均由组合子树基元绘制，
+    Button 自身仅绘制交互覆盖；controls 测试 49 用例 118 断言、binding 27 用例 60 断言
+    全通过，sample.02-controls-demo 构建通过
+
 - **mine.ui.controls：Button 外观绘制真正下沉到组合子树（不再 on_render 手画背景）**：
 
   组合式外观架构（docs/22）的彻底落地。此前 Button 虽用 bind_property 声明化了数据流，

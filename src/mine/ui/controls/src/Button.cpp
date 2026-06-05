@@ -68,12 +68,15 @@ const DependencyProperty& Button::ForegroundProperty =
         });
 
 // Button::BorderColorProperty — 边框画刷（MD3 Filled Button 无外边框，默认透明）
+// 边框画刷经 bind_property（Button.BorderColor → Border.BorderBrush）下沉给基元 Border 绘制；
+// 边框粗细由 on_border_color_changed 根据是否透明推导（透明 0 / 非透明 2dp）。
 const DependencyProperty& Button::BorderColorProperty =
     register_property<Button>(
         "BorderColor",
         core::Variant{ paint::Brush::solid(math::Color::Transparent) },
         PropertyMetadata{
             .affects_render = true,
+            .changed        = &Button::on_border_color_changed,
         });
 
 // Button::CommandProperty — 命令（Variant 存储 ICommand*，默认为空）
@@ -193,6 +196,23 @@ void Button::on_padding_changed(DependencyObject*         sender,
     }
 }
 
+void Button::on_border_color_changed(DependencyObject*         sender,
+                                     const DependencyProperty& /*prop*/,
+                                     const core::Variant&      /*old_v*/,
+                                     const core::Variant&      new_v) noexcept
+{
+    auto* self = static_cast<Button*>(sender);
+    if (self->border_part_ == nullptr) {
+        return;
+    }
+    // 边框画刷本身经 bind_property 同步到 Border.BorderBrush；
+    // 此处仅按是否透明推导 Border 的边框粗细，保持「设色即显示 2dp 边框、
+    // 默认透明无边框且不占布局」的便捷语义（边框由基元 Border 真正绘制）。
+    const bool visible = new_v.has<paint::Brush>() && !new_v.get<paint::Brush>().is_transparent();
+    self->border_part_->set_border_thickness(
+        visible ? math::Thickness::uniform(2.0f) : math::Thickness::uniform(0.0f));
+}
+
 void Button::on_command_changed(DependencyObject*         sender,
                                 const DependencyProperty& /*prop*/,
                                 const core::Variant&      old_v,
@@ -242,7 +262,7 @@ void Button::on_can_execute_changed(ICommand* sender, void* user_data) noexcept
  * @brief Button 的交互覆盖层（组合式视觉树中间层）。
  *
  * 视觉树层级（自底向上）：
- *   Border（背景+圆角）→ InteractionLayer（State Layer+Ripple+边框）→ ContentPresenter（文字）
+ *   Border（背景+圆角+边框）→ InteractionLayer（State Layer+Ripple）→ ContentPresenter（文字）
  *
  * 继承 Control 以复用 inner_element 委托机制：其 inner_element 为 ContentPresenter，
  * 测量/排列自动转发；on_render 仅负责绘制交互覆盖（在背景之上、文字之下）。
@@ -284,7 +304,7 @@ Button::Button()
 {
     // ── 组合式视觉树装配（自内向外）─────────────────────────────────────────
     // 目标层级（自底向上）：
-    //   Border（背景+圆角）→ InteractionLayer（State Layer+Ripple+边框）→ ContentPresenter（文字）
+    //   Border（背景+圆角+边框）→ InteractionLayer（State Layer+Ripple）→ ContentPresenter（文字）
     // Button 自身不再 on_render 手画背景/边框/圆角，全部下沉到基元 Border 与覆盖层。
 
     // 1) ContentPresenter（文字层，最内）
@@ -295,14 +315,14 @@ Button::Button()
     content_part_->set_use_ink_alignment(true);
     content_part_->set_vertical_alignment(VerticalAlignment::Center);
 
-    // 2) InteractionLayer（State Layer + Ripple + 边框，中间层），其 inner_element 为 content
+    // 2) InteractionLayer（State Layer + Ripple，中间层），其 inner_element 为 content
     auto interaction = core::make_owned<InteractionLayer>(this);
     interaction->set_hit_transparent(true);     // 内部实现层不参与命中测试
     interaction->set_content(std::move(content));
 
-    // 3) Border（背景 + 圆角，最底层基元控件）
+    // 3) Border（背景 + 圆角 + 边框，最底层基元控件）
     auto border = core::make_owned<Border>();
-    // 无边框占位（边框描边由 InteractionLayer 叠加绘制，不挤压内容布局）
+    // 边框粗细默认 0（不占布局）；当 BorderColor 非透明时由 on_border_color_changed 推导为 2dp
     border->set_border_thickness(math::Thickness::uniform(0.0f));
     border_part_ = border.get();
     // 把 InteractionLayer 作为 Border 的子元素（Border 转移所有权）
@@ -353,6 +373,9 @@ Button::Button()
     //   背景 → Border（VSM 动画改 Button.Background(P1) 会经此绑定实时同步给 Border）
     border_part_->bind_property(Border::BackgroundProperty,
                                 *this, Button::BackgroundProperty);
+    //   边框画刷 → Border（边框粗细由 on_border_color_changed 按透明与否推导）
+    border_part_->bind_property(Border::BorderBrushProperty,
+                                *this, Button::BorderColorProperty);
     //   内容/内边距/前景 → ContentPresenter
     content_part_->bind_property(ContentPresenter::ContentProperty,
                                  *this, ContentControl::ContentProperty);
@@ -592,19 +615,6 @@ void Button::render_interaction(paint::Canvas& canvas, const math::Rect& rect)
             canvas.fill_complex_rounded_rect(crr,
                 paint::Brush::solid(math::Color::White.with_alpha(state_alpha)));
         }
-    }
-
-    // ── 圆角边框描边 ─────────────────────────────────────────────────────────
-    // 由 BorderColorProperty 驱动（默认透明则跳过）；描边叠加在背景之上、内容之下，
-    // 不占用布局空间（故 Border 边框粗细设为 0）。
-    const core::Variant& bc_var = get_value(BorderColorProperty);
-    const paint::Brush border_fill = bc_var.has<paint::Brush>()
-        ? bc_var.get<paint::Brush>()
-        : paint::Brush::solid(math::Color::Transparent);
-    if (!border_fill.is_transparent()) {
-        paint::Pen pen;
-        pen.width = 2.0f;
-        canvas.stroke_complex_rounded_rect(crr, border_fill, pen);
     }
 
     // ── MD3 Ripple 涟漪 ──────────────────────────────────────────────────────
