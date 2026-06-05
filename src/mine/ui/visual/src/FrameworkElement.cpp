@@ -375,6 +375,20 @@ void FrameworkElement::set_binding(
     BindingExpression::bind(bindings_.back(), binding, *this, target_prop);
 }
 
+void FrameworkElement::bind_property(
+    const DependencyProperty& target_prop,
+    DependencyObject&         source,
+    const DependencyProperty& source_prop,
+    BindingMode               mode,
+    IConverter*               converter) noexcept
+{
+    // 向内置存储追加一个空 BindingExpression，再激活元素间绑定。
+    // push_back 在此处完成，bind_property() 内部不会再触发 push_back，故引用安全。
+    bindings_.push_back(BindingExpression{});
+    BindingExpression::bind_property(
+        bindings_.back(), source, source_prop, *this, target_prop, mode, converter);
+}
+
 void FrameworkElement::clear_all_bindings() noexcept
 {
     for (auto& be : bindings_) {

@@ -539,3 +539,106 @@ TEST_CASE("binding_BindingExpr_析构时自动取消订阅") {
     // 目标仍为 30（最后一次写入的值）
     CHECK(tgt.get_value(TestDepObj::IntProp).get<int>() == 30);
 }
+
+// ============================================================================
+// BindingExpression - DP ↔ DP 元素间绑定（bind_property）
+// ============================================================================
+
+TEST_CASE("binding_bind_property_OneWay_初始与变更同步") {
+    TestDepObj src, tgt;
+    src.set_value(TestDepObj::IntProp, Variant{7});
+
+    BindingExpression expr;
+    BindingExpression::bind_property(
+        expr, src, TestDepObj::IntProp, tgt, TestDepObj::IntProp);
+
+    // 初始：目标取得源值
+    CHECK(tgt.get_value(TestDepObj::IntProp).get<int>() == 7);
+
+    // 源变更，目标自动更新
+    src.set_value(TestDepObj::IntProp, Variant{15});
+    CHECK(tgt.get_value(TestDepObj::IntProp).get<int>() == 15);
+
+    // OneWay：改目标不影响源
+    tgt.set_value(TestDepObj::IntProp, Variant{99}, ValuePriority::Local);
+    CHECK(src.get_value(TestDepObj::IntProp).get<int>() == 15);
+}
+
+TEST_CASE("binding_bind_property_TwoWay_双向同步与防循环") {
+    TestDepObj src, tgt;
+    src.set_value(TestDepObj::IntProp, Variant{1});
+
+    BindingExpression expr;
+    BindingExpression::bind_property(
+        expr, src, TestDepObj::IntProp, tgt, TestDepObj::IntProp,
+        BindingMode::TwoWay);
+
+    // 初始：源 → 目标
+    CHECK(tgt.get_value(TestDepObj::IntProp).get<int>() == 1);
+
+    // 正向：改源 → 目标更新
+    src.set_value(TestDepObj::IntProp, Variant{2});
+    CHECK(tgt.get_value(TestDepObj::IntProp).get<int>() == 2);
+
+    // 反向：改目标 → 源回写
+    tgt.set_value(TestDepObj::IntProp, Variant{30}, ValuePriority::Local);
+    CHECK(src.get_value(TestDepObj::IntProp).get<int>() == 30);
+
+    // 再次正向仍生效（防循环未破坏后续更新，且不退化为单向）
+    src.set_value(TestDepObj::IntProp, Variant{45});
+    CHECK(tgt.get_value(TestDepObj::IntProp).get<int>() == 45);
+}
+
+TEST_CASE("binding_bind_property_OneWayToSource_仅目标到源") {
+    TestDepObj src, tgt;
+    tgt.set_value(TestDepObj::IntProp, Variant{5}, ValuePriority::Local);
+
+    BindingExpression expr;
+    BindingExpression::bind_property(
+        expr, src, TestDepObj::IntProp, tgt, TestDepObj::IntProp,
+        BindingMode::OneWayToSource);
+
+    // attach 初始：把目标当前值回写到源
+    CHECK(src.get_value(TestDepObj::IntProp).get<int>() == 5);
+
+    // 改目标 → 源更新
+    tgt.set_value(TestDepObj::IntProp, Variant{8}, ValuePriority::Local);
+    CHECK(src.get_value(TestDepObj::IntProp).get<int>() == 8);
+
+    // 改源 → 目标不受影响（无正向路径）
+    src.set_value(TestDepObj::IntProp, Variant{100});
+    CHECK(tgt.get_value(TestDepObj::IntProp).get<int>() == 8);
+}
+
+TEST_CASE("binding_bind_property_OneTime_仅初始一次") {
+    TestDepObj src, tgt;
+    src.set_value(TestDepObj::IntProp, Variant{3});
+
+    BindingExpression expr;
+    BindingExpression::bind_property(
+        expr, src, TestDepObj::IntProp, tgt, TestDepObj::IntProp,
+        BindingMode::OneTime);
+
+    CHECK(tgt.get_value(TestDepObj::IntProp).get<int>() == 3);
+
+    // 之后改源，目标不更新
+    src.set_value(TestDepObj::IntProp, Variant{77});
+    CHECK(tgt.get_value(TestDepObj::IntProp).get<int>() == 3);
+}
+
+TEST_CASE("binding_bind_property_converter正向转换") {
+    TestDepObj src, tgt;
+    src.set_value(TestDepObj::IntProp, Variant{6});
+    DoubleConverter conv;
+
+    BindingExpression expr;
+    BindingExpression::bind_property(
+        expr, src, TestDepObj::IntProp, tgt, TestDepObj::IntProp,
+        BindingMode::OneWay, &conv);
+
+    // 6 经 DoubleConverter 转换为 12
+    CHECK(tgt.get_value(TestDepObj::IntProp).get<int>() == 12);
+
+    src.set_value(TestDepObj::IntProp, Variant{9});
+    CHECK(tgt.get_value(TestDepObj::IntProp).get<int>() == 18);
+}

@@ -303,6 +303,50 @@ public:
         const DependencyProperty& target_prop) noexcept;
 
     /**
+     * @brief 一步建立 DependencyProperty → DependencyProperty 的绑定（元素间 / 控件间绑定）。
+     *
+     * 等价于 WPF 的 ElementName 绑定（`{Binding ElementName=src, Path=Prop}`），
+     * 但 C++ 化为直接传入源对象与源属性描述符，无需字符串路径与运行时反射。
+     *
+     * 各模式行为：
+     *   - OneWay        ：source.source_prop 变更 → 写入 target.target_prop（TemplateBind 优先级）
+     *   - OneTime       ：attach 时求值一次写入目标，随后不再订阅
+     *   - TwoWay        ：双向同步；目标变更回写源（Local 优先级），内置防循环保护
+     *   - OneWayToSource：仅 目标 → 源；attach 时把目标当前值回写源，随后订阅目标变更
+     *
+     * @code
+     *   // 让 Border 的圆角随宿主 TextBox 的 CornerRadius 同步（OneWay）
+     *   BindingExpression::bind_property(expr,
+     *       textbox, TextBox::CornerRadiusProperty,
+     *       border,  Border::CornerRadiusProperty);
+     *
+     *   // 滑块值与进度条值双向同步
+     *   BindingExpression::bind_property(expr,
+     *       slider,   Slider::ValueProperty,
+     *       progress, ProgressBar::ValueProperty,
+     *       BindingMode::TwoWay);
+     * @endcode
+     *
+     * @param out         待激活的 BindingExpression（须未 attach）
+     * @param source      源 DependencyObject（生命周期须覆盖 out）
+     * @param source_prop 源属性描述符
+     * @param target      目标 DependencyObject（生命周期须覆盖 out）
+     * @param target_prop 目标属性描述符
+     * @param mode        绑定方向，默认 OneWay
+     * @param converter   可选值转换器（不拥有；生命周期须覆盖 out）
+     * @param conv_param  传递给 converter 的参数字符串（可选）
+     */
+    static void bind_property(
+        BindingExpression&        out,
+        DependencyObject&         source,
+        const DependencyProperty& source_prop,
+        DependencyObject&         target,
+        const DependencyProperty& target_prop,
+        BindingMode               mode       = BindingMode::OneWay,
+        IConverter*               converter  = nullptr,
+        core::StringView          conv_param = {}) noexcept;
+
+    /**
      * @brief 注入 DataContextProperty 描述符（由 mine.ui.window 静态初始化时调用）。
      *
      * 将 Window::DataContextProperty 的描述符指针传入 mine.ui.binding 层，

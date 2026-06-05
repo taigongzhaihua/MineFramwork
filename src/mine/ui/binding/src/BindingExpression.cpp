@@ -149,9 +149,15 @@ struct BindingExpression::Impl {
             value = fallback;
         }
 
-        // 将有效值以 TemplateBind 优先级写入目标
+        // 将有效值写入目标。
+        // TwoWay：以 Local 优先级写入，与反向回写对等，避免目标端的 Local 残留
+        //         遮盖正向更新（否则 TwoWay 会退化为单向）。
+        // 其余（OneWay / OneTime）：以 TemplateBind 写入，允许用户显式 Local 赋值覆盖绑定。
         if (value.has_value()) {
-            target_obj->set_value(*target_prop, std::move(value), ValuePriority::TemplateBind);
+            const ValuePriority prio = (mode == BindingMode::TwoWay)
+                ? ValuePriority::Local
+                : ValuePriority::TemplateBind;
+            target_obj->set_value(*target_prop, std::move(value), prio);
         }
 
         // 清除标志
@@ -288,7 +294,13 @@ void BindingExpression::attach(
 {
     MINE_ASSERT(static_cast<bool>(p_));
     MINE_ASSERT_MSG(!is_attached(), "BindingExpression: 已激活，请先调用 detach()");
-    MINE_ASSERT_MSG(static_cast<bool>(getter), "BindingExpression: getter 不可为空");
+    // OneWayToSource 仅有反向路径（无 getter），要求 setter 非空；其余模式要求 getter 非空。
+    if (mode == BindingMode::OneWayToSource) {
+        MINE_ASSERT_MSG(static_cast<bool>(setter),
+            "BindingExpression: OneWayToSource 模式 setter 不可为空");
+    } else {
+        MINE_ASSERT_MSG(static_cast<bool>(getter), "BindingExpression: getter 不可为空");
+    }
 
     auto& impl = *p_;
 
@@ -366,7 +378,8 @@ void BindingExpression::attach(
 
     // ── 步骤 4：TwoWay 模式：订阅目标属性变更（反向路径）────────────────────
 
-    if (impl.mode == BindingMode::TwoWay && impl.setter) {
+    if ((impl.mode == BindingMode::TwoWay ||
+         impl.mode == BindingMode::OneWayToSource) && impl.setter) {
         // 订阅目标属性的变更，触发反向回写到源
         impl.target_sub_token = target.subscribe_property_changed(
             [](DependencyObject*,
@@ -383,9 +396,15 @@ void BindingExpression::attach(
             &impl);
     }
 
-    // ── 步骤 5：立即求值一次写入目标 ─────────────────────────────────────────
+    // ── 步骤 5：初始同步 ────────────────────────────────────────
+    // OneWayToSource：方向为 目标 → 源，初始把目标当前值回写到源；
+    // 其余模式（OneWay / OneTime / TwoWay）：方向为 源 → 目标，初始求值写入目标。
 
-    impl.re_evaluate();
+    if (impl.mode == BindingMode::OneWayToSource) {
+        impl.write_back_to_source();
+    } else {
+        impl.re_evaluate();
+    }
 
     // ── 步骤 6：OneTime 模式：写入后立即取消订阅（不再响应后续变更）────────
 
@@ -579,6 +598,39 @@ void BindingExpression::bind(
 // ────────────────────────────────────────────────────────────────────────────
 // retarget：修正 Impl::target_obj 指针（供 FrameworkElement 移动时调用）
 // ────────────────────────────────────────────────────────────────────────────
+
+void BindingExpression::bind_property(
+    BindingExpression&        out,
+    DependencyObject&         source,
+    const DependencyProperty& source_prop,
+    DependencyObject&         target,
+    const DependencyProperty& target_prop,
+    BindingMode               mode,
+    IConverter*               converter,
+    core::StringView          conv_param) noexcept
+{
+    // 正向路径（源 → 目标）：OneWay / OneTime / TwoWay 需要 getter 与源订阅。
+    // OneWayToSource 无正向路径，不设 getter、不订阅源。
+    if (mode != BindingMode::OneWayToSource) {
+        out.getter = [&source, &source_prop]() noexcept -> core::Variant {
+            return source.get_value(source_prop);
+        };
+        out.deps.push_back(PropertyDependency::from_dep(source, source_prop));
+    }
+
+    // 反向路径（目标 → 源）：TwoWay / OneWayToSource 需要 setter。
+    // 以 ValuePriority::Local 写回源，符合“绑定回写等同本地赋值”的语义。
+    if (mode == BindingMode::TwoWay || mode == BindingMode::OneWayToSource) {
+        out.setter = [&source, &source_prop](const core::Variant& value) noexcept {
+            source.set_value(source_prop, value, ValuePriority::Local);
+        };
+    }
+
+    out.mode       = mode;
+    out.converter  = converter;
+    out.conv_param = conv_param;
+    out.attach(target, target_prop);
+}
 
 void BindingExpression::retarget(DependencyObject& new_target) noexcept {
     // 未 attach（p_ 为空）时为空操作

@@ -132,6 +132,31 @@ public:
         const Binding&            binding) noexcept;
 
     /**
+     * @brief 元素间绑定：把本元素某属性绑定到另一个 DependencyObject 的属性（DP ↔ DP）。
+     *
+     * 等价于 WPF 的 ElementName 绑定。绑定生命周期由本元素的内置存储管理，
+     * 无需在外部声明 BindingExpression。适用于复合控件把宿主属性同步到子元素。
+     *
+     * @code
+     *   // 让本 Border 的圆角随 host 的 CornerRadius 单向同步
+     *   border.bind_property(Border::CornerRadiusProperty,
+     *                        host, TextBox::CornerRadiusProperty);
+     * @endcode
+     *
+     * @param target_prop 本元素的目标属性
+     * @param source      源 DependencyObject（生命周期须覆盖本元素）
+     * @param source_prop 源属性描述符
+     * @param mode        绑定方向，默认 OneWay
+     * @param converter   可选值转换器（不拥有）
+     */
+    void bind_property(
+        const DependencyProperty& target_prop,
+        DependencyObject&         source,
+        const DependencyProperty& source_prop,
+        BindingMode               mode      = BindingMode::OneWay,
+        IConverter*               converter = nullptr) noexcept;
+
+    /**
      * @brief 清除本元素上已建立的所有绑定（元素析构时自动调用）。
      *
      * 手动调用适用于需要整体替换数据源的场景（重新调用 set_data_context + set_binding）。

@@ -5,6 +5,36 @@
 ## [Unreleased]
 
 ### Added
+- **mine.ui.binding / mine.ui.visual：DP↔DP 属性绑定（元素间外观联动，单/双向）**：
+
+  新增「依赖属性 → 依赖属性」绑定能力，作为组合式外观架构的粘合剂，等价 WPF ElementName 绑定：
+  - `BindingExpression::bind_property(out, source, source_prop, target, target_prop, mode,
+    converter, conv_param)`（新增静态自由工厂）：以「源对象 + 源属性描述符」为源，
+    无需字符串路径与反射，支持 OneWay / OneTime / TwoWay / OneWayToSource 四种方向
+  - `FrameworkElement::bind_property(target_prop, source, source_prop, mode, converter)`
+    （新增便捷成员）：绑定写入元素内置 `bindings_`，生命周期自动托管
+  - 完善 `BindingExpression::attach()` 对 `OneWayToSource` 的支持：反向订阅扩展为
+    `(TwoWay || OneWayToSource)`，初始同步按方向区分（OneWayToSource 初始把目标值回写源）；
+    放宽 getter 非空断言（OneWayToSource 仅需 setter）
+  - **修正 TwoWay 写入优先级**：正向写目标由 `TemplateBind` 改为 `Local`，与反向回写对等，
+    避免目标端 Local 残留遮盖正向更新导致 TwoWay 退化为单向；OneWay/OneTime 仍写 `TemplateBind`
+    （保证用户显式 `set_xxx()` 可覆盖绑定）
+  - 防循环：复用 `is_updating` 标志，任一方向更新期间阻断对端回调
+  - 更新 `BindingMode.h` 注释（移除过时的「M2 未实现」描述）
+  - 新增单元测试 `binding_bind_property_*`：OneWay/TwoWay/OneWayToSource/OneTime/converter
+    共 5 例，全部通过（mine.ui.binding.test：27 用例 60 断言全绿）
+
+- **docs：新增控件外观架构设计文档 `docs/22-appearance-architecture.md`**：
+
+  确立 MineUI 控件外观最终架构「继承式基元绘制 + 组合式装配 + DP↔DP 绑定」，取代已废弃的
+  运行时 ControlTemplate 方案：
+  - 三类元素职责划分（基元 / 复合 / 容器）；外观定制四层次（属性 / 样式 / 状态动画 / 结构）
+  - 组合式复合控件范式（构造期组装基元子树 + `bind_property` 同步宿主属性到子元素）
+  - DP↔DP 绑定系统完整说明（四模式、双接口、优先级规则、防循环、转换器）
+  - 与已废弃 ControlTemplate 的对照、与 MML/mmlc 的演进关系、决策记录
+  - `docs/20`、`docs/21-controls-architecture`、`docs/21-control-authoring` 顶部新增架构变更横幅
+    指向 `docs/22`；`docs/README.md` 索引补充 22 条目
+
 - **mine.ui.controls：TextBox 外观升级至 MD3 Outlined Text Field 风格**：
 
   实现 Material Design 3 Outlined Text Field 规范：

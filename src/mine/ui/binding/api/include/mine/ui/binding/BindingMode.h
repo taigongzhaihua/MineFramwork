@@ -2,8 +2,8 @@
  * @file BindingMode.h
  * @brief 绑定方向枚举，控制数据在源与目标之间的流动方向。
  *
- * M1.1 实现：OneWay
- * M2 实现：TwoWay、OneWayToSource（需要 setter + 防循环机制）
+ * 已实现：OneWay / OneTime / TwoWay / OneWayToSource。
+ * 支持来源：INotifyPropertyChanged（VM → UI）与 DependencyProperty（DP ↔ DP）。
  */
 
 #pragma once
@@ -23,7 +23,6 @@ enum class BindingMode : uint8_t {
      * @brief 单向绑定（源 → 目标）。
      *
      * 源属性变更时自动更新目标属性；目标属性的变更不影响源。
-     * M1.1 实现此模式。
      */
     OneWay,
 
@@ -31,8 +30,8 @@ enum class BindingMode : uint8_t {
      * @brief 双向绑定（源 ↔ 目标）。
      *
      * 源或目标任一端变更均触发对方更新。
-     * 内置防循环保护（is_updating 标志）。
-     * M2 实现此模式。
+     * 内置防循环保护（is_updating 标志）。支持 INPC 与 DP ↔ DP 两类来源。
+     * 正向与反向均以 ValuePriority::Local 写入，两端对等。
      */
     TwoWay,
 
@@ -40,7 +39,7 @@ enum class BindingMode : uint8_t {
      * @brief 单向回写绑定（目标 → 源）。
      *
      * 目标属性变更时自动写回源，源变更不影响目标。
-     * M2 实现此模式。
+     * attach 时把目标当前值初始回写一次。
      */
     OneWayToSource,
 
