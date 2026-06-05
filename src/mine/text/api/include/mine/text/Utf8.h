@@ -86,4 +86,28 @@ inline uint32_t utf32_to_utf8(uint32_t cp, char out[4]) noexcept
     return 4u;
 }
 
+/**
+ * @brief 统计 UTF-8 字节序列中的完整字符数。
+ *
+ * @param p   字节序列起始指针
+ * @param len 字节长度
+ * @return    完整字符数（截断的不完整尾字节不计入）
+ */
+inline uint32_t count_utf8_chars(const char* p, uint32_t len) noexcept
+{
+    const char* end   = p + len;
+    uint32_t    count = 0;
+    while (p < end) {
+        const auto c    = static_cast<uint8_t>(*p);
+        uint32_t   step = (c < 0x80u) ? 1u
+                        : (c < 0xE0u) ? 2u
+                        : (c < 0xF0u) ? 3u
+                        :               4u;
+        if (static_cast<uint32_t>(end - p) < step) break;
+        p += step;
+        ++count;
+    }
+    return count;
+}
+
 }  // namespace mine::text

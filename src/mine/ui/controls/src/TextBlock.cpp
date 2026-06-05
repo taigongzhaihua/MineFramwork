@@ -9,6 +9,7 @@
 #include <mine/ui/controls/TextBlock.h>
 
 #include <mine/text/FontFace.h>
+#include <mine/text/Utf8.h>
 #include <mine/paint/Canvas.h>
 #include <mine/paint/Brush.h>
 #include <mine/ui/property/DependencyProperty.h>
@@ -18,46 +19,6 @@
 #include <cstdio>  // 调试用，验证 char_spacing_px_ 运行时值
 
 namespace mine::ui {
-
-// ============================================================================
-// 内部 UTF-8 辅助函数
-// ============================================================================
-
-/**
- * @brief 统计 [p, p+len) 内完整 UTF-8 字符数。
- */
-static uint32_t count_utf8_chars(const char* p, uint32_t len) noexcept
-{
-    const char* end   = p + len;
-    uint32_t    count = 0;
-    while (p < end) {
-        const auto c    = static_cast<uint8_t>(*p);
-        uint32_t   step = (c < 0x80u) ? 1u
-                        : (c < 0xE0u) ? 2u
-                        : (c < 0xF0u) ? 3u
-                        :               4u;
-        if (static_cast<uint32_t>(end - p) < step) break;
-        p += step;
-        ++count;
-    }
-    return count;
-}
-
-/**
- * @brief 返回从 pos 开始的下一个 UTF-8 字符边界（即下一字符的起始偏移）。
- */
-static uint32_t next_utf8_boundary(const char* data,
-                                   uint32_t    pos,
-                                   uint32_t    end_pos) noexcept
-{
-    if (pos >= end_pos) return end_pos;
-    const auto c    = static_cast<uint8_t>(data[pos]);
-    uint32_t   step = (c < 0x80u) ? 1u
-                    : (c < 0xE0u) ? 2u
-                    : (c < 0xF0u) ? 3u
-                    :               4u;
-    return std::min(pos + step, end_pos);
-}
 
 /// 省略号 UTF-8 编码（U+2026）
 static constexpr const char  kEllipsis[]  = "\xE2\x80\xA6";
@@ -519,11 +480,11 @@ float TextBlock::measure_segment(const char* p, uint32_t len) const noexcept
         w = face->measure_text(p, len, font_size_px_);
     } else {
         // 无字体：按字符数估算（ASCII 平均比例 0.55）
-        w = static_cast<float>(count_utf8_chars(p, len)) * font_size_px_ * 0.55f;
+        w = static_cast<float>(text::count_utf8_chars(p, len)) * font_size_px_ * 0.55f;
     }
     // 叠加字符间距
     if (char_spacing_px_ != 0.0f) {
-        w += static_cast<float>(count_utf8_chars(p, len)) * char_spacing_px_;
+        w += static_cast<float>(text::count_utf8_chars(p, len)) * char_spacing_px_;
     }
     return w;
 }
@@ -565,7 +526,7 @@ void TextBlock::build_lines(float max_content_width)
             float    accum_w  = 0.0f;
 
             while (line_end < seg_end) {
-                const uint32_t next_b = next_utf8_boundary(data, line_end, seg_end);
+                const uint32_t next_b = text::utf8_next(data, line_end, seg_end);
                 const float    cw     = measure_segment(data + line_end, next_b - line_end);
                 // 首字符强制放入，后续若超出则停止
                 if (line_end > pos && accum_w + cw > max_content_width) break;
@@ -574,7 +535,7 @@ void TextBlock::build_lines(float max_content_width)
             }
             // 保证至少放入一个字符（防死循环）
             if (line_end == pos) {
-                line_end = next_utf8_boundary(data, pos, seg_end);
+                line_end = text::utf8_next(data, pos, seg_end);
                 accum_w  = measure_segment(data + pos, line_end - pos);
             }
 
@@ -709,7 +670,7 @@ void TextBlock::build_lines(float max_content_width)
 
                 if (avail > 0.0f) {
                     while (trim_pos < line.disp_length) {
-                        const uint32_t nb = next_utf8_boundary(p, trim_pos, line.disp_length);
+                        const uint32_t nb = text::utf8_next(p, trim_pos, line.disp_length);
                         const float    cw = measure_segment(p + trim_pos, nb - trim_pos);
                         if (accum + cw > avail) break;
                         accum   += cw;
@@ -745,7 +706,7 @@ void TextBlock::build_lines(float max_content_width)
 
                     if (avail > 0.0f) {
                         while (trim_pos < last.disp_length) {
-                            const uint32_t nb = next_utf8_boundary(p, trim_pos,
+                            const uint32_t nb = text::utf8_next(p, trim_pos,
                                                                     last.disp_length);
                             const float cw = measure_segment(p + trim_pos, nb - trim_pos);
                             if (accum + cw > avail) break;
