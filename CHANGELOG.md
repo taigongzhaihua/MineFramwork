@@ -4,6 +4,34 @@
 
 ## [Unreleased]
 
+### Changed
+- **mine.ui.controls：Border 升级为合格基元控件（外观完全 DP 化 + 圆角支持）**：
+
+  作为组合式外观架构（docs/22）的地基改造。此前 Border 的边框/背景为 plain member，
+  `on_render` 读 plain member 而非 DP，导致 `bind_property` 绑定到 Border 是「死」的
+  （绑定写 DP 但绘制不读 DP），是组合式复合控件无法落地的根因。本次改造：
+  - 新增 4 个外观依赖属性：`BackgroundProperty`、`BorderBrushProperty`、
+    `BorderThicknessProperty`、`CornerRadiusProperty`（math::CornerRadii，默认直角）
+  - 移除 plain member（`border_thickness_`/`border_color_`/`background_`），
+    所有访问器改为读写 DP（单一真相源）；`on_measure`/`on_arrange`/`on_render` 全部从 DP 取值
+  - `on_render` 支持圆角：圆角>0 时用 `fill_complex_rounded_rect` + `stroke_complex_rounded_rect`
+    绘制；圆角=0 时走直角快路径（`fill_rect` + `stroke_bordered_rect`），历史视觉零变化
+  - 新增规范访问器 `border_brush()`/`set_border_brush()`、`corner_radius()`/`set_corner_radius()`；
+    保留 `border_color()`/`set_border_color()` 作为兼容别名（转发 BorderBrushProperty）
+  - 现在 `bind_property` 可把宿主外观属性单向同步到 Border，复合控件得以把外框绘制
+    从自身 `on_render` 下沉到 Border，实现外观与逻辑分离
+  - 新增单元测试：`controls_Border_外观属性经依赖属性读写一致`、
+    `controls_Border_bind_property_圆角随源同步`
+
+### Fixed
+- **mine.ui.controls（测试）：修复 Button 状态往返测试引用已移除 API**：
+
+  `controls_Button_Pressed到Hovered再回Normal时恢复Normal外观` 仍调用早已移除的
+  `set_background_hovered()`/`set_background_pressed()`（Button MD3 改造遗留），导致
+  controls 测试无法编译。改为不硬编码中间态颜色（其值由默认样式与动画时序决定，
+  单次 tick 未必达终值），仅驱动状态机往返并验证回到 Normal 后恢复本地基线色。
+  （controls 测试：45 用例 106 断言全通过）
+
 ### Added
 - **mine.ui.binding / mine.ui.visual：DP↔DP 属性绑定（元素间外观联动，单/双向）**：
 
