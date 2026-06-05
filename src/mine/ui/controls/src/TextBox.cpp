@@ -595,9 +595,6 @@ TextBox::TextBox()
     //   背景 → Border
     border_part_->bind_property(Border::BackgroundProperty,
                                 *this, TextBox::BackgroundProperty);
-    //   指示线画刷 → Border 边框画刷
-    border_part_->bind_property(Border::BorderBrushProperty,
-                                *this, TextBox::IndicatorBrushProperty);
     //   State Layer 蒙版色 → StateLayerBorder 背景（VSM 缓动实时同步）
     state_border_->bind_property(Border::BackgroundProperty,
                                  *this, TextBox::StateLayerBrushProperty);
@@ -896,6 +893,21 @@ void TextBox::render_text_content(paint::Canvas& canvas)
     const math::Thickness pad = pad_var.has<math::Thickness>()
         ? pad_var.get<math::Thickness>()
         : math::Thickness{ 16.0f, 12.0f, 16.0f, 12.0f };
+
+    // ── 底部指示线（MD3 Filled Text Field）──────────────────────────────
+    // Border 圆角描边（stroke_complex_rounded_rect）以 pen.width=t.left 确定线宽，
+    // 无法表达仅底边有厚度的语义，故在此手画填充矩形。
+    const core::Variant& ic_var = get_value(IndicatorBrushProperty);
+    const paint::Brush indicator_brush = ic_var.has<paint::Brush>()
+        ? ic_var.get<paint::Brush>()
+        : paint::Brush::solid_rgb(0x79747E);
+    const core::Variant& it_var = get_value(IndicatorThicknessProperty);
+    const float indicator_w = it_var.has<float>() ? it_var.get<float>() : 1.0f;
+    if (!indicator_brush.is_transparent() && indicator_w > 0.0f) {
+        canvas.fill_rect(
+            { rect.x, rect.y + rect.height - indicator_w, rect.width, indicator_w },
+            indicator_brush);
+    }
 
     const float text_x0 = rect.x + pad.left;
     const float text_y0 = rect.y + pad.top;
