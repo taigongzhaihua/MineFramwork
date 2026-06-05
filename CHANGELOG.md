@@ -25,6 +25,23 @@
     独立为 Border 基元 + 状态机动画）彻底取代，根因诊断仍保留以备查。
 
 ### Changed
+- **mine.ui.controls：TextBox 外观组合式重构下沉到 Border 基元**：
+
+  TextBox 此前全在 on_render（约 180 行）手画背景填充、hover 蒙版、四边描边、文本、
+  选区高亮、光标。本次参照 Button 模式，将外观要素下沉到 Border 基元组合子树：
+  - 新增 `StateLayerBrushProperty`（默认 OnSurface 全透明，Hovered StyleTrigger=8%，
+    VSM Storyboard 插值缓动）
+  - 视觉树三层：`Border(背景+底部指示线) → StateLayerBorder(hover蒙版) → TextBoxContentLayer(文本)`
+  - `TextBoxContentLayer` 为私有嵌套 Control，`on_render` 调用宿主 `render_text_content`
+    绘制文本/选区/光标/占位文字
+  - 构造函数 `bind_property`（TextBox.Background → Border.Background、
+    IndicatorBrush → Border.BorderBrush、StateLayerBrush → StateLayerBorder.Background）
+  - `on_arrange` 同步圆角到两个 Border + 推导指示线粗细到 Border 底边
+  - `on_render` 清空（所有外观下沉），保留 `render_text_content` 负责文本绘制
+  - 默认样式：Hovered 新增 StateLayerBrush 8% OnSurface，Disabled 新增 StateLayerBrush 全透明；
+    VSM 过渡加 StateLayerBrush 缓动（Normal 120ms/Hovered 80ms）；Disabled 不加过渡（即时 P60 覆盖）
+  - controls 测试 50 用例 124 断言通过，sample.01/02 构建通过
+
 - **mine.ui.controls：State Layer 蒙版独立为 Border 基元，hover/press 反馈改由状态机动画驱动**：
 
   承接上一条 Fixed（手动 alpha 缓动）的彻底重构——把"手画 + 手动缓动"的 State Layer

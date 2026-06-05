@@ -9,6 +9,7 @@
  */
 
 #include <mine/ui/controls/TextBox.h>
+#include <mine/ui/controls/Border.h>
 
 #include <mine/ui/window/Window.h>
 #include <mine/platform/IMEService.h>
@@ -383,6 +384,18 @@ const DependencyProperty& TextBox::IndicatorBrushProperty =
             .affects_render = true,
         });
 
+// StateLayerBrushProperty — State Layer 蒙版画刷（MD3 hover 反馈层）
+// 默认 OnSurface 全透明（避免与非透明白插值时 RGB 由 0 渐变中途偏暗）。
+// Hovered 状态终值 8% 由默认样式 StyleTrigger 写入，VSM Storyboard 插值缓动；
+// 经 bind_property 同步到独立的 State Layer Border 背景。
+const DependencyProperty& TextBox::StateLayerBrushProperty =
+    register_property<TextBox>(
+        "StateLayerBrush",
+        core::Variant{ paint::Brush::solid(math::Color{ 0.11f, 0.11f, 0.14f, 0.0f }) },
+        PropertyMetadata{
+            .affects_render = true,
+        });
+
 // ============================================================================
 // 路由事件注册
 // ============================================================================
@@ -424,12 +437,16 @@ static style::Style& default_textbox_style()
                        core::Variant{ Brush::solid_rgb(0x79747E) } });  // MD3 Outline
         s.add_setter({ &TextBox::IndicatorThicknessProperty,
                        core::Variant{ 1.0f } });                       // Normal 1dp
+        s.add_setter({ &TextBox::StateLayerBrushProperty,
+                       core::Variant{ Brush::solid(Color{ 0.11f, 0.11f, 0.14f, 0.0f }) } });  // 全透明
 
         // ── P4 StyleTrigger：Hovered 状态终值 ──────────────────────────────
         style::VisualStateSetters hovered;
         hovered.state_name = "Hovered";
         hovered.setters.push_back({ &TextBox::IndicatorBrushProperty,
             core::Variant{ Brush::solid_rgb(0x1C1B1F) } });  // MD3 On Surface
+        hovered.setters.push_back({ &TextBox::StateLayerBrushProperty,
+            core::Variant{ Brush::solid(Color{ 0.11f, 0.11f, 0.14f, 0.08f }) } });  // OnSurface 8%
         s.add_state_setters(std::move(hovered));
 
         // ── P4 StyleTrigger：Focused 状态终值 ──────────────────────────────
@@ -448,12 +465,41 @@ static style::Style& default_textbox_style()
             core::Variant{ Brush::solid(Color{ 0.11f, 0.11f, 0.14f, 0.38f }) } });  // On Surface 38%
         disabled.setters.push_back({ &TextBox::IndicatorBrushProperty,
             core::Variant{ Brush::solid(Color{ 0.11f, 0.11f, 0.14f, 0.12f }) } });  // On Surface 12%
+        disabled.setters.push_back({ &TextBox::StateLayerBrushProperty,
+            core::Variant{ Brush::solid(Color{ 0.11f, 0.11f, 0.14f, 0.0f }) } });  // 禁用无蒙版
         s.add_state_setters(std::move(disabled));
 
         return s;
     }();
     return s;
 }
+
+// ============================================================================
+// 文本内容渲染层（私有嵌套类）
+// ============================================================================
+
+/**
+ * @brief TextBox 的文本内容渲染层（组合式视觉树最内层）。
+ *
+ * 视觉树层级（自底向上）：
+ *   Border（背景+指示线边框）→ StateLayerBorder（hover 蒙版）→ TextBoxContentLayer（文本）
+ *
+ * 继承 Control 以可利用 inner_element 机制（但 TextBox 不将其设为 inner_element，
+ * 而是作为 State Layer Border 的 child，由 TextBox 直接管理布局）。
+ * on_render 负责文本、选区高亮、光标、占位文字的绘制。
+ */
+class TextBox::TextBoxContentLayer : public Control {
+public:
+    explicit TextBoxContentLayer(TextBox* owner) noexcept : owner_(owner) {}
+
+protected:
+    void on_render(paint::Canvas& canvas) override {
+        owner_->render_text_content(canvas);
+    }
+
+private:
+    TextBox* owner_;
+};
 
 // ============================================================================
 // 生命周期
@@ -464,6 +510,37 @@ TextBox::TextBox()
     // 声明为可聚焦（InputRouter::dispatch_mouse_event 在 MouseDown 时自动调用 set_keyboard_focus）
     set_focusable(true);
 
+    // ── 组合式视觉树装配（自内向外）─────────────────────────────────────────
+    // 目标层级（自底向上）：
+    //   Border（背景+底部指示线）→ StateLayerBorder（hover 蒙版）→ TextBoxContentLayer（文本）
+    // TextBox 自身不再 on_render 手画背景/蒙版/指示线，全部下沉到基元 Border。
+
+    // 1) TextBoxContentLayer（文本渲染层，最内）
+    auto content_layer = core::make_owned<TextBoxContentLayer>(this);
+    content_layer_ = content_layer.get();
+
+    // 2) StateLayerBorder（hover 半透明蒙版叠加层），其 child 为 content_layer
+    auto state_border = core::make_owned<Border>();
+    state_border->set_border_thickness(math::Thickness::uniform(0.0f));  // 纯叠加层
+    state_border_ = state_border.get();
+    {
+        auto deleter = content_layer.get_deleter();
+        UIElement* raw = content_layer.release();
+        state_border->set_child(core::OwnedPtr<UIElement>{ raw, deleter });
+    }
+
+    // 3) Border（背景 + 底部指示线，最底层基元控件），其 child 为 state_border
+    auto border = core::make_owned<Border>();
+    // 底部指示线粗细由 IndicatorThicknessProperty 控制（经 bind_property 同步），
+    // 默认 0 避免未初始化闪动
+    border->set_border_thickness(math::Thickness::uniform(0.0f));
+    border_part_ = border.get();
+    {
+        auto deleter = state_border.get_deleter();
+        UIElement* raw = state_border.release();
+        border->set_child(core::OwnedPtr<UIElement>{ raw, deleter });
+    }
+
     // ── 配置 VisualStateManager（模板层第二层） ─────────────────────────────
     style::VisualStateManager vsm{ *this };
     vsm.define_state("Normal");
@@ -471,7 +548,7 @@ TextBox::TextBox()
     vsm.define_state("Focused");
     vsm.define_state("Disabled");
 
-    // 过渡动画：指示线颜色和粗细插值
+    // 过渡动画：指示线颜色/粗细 + State Layer 蒙版缓动
     auto* tb_ptr = this;
     vsm.add_transition("*", "Normal",
         [tb_ptr](animation::Storyboard& sb) {
@@ -481,10 +558,16 @@ TextBox::TextBox()
             sb.animate_dp(*tb_ptr, TextBox::IndicatorThicknessProperty,
                           animation::Duration::milliseconds(120.0f),
                           animation::QuadEaseOut);
+            sb.animate_dp(*tb_ptr, TextBox::StateLayerBrushProperty,
+                          animation::Duration::milliseconds(120.0f),
+                          animation::QuadEaseOut);
         });
     vsm.add_transition("*", "Hovered",
         [tb_ptr](animation::Storyboard& sb) {
             sb.animate_dp(*tb_ptr, TextBox::IndicatorBrushProperty,
+                          animation::Duration::milliseconds(80.0f),
+                          animation::QuadEaseOut);
+            sb.animate_dp(*tb_ptr, TextBox::StateLayerBrushProperty,
                           animation::Duration::milliseconds(80.0f),
                           animation::QuadEaseOut);
         });
@@ -497,13 +580,30 @@ TextBox::TextBox()
                           animation::Duration::milliseconds(120.0f),
                           animation::QuadEaseOut);
         });
+    // 注意：Disabled 不配置过渡——它是权限状态，必须即时跳变：
+    // 走无动画路径 → apply_state_animation 以 P60 覆盖 Local(P50)。
+    // Normal 过渡的 animate_dp 负责 Disabled→Normal 回弹缓动。
 
     // 连接样式层（P4 StyleTrigger 终值 + P5 StyleSetter 基线）
     vsm.set_style(&default_textbox_style());
     set_visual_state_manager(std::move(vsm));
 
-    // 应用 P5 基线值（Normal 背景色、前景色、边框色）
+    // 应用 P5 基线值（Normal 背景色、前景色、指示线色、State Layer 透明）
     default_textbox_style().apply(*this);
+
+    // 组合式装配绑定（DP↔DP 绑定，绑定建立时自动初始同步）：
+    //   背景 → Border
+    border_part_->bind_property(Border::BackgroundProperty,
+                                *this, TextBox::BackgroundProperty);
+    //   指示线画刷 → Border 边框画刷
+    border_part_->bind_property(Border::BorderBrushProperty,
+                                *this, TextBox::IndicatorBrushProperty);
+    //   State Layer 蒙版色 → StateLayerBorder 背景（VSM 缓动实时同步）
+    state_border_->bind_property(Border::BackgroundProperty,
+                                 *this, TextBox::StateLayerBrushProperty);
+
+    // 安装 Border 作为 TextBox 内部元素（由 Control::set_inner_element 管理生命周期）
+    set_inner_element(std::move(border));
 
     // ── 注册事件处理器 ─────────────────────────────────────────────────────
     add_handler(input::MouseEnterEvent(), &TextBox::on_mouse_enter_router, this);
@@ -739,19 +839,43 @@ void TextBox::on_arrange(math::Rect final_rect)
 {
     FrameworkElement::on_arrange(final_rect);
 
-    // 设置圆角裁剪区：使用四角独立半径
+    // 同步圆角到各 Border（Border 子元素填充整个 TextBox）
     const core::Variant& cr_var = get_value(CornerRadiusProperty);
-    const math::CornerRadii clip_radii = cr_var.has<math::CornerRadii>()
+    const math::CornerRadii radii = cr_var.has<math::CornerRadii>()
         ? cr_var.get<math::CornerRadii>()
         : math::CornerRadii::uniform(4.0f);
-    set_clip_complex_rounded_rect(math::ComplexRoundedRect{ final_rect, clip_radii });
+
+    if (border_part_ != nullptr) {
+        border_part_->set_corner_radius(radii);
+    }
+    if (state_border_ != nullptr) {
+        state_border_->set_corner_radius(radii);
+    }
+
+    // 同步指示线粗细到 Border 底边（仅底边有厚度，模拟 MD3 底部指示线）
+    const core::Variant& it_var = get_value(IndicatorThicknessProperty);
+    const float indicator_w = it_var.has<float>() ? it_var.get<float>() : 1.0f;
+    if (border_part_ != nullptr) {
+        border_part_->set_border_thickness(
+            math::Thickness{ 0.0f, 0.0f, 0.0f, indicator_w });
+    }
+
+    // TextBoxContentLayer clip 由 on_render 内 clip_rect 控制，
+    // 保留原有 set_clip_complex_rounded_rect 用于 HitTest 边界
+    set_clip_complex_rounded_rect(math::ComplexRoundedRect{ final_rect, radii });
 }
 
 // ============================================================================
 // 渲染
 // ============================================================================
 
-void TextBox::on_render(paint::Canvas& canvas)
+void TextBox::on_render(paint::Canvas& /*canvas*/)
+{
+    // 外观（背景、蒙版、指示线）已全部分散到 Border 基元与 render_text_content。
+    // TextBox 自身的 on_render 不再绘制任何内容。
+}
+
+void TextBox::render_text_content(paint::Canvas& canvas)
 {
     const math::Rect rect = bounds_rect();
     if (rect.empty()) {
@@ -761,44 +885,13 @@ void TextBox::on_render(paint::Canvas& canvas)
     // 每次渲染前确保滚动偏移在有效范围内
     clamp_scroll_offsets();
 
-    // 读取四角独立圆角半径
     const core::Variant& cr_var = get_value(CornerRadiusProperty);
     const math::CornerRadii bg_radii = cr_var.has<math::CornerRadii>()
         ? cr_var.get<math::CornerRadii>()
         : math::CornerRadii::uniform(4.0f);
     const math::ComplexRoundedRect bg_crr{ rect, bg_radii };
 
-    // ── 1. 背景填充（透明）─────────────────────────────────────────────
-    const core::Variant& bg_var = get_value(BackgroundProperty);
-    const paint::Brush bg = bg_var.has<paint::Brush>()
-        ? bg_var.get<paint::Brush>()
-        : paint::Brush::solid(math::Color::Transparent);
-    if (!bg.is_transparent()) {
-        canvas.fill_complex_rounded_rect(bg_crr, bg);
-    }
-
-    // ── 2. 状态层叠加（MD3 Hover State Layer：On Surface 8%）───────────
-    if (is_enabled_ && is_hovered_ && !is_focused_) {
-        canvas.fill_complex_rounded_rect(bg_crr,
-            paint::Brush::solid(math::Color{ 0.11f, 0.11f, 0.14f, 0.08f }));
-    }
-
-    // ── 3. 四边描边（MD3 Outlined Text Field）───────────────────────────
-    const core::Variant& ic_var = get_value(IndicatorBrushProperty);
-    const paint::Brush outline_brush = ic_var.has<paint::Brush>()
-        ? ic_var.get<paint::Brush>()
-        : paint::Brush::solid_rgb(0x79747E);
-
-    const core::Variant& it_var = get_value(IndicatorThicknessProperty);
-    const float outline_w = it_var.has<float>() ? it_var.get<float>() : 1.0f;
-
-    if (!outline_brush.is_transparent() && outline_w > 0.0f) {
-        paint::Pen pen;
-        pen.width = outline_w;
-        canvas.stroke_complex_rounded_rect(bg_crr, outline_brush, pen);
-    }
-
-    // ── 4. 准备文字绘制区域（减去内边距）────────────────────────────────
+    // ── 准备文字绘制区域（减去内边距）─────────────────────────────────────
     const core::Variant& pad_var = get_value(PaddingProperty);
     const math::Thickness pad = pad_var.has<math::Thickness>()
         ? pad_var.get<math::Thickness>()

@@ -33,7 +33,7 @@
 
 namespace mine::paint { class Canvas; }
 namespace mine::ui::input { class MouseEventArgs; class KeyEventArgs; class TextInputEventArgs; }
-namespace mine::ui { class Window; }
+namespace mine::ui { class Border; class Window; }
 
 namespace mine::ui {
 
@@ -162,6 +162,16 @@ public:
      */
     static const DependencyProperty& IndicatorBrushProperty;
 
+    /**
+     * @brief State Layer 蒙版画刷（Variant 存储 paint::Brush）。
+     *
+     * MD3 Filled Text Field 的 hover 交互反馈层。
+     * Default = Brush::solid(Color{0.11f,0.11f,0.14f,0})（OnSurface 全透明）。
+     * Hovered 状态终值 8% 由样式 StyleTrigger 写入，VSM Storyboard 插值缓动；
+     * 经 bind_property 同步到独立的 State Layer Border 背景。
+     */
+    static const DependencyProperty& StateLayerBrushProperty;
+
     // ── 生命周期 ───────────────────────────────────────────────────────────
 
     TextBox();
@@ -272,6 +282,13 @@ protected:
     void on_render(paint::Canvas& canvas) override;
     void on_arrange(math::Rect final_rect) override;
 
+    /**
+     * @brief 文本内容渲染（由 TextBoxContentLayer::on_render 转发调用）。
+     *
+     * 绘制文本、选区高亮、光标、占位文字。背景/蒙版/指示线已下沉到 Border 基元。
+     */
+    void render_text_content(paint::Canvas& canvas);
+
     // ── 视觉状态 ──────────────────────────────────────────────────────────
 
     [[nodiscard]] ControlVisualState compute_visual_state() const override;
@@ -280,6 +297,13 @@ protected:
 
 private:
     // ── 事件处理路由静态方法 ──────────────────────────────────────────────
+
+    /**
+     * @brief 文本内容渲染层（组合式视觉树最内层），负责文本、选区高亮、光标绘制。
+     *
+     * 作为 TextBox 的私有嵌套类，可访问 TextBox 的所有私有状态。完整定义在 TextBox.cpp 中。
+     */
+    class TextBoxContentLayer;
 
     static void on_mouse_enter_router(void*, RoutedEventArgs&, void* ud);
     static void on_mouse_leave_router(void*, RoutedEventArgs&, void* ud);
@@ -492,7 +516,12 @@ private:
     float  scroll_offset_x_ = 0.0f;  ///< 水平滚动偏移（像素，正值 = 内容左移）
     float  scroll_offset_y_ = 0.0f;  ///< 垂直滚动偏移（像素，正值 = 内容上移）
 
+    /// 组合式视觉树成员（外观全部下沉到 Border 基元）
+    Border* border_part_  = nullptr;  ///< 背景+底部指示线绘制的底层 Border
+    Border* state_border_ = nullptr;  ///< State Layer 蒙版层 Border（hover 叠加，VSM 驱动）
 
+    /// 文本渲染层指针（组合式视觉树最内层）
+    TextBoxContentLayer* content_layer_ = nullptr;
 };
 
 } // namespace mine::ui
