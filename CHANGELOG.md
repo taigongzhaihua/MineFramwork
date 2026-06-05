@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+### Fixed
+- **mine.ui.controls：修复自定义背景 Button 的 Hovered/Pressed 过渡瞬时跳变（State Layer 蒙版改缓动）**：
+
+  根因定位：当 Button 调用 `set_background()`（写入 Local P50）后，VSM 背景色动画在
+  `Storyboard::resolve_and_begin` 中解析终值时走 `has_local` 分支，`to` 取最高优先级值
+  （即 Local 色本身），导致 `from == to` 背景色动画零变化；此时视觉反馈全靠
+  `render_interaction` 的 State Layer 半透明蒙版，而蒙版 alpha 此前按 `is_hovered_`/
+  `is_pressed_` 直接取 0.08/0.12 离散切换，状态一变下一帧整层蒙版突现/突隐，故瞬时。
+  （唯独 Disabled→Normal 缓动，因其走背景色 Storyboard：from=禁用灰 P60、to=Local 色，from≠to。）
+  - State Layer 蒙版 alpha 改为缓动：新增 `state_layer_`（current_alpha/target_alpha），
+    `on_visual_state_changed` 仅在背景为 Local 色时按状态置目标 alpha（Hover 0.08/Press 0.12/
+    其他 0），`anim_tick_callback` 每帧朝目标线性逼近（约 120ms 全程），淡入淡出
+  - 保留「仅 Local 背景才用蒙版」语义：背景来自样式/动画时 target 恒 0，由背景色过渡本身
+    提供反馈，避免双重叠加偏色
+  - 效果：自定义背景按钮 Hover/Press 蒙版平滑淡入淡出；无 Local 背景按钮仍走背景色渐变；
+    Disabled→Normal 维持原背景色缓动。三处状态过渡均不再瞬时
+  - controls 测试 49 用例 118 断言通过，sample.01-mvvm-binding 构建通过
+
 ### Changed
 - **mine.ui.controls：Button 边框描边下沉到 Border 基元（彻底交由组合子树绘制）**：
 

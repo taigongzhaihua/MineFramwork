@@ -332,6 +332,15 @@ private:
         bool  active     = false; ///< 是否正在播放
     };
     RippleState ripple_;  ///< 当前涟漪状态
+
+    /// MD3 State Layer 缓动状态：Hover/Press 半透明蒙版的 alpha 做淡入淡出，
+    /// 避免状态切换时整层蒙版瞬时突现/突隐（仅当背景为 Local 色、背景色动画无变化时启用）。
+    struct StateLayerState {
+        float current_alpha = 0.0f;  ///< 当前渲染用 alpha（由 tick 每帧朝 target 缓动）
+        float target_alpha  = 0.0f;  ///< 目标 alpha（Hover=0.08 / Press=0.12 / 其他=0）
+    };
+    StateLayerState state_layer_;  ///< 当前 State Layer 蒙版缓动状态
+
     ContentPresenter*        content_part_           = nullptr;  ///< 文字层（组合式视觉树最内层，bind_property 目标）
     Border*                  border_part_            = nullptr;  ///< 背景/圆角基元层（组合式视觉树最底层，圆角同步目标）
     style::Style*            vsm_style_              = nullptr;  ///< 用户指定的 VSM 样式（nullptr 则用 default_button_style）

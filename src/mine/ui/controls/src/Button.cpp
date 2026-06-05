@@ -597,24 +597,17 @@ void Button::render_interaction(paint::Canvas& canvas, const math::Rect& rect)
     const math::CornerRadii radii = compute_radii(rect.height);
     const math::ComplexRoundedRect crr{ rect, radii };
 
-    // ── MD3 State Layer ─────────────────────────────────────────────────────
-    // 当背景由 set_background()（Local P50）直接指定时，VSM 颜色动画对该按钮无感知
-    // （Border 背景被 Local 值固定，不随状态变化），改用半透明叠加层提供视觉反馈：
+    // ── MD3 State Layer（半透明蒙版，淡入淡出缓动）─────────────────────────────
+    // 当背景由 set_background()（Local P50）直接指定时，VSM 背景色动画的 from==to
+    // （终值取最高优先级 = Local 色），背景色本身不变化，视觉反馈全靠本蒙版：
     //   Hover   = On Primary 8%  白色叠加
     //   Pressed = On Primary 12% 白色叠加
-    // 当背景来自样式/动画（非 Local）时，VSM 已经驱动 Button.Background 变化并经
-    // bind_property 同步到 Border，背景色本身即提供反馈，故此处不叠加。
-    if (is_enabled_ && has_value(BackgroundProperty, ValuePriority::Local)) {
-        float state_alpha = 0.0f;
-        if (is_pressed_) {
-            state_alpha = 0.12f;
-        } else if (is_hovered_) {
-            state_alpha = 0.08f;
-        }
-        if (state_alpha > 0.0f) {
-            canvas.fill_complex_rounded_rect(crr,
-                paint::Brush::solid(math::Color::White.with_alpha(state_alpha)));
-        }
+    // alpha 由 anim_tick_callback 每帧朝 state_layer_.target_alpha 缓动（淡入淡出），
+    // 避免状态切换时整层蒙版瞬时突现/突隐。target_alpha 仅在背景为 Local 色时置非零
+    // （见 on_visual_state_changed）；背景来自样式/动画时由背景色过渡本身提供反馈。
+    if (state_layer_.current_alpha > 0.001f) {
+        canvas.fill_complex_rounded_rect(crr,
+            paint::Brush::solid(math::Color::White.with_alpha(state_layer_.current_alpha)));
     }
 
     // ── MD3 Ripple 涟漪 ──────────────────────────────────────────────────────
@@ -782,6 +775,28 @@ bool Button::anim_tick_callback(void* user_data, float dt) noexcept
     auto* self = static_cast<Button*>(user_data);
     bool  any_active = false;
 
+    // ── MD3 State Layer 蒙版淡入淡出 ─────────────────────────────────────────
+    // 每帧朝 target_alpha 线性逼近（约 120ms 走完 0↔0.12 全程），消除瞬时跳变。
+    {
+        const float target = self->state_layer_.target_alpha;
+        float&      cur    = self->state_layer_.current_alpha;
+        if (cur != target) {
+            constexpr float kFadeRatePerSec = 1.0f / 0.12f;  // alpha/秒
+            const float     step            = kFadeRatePerSec * dt;
+            if (cur < target) {
+                cur += step;
+                if (cur > target) { cur = target; }
+            } else {
+                cur -= step;
+                if (cur < target) { cur = target; }
+            }
+            self->invalidate_render();
+            if (cur != target) {
+                any_active = true;
+            }
+        }
+    }
+
     // ── Ripple 涟漪动画 ─────────────────────────────────────────────────────
     if (self->ripple_.active) {
         constexpr float kRippleDurationMs = 300.0f;  // MD3 medium2
@@ -820,6 +835,20 @@ void Button::on_visual_state_changed(ControlVisualState old_state,
     //        b) apply_state(P4)        — 将状态终值写入 BackgroundProperty / ForegroundProperty
     //        c) resolve_and_begin()    — 创建 Storyboard，启动插值
     Control::on_visual_state_changed(old_state, new_state);
+
+    // 更新 State Layer 蒙版目标 alpha（Hover=0.08 / Press=0.12 / 其他=0）。
+    // 仅当背景为 Local 色（背景色动画 from==to 无变化）时启用蒙版反馈；
+    // 背景来自样式/动画时 target 恒 0，由背景色过渡本身提供反馈，避免双重叠加偏色。
+    // 实际 alpha 由 anim_tick_callback 每帧朝此目标缓动，呈现淡入淡出。
+    float target_alpha = 0.0f;
+    if (is_enabled_ && has_value(BackgroundProperty, ValuePriority::Local)) {
+        if (is_pressed_) {
+            target_alpha = 0.12f;
+        } else if (is_hovered_) {
+            target_alpha = 0.08f;
+        }
+    }
+    state_layer_.target_alpha = target_alpha;
 
     // 注册 AnimationClock（幂等）：
     //   - 驱动 VSM::tick_animations(dt)（背景色过渡 Storyboard）
