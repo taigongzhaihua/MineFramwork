@@ -35,6 +35,7 @@
 #include <mine/ui/animation/Duration.h>
 #include <mine/ui/animation/AnimationClock.h>
 #include <mine/text/FontFace.h>
+#include <mine/text/Utf8.h>
 #include <mine/core/Memory.h>
 
 #include <cmath>
@@ -56,78 +57,8 @@
 namespace mine::ui {
 
 // ============================================================================
-// 内部 UTF-8 辅助函数
-// ============================================================================
-
-/// 向前移动一个 UTF-8 字符，返回下一个字符的字节偏移
-static uint32_t utf8_next(const char* data, uint32_t pos, uint32_t end) noexcept
-{
-    if (pos >= end) {
-        return end;
-    }
-    const auto c = static_cast<uint8_t>(data[pos]);
-    uint32_t skip = 1u;
-    if      ((c & 0xF8u) == 0xF0u) { skip = 4u; }
-    else if ((c & 0xF0u) == 0xE0u) { skip = 3u; }
-    else if ((c & 0xE0u) == 0xC0u) { skip = 2u; }
-    const uint32_t next = pos + skip;
-    return next <= end ? next : end;
-}
-
-/// 向后移动一个 UTF-8 字符，返回前一个字符起始的字节偏移
-static uint32_t utf8_prev(const char* data, uint32_t pos) noexcept
-{
-    if (pos == 0u) {
-        return 0u;
-    }
-    uint32_t p = pos - 1u;
-    while (p > 0u && (static_cast<uint8_t>(data[p]) & 0xC0u) == 0x80u) {
-        --p;
-    }
-    return p;
-}
-
-/// 将 UTF-32 码点转换为 UTF-8 字节序列（最多 4 字节），返回字节数
-static uint32_t utf32_to_utf8(uint32_t cp, char out[4]) noexcept
-{
-    if (cp < 0x80u) {
-        out[0] = static_cast<char>(cp);
-        return 1u;
-    }
-    if (cp < 0x800u) {
-        out[0] = static_cast<char>(0xC0u | (cp >> 6));
-        out[1] = static_cast<char>(0x80u | (cp & 0x3Fu));
-        return 2u;
-    }
-    if (cp < 0x10000u) {
-        out[0] = static_cast<char>(0xE0u | (cp >> 12));
-        out[1] = static_cast<char>(0x80u | ((cp >> 6) & 0x3Fu));
-        out[2] = static_cast<char>(0x80u | (cp & 0x3Fu));
-        return 3u;
-    }
-    out[0] = static_cast<char>(0xF0u | (cp >> 18));
-    out[1] = static_cast<char>(0x80u | ((cp >> 12) & 0x3Fu));
-    out[2] = static_cast<char>(0x80u | ((cp >> 6)  & 0x3Fu));
-    out[3] = static_cast<char>(0x80u | (cp         & 0x3Fu));
-    return 4u;
-}
-
-// ============================================================================
 // 多行文本辅助（行分割与查找）
 // ============================================================================
-
-/// UTF-8 下一字符边界
-static uint32_t next_utf8_boundary(const char* data, uint32_t pos, uint32_t end) noexcept
-{
-    if (pos >= end) return end;
-    const auto c = static_cast<uint8_t>(data[pos]);
-    uint32_t skip = 1u;
-    if      ((c & 0xF8u) == 0xF0u) { skip = 4u; }
-    else if ((c & 0xF0u) == 0xE0u) { skip = 3u; }
-    else if ((c & 0xE0u) == 0xC0u) { skip = 2u; }
-    const uint32_t next = pos + skip;
-    return next <= end ? next : end;
-}
 
 /// 行信息：起始字节偏移和字节长度
 struct LineInfo {
@@ -183,7 +114,7 @@ static containers::Vector<LineInfo> split_lines(
             float    accum_w  = 0.0f;
 
             while (line_end < seg_end) {
-                const uint32_t next_b = next_utf8_boundary(text, line_end, seg_end);
+                const uint32_t next_b = text::utf8_next(text, line_end, seg_end);
                 const float    cw     = measure_segment(text + line_end, next_b - line_end);
                 // 首字符强制放入，后续若超出则停止
                 if (line_end > pos && accum_w + cw > max_width) break;
@@ -192,7 +123,7 @@ static containers::Vector<LineInfo> split_lines(
             }
             // 保证至少放入一个字符（防死循环）
             if (line_end == pos) {
-                line_end = next_utf8_boundary(text, pos, seg_end);
+                line_end = text::utf8_next(text, pos, seg_end);
                 accum_w  = measure_segment(text + pos, line_end - pos);
             }
 
@@ -1562,7 +1493,7 @@ void TextBox::insert_char(uint32_t char_utf32)
     }
 
     char utf8_bytes[4]{};
-    const uint32_t byte_count = utf32_to_utf8(char_utf32, utf8_bytes);
+    const uint32_t byte_count = text::utf32_to_utf8(char_utf32, utf8_bytes);
     const uint32_t sz  = static_cast<uint32_t>(text_buf_.size());
     const uint32_t pos = cursor_pos_;
 
@@ -1593,7 +1524,7 @@ void TextBox::delete_char_before()
     if (cursor_pos_ == 0u) {
         return;
     }
-    const uint32_t prev_pos = utf8_prev(text_buf_.data(), cursor_pos_);
+    const uint32_t prev_pos = text::utf8_prev(text_buf_.data(), cursor_pos_);
     const uint32_t sz = static_cast<uint32_t>(text_buf_.size());
 
     // 构建新字符串：删除 [prev_pos, cursor_pos_) 区间
@@ -1622,7 +1553,7 @@ void TextBox::delete_char_after()
     if (cursor_pos_ >= sz) {
         return;
     }
-    const uint32_t next_pos = utf8_next(text_buf_.data(), cursor_pos_, sz);
+    const uint32_t next_pos = text::utf8_next(text_buf_.data(), cursor_pos_, sz);
 
     // 构建新字符串：删除 [cursor_pos_, next_pos) 区间
     containers::InlineString new_buf;
@@ -1646,14 +1577,14 @@ void TextBox::delete_char_after()
 
 void TextBox::move_cursor_left()
 {
-    cursor_pos_      = utf8_prev(text_buf_.data(), cursor_pos_);
+    cursor_pos_      = text::utf8_prev(text_buf_.data(), cursor_pos_);
     cursor_target_x_ = 0.0f;  // 水平移动，重置目标 x（下次垂直移动时重新计算）
 }
 
 void TextBox::move_cursor_right()
 {
     const uint32_t sz = static_cast<uint32_t>(text_buf_.size());
-    cursor_pos_      = utf8_next(text_buf_.data(), cursor_pos_, sz);
+    cursor_pos_      = text::utf8_next(text_buf_.data(), cursor_pos_, sz);
     cursor_target_x_ = 0.0f;  // 水平移动，重置目标 x
     update_ime_position();
 }
@@ -1686,7 +1617,7 @@ float TextBox::measure_text_width(const char* utf8, uint32_t len) const noexcept
     // 无字体时按字符数估算宽度（等宽近似：0.55 倍字号）
     uint32_t char_count = 0u;
     for (uint32_t i = 0u; i < len;) {
-        i = utf8_next(utf8, i, len);
+        i = text::utf8_next(utf8, i, len);
         ++char_count;
     }
     return static_cast<float>(char_count) * font_size_px_ * 0.55f;
@@ -1749,7 +1680,7 @@ uint32_t TextBox::cursor_pos_from_x(float click_x) const noexcept
 
     uint32_t i = 0;
     while (i < len) {
-        const uint32_t next     = utf8_next(text_buf_.data(), i, len);
+        const uint32_t next     = text::utf8_next(text_buf_.data(), i, len);
         const float    x_before = measure_text_width(text_buf_.data(), i);
         const float    x_after  = measure_text_width(text_buf_.data(), next);
         const float    midpoint = (x_before + x_after) * 0.5f;
@@ -1918,7 +1849,7 @@ uint32_t TextBox::cursor_pos_from_xy(float click_x, float click_y) const noexcep
     // 在该行内按 x 坐标定位字符（与单行逻辑相同）
     uint32_t i = 0;
     while (i < line.byte_length) {
-        const uint32_t next     = utf8_next(line_start, i, line.byte_length);
+        const uint32_t next     = text::utf8_next(line_start, i, line.byte_length);
         const float    x_before = measure_text_width(line_start, i);
         const float    x_after  = measure_text_width(line_start, next);
         const float    midpoint = (x_before + x_after) * 0.5f;
@@ -1983,7 +1914,7 @@ void TextBox::move_cursor_up()
             best_offset = i;
         }
         if (i >= prev_line.byte_length) break;
-        i = utf8_next(prev_text, i, prev_line.byte_length);
+        i = text::utf8_next(prev_text, i, prev_line.byte_length);
     }
 
     cursor_pos_ = prev_line.start_offset + best_offset;
@@ -2039,7 +1970,7 @@ void TextBox::move_cursor_down()
             best_offset = i;
         }
         if (i >= next_line.byte_length) break;
-        i = utf8_next(next_text, i, next_line.byte_length);
+        i = text::utf8_next(next_text, i, next_line.byte_length);
     }
 
     cursor_pos_ = next_line.start_offset + best_offset;
