@@ -176,6 +176,8 @@ static style::Style& default_button_style()
             core::Variant{ Brush::solid(Color{0.11f, 0.11f, 0.12f, 0.12f}) } });  // OnSurface 12%
         disabled.setters.push_back({ &Button::ForegroundProperty,
             core::Variant{ Brush::solid(Color{0.11f, 0.11f, 0.12f, 0.38f}) } });  // OnSurface 38%
+        disabled.setters.push_back({ &Button::StateLayerBrushProperty,
+            core::Variant{ Brush::solid(Color{ 1.0f, 1.0f, 1.0f, 0.0f }) } });  // State Layer 无反馈
         s.add_state_setters(std::move(disabled));
 
         return s;
@@ -381,15 +383,7 @@ Button::Button()
                           animation::Duration::milliseconds(120.0f),
                           animation::QuadEaseOut);
         });
-    vsm.add_transition("*", "Normal",
-        [btn_ptr](animation::Storyboard& sb) {
-            sb.animate_dp(*btn_ptr, Button::StateLayerBrushProperty,
-                          animation::Duration::milliseconds(100.0f),
-                          animation::QuadEaseOut);
-            sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
-                          animation::Duration::milliseconds(100.0f),
-                          animation::QuadEaseOut);
-        });
+
     vsm.add_transition("*", "Pressed",
         [btn_ptr](animation::Storyboard& sb) {
             sb.animate_dp(*btn_ptr, Button::StateLayerBrushProperty,
@@ -399,7 +393,15 @@ Button::Button()
                           animation::Duration::milliseconds(60.0f),
                           animation::QuadEaseIn);
         });
-
+    vsm.add_transition("*", "Disabled",
+        [btn_ptr](animation::Storyboard& sb) {
+            sb.animate_dp(*btn_ptr, Button::StateLayerBrushProperty,
+                          animation::Duration::milliseconds(120.0f),
+                          animation::QuadEaseOut);
+            sb.animate_dp(*btn_ptr, Button::ForegroundProperty,
+                          animation::Duration::milliseconds(120.0f),
+                          animation::QuadEaseOut);
+        });
 
     // 连接样式层（若用户已通过 set_vsm_style 指定自定义样式则使用该样式）
     style::Style& active_style = vsm_style_ ? *vsm_style_ : default_button_style();
