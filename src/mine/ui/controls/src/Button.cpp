@@ -57,14 +57,13 @@ const DependencyProperty& Button::BackgroundProperty =
         });
 
 // Button::ForegroundProperty — 文字前景画刷（MD3 On Primary 白色）
-// 变更时通过 on_foreground_changed 自动传播到 ContentPresenter
+// 变更经组合式 bind_property（Button.Foreground → ContentPresenter.Foreground）自动传播
 const DependencyProperty& Button::ForegroundProperty =
     register_property<Button>(
         "Foreground",
         core::Variant{ paint::Brush::solid(math::Color::White) },  // MD3 On Primary
         PropertyMetadata{
             .affects_render = true,
-            .changed        = &Button::on_foreground_changed,
         });
 
 // Button::BorderColorProperty — 边框画刷（MD3 Filled Button 无外边框，默认透明）
@@ -171,15 +170,12 @@ static style::Style& default_button_style()
 void Button::on_content_changed(const core::Variant& /*old_v*/,
                                 const core::Variant& new_v) noexcept
 {
-    // 同步文字成员缓存
+    // 仅同步文字成员缓存（供 text() 返回）；
+    // 内容到 ContentPresenter 的同步由构造函数建立的 bind_property 负责。
     if (new_v.has<containers::InlineString>()) {
         text_ = new_v.get<containers::InlineString>();
     } else {
         text_ = containers::InlineString{};
-    }
-    // 直接同步到 ContentPresenter（无 bind_template 机制）
-    if (content_part_ != nullptr) {
-        content_part_->set_value(ContentPresenter::ContentProperty, new_v);
     }
 }
 
@@ -189,25 +185,10 @@ void Button::on_padding_changed(DependencyObject*         sender,
                                 const core::Variant&      new_v) noexcept
 {
     auto* self = static_cast<Button*>(sender);
-    // 同步内边距成员缓存
+    // 仅同步内边距成员缓存；
+    // 内边距到 ContentPresenter 的同步由构造函数建立的 bind_property 负责。
     if (new_v.has<math::Thickness>()) {
         self->padding_ = new_v.get<math::Thickness>();
-    }
-    // 直接同步到 ContentPresenter（无 bind_template 机制）
-    if (self->content_part_ != nullptr) {
-        self->content_part_->set_value(ContentPresenter::PaddingProperty, new_v);
-    }
-}
-
-void Button::on_foreground_changed(DependencyObject*         sender,
-                                   const DependencyProperty& /*prop*/,
-                                   const core::Variant&      /*old_v*/,
-                                   const core::Variant&      new_v) noexcept
-{
-    auto* self = static_cast<Button*>(sender);
-    // 直接推送到 ContentPresenter（无 find_template_child 间接层）
-    if (self->content_part_ != nullptr && new_v.has<paint::Brush>()) {
-        self->content_part_->set_foreground(new_v.get<paint::Brush>());
     }
 }
 
@@ -308,16 +289,16 @@ Button::Button()
     // 应用 P5 基线值（StyleSetter：Normal 背景色、前景色、边框色）
     active_style.apply(*this);
 
-    // 同步 Padding 默认值到 ContentPresenter（Content 默认为空，无需同步）
-    content_part_->set_value(ContentPresenter::PaddingProperty, get_value(PaddingProperty));
-
-    // 初始同步前景色到 ContentPresenter
-    {
-        const core::Variant& fg_var = get_value(ForegroundProperty);
-        if (fg_var.has<paint::Brush>()) {
-            content_part_->set_foreground(fg_var.get<paint::Brush>());
-        }
-    }
+    // 组合式装配：以 DP↔DP 绑定把宿主外观属性单向同步到 ContentPresenter，
+    // 取代原先散落在 on_content_changed/on_padding_changed/on_foreground_changed
+    // 与构造函数中的手工 push。绑定建立时自动完成一次初始同步；
+    // 绑定生命周期托管于 ContentPresenter 的内置存储（其析构早于本 Button）。
+    content_part_->bind_property(ContentPresenter::ContentProperty,
+                                 *this, ContentControl::ContentProperty);
+    content_part_->bind_property(ContentPresenter::PaddingProperty,
+                                 *this, Button::PaddingProperty);
+    content_part_->bind_property(ContentPresenter::ForegroundProperty,
+                                 *this, Button::ForegroundProperty);
 
     // 安装 ContentPresenter 到视觉子树（由 Control::set_inner_element 管理生命周期）
     set_inner_element(std::move(presenter));
@@ -492,13 +473,10 @@ style::Style* Button::vsm_style() const noexcept
 void Button::set_font_face(void* font_face) noexcept
 {
     font_face_ = font_face;
-    // 若模板已构建，立即将字体与当前前景色传播到 ContentPresenter
+    // 若模板已构建，立即将字体传播到 ContentPresenter
+    // （前景色同步由 bind_property 负责，此处无需重推）
     if (content_part_ != nullptr) {
         content_part_->set_font_face(font_face_);
-        const core::Variant& fg_var = get_value(ForegroundProperty);
-        if (fg_var.has<paint::Brush>()) {
-            content_part_->set_foreground(fg_var.get<paint::Brush>());
-        }
     }
 }
 

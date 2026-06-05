@@ -233,12 +233,6 @@ private:
                                    const core::Variant&      old_v,
                                    const core::Variant&      new_v) noexcept;
 
-    /// ForegroundProperty 变更时将新颜色推送到 ContentPresenter
-    static void on_foreground_changed(DependencyObject*         sender,
-                                      const DependencyProperty& prop,
-                                      const core::Variant&      old_v,
-                                      const core::Variant&      new_v) noexcept;
-
     /**
      * @brief CommandProperty 变更回调。
      *

@@ -5,6 +5,20 @@
 ## [Unreleased]
 
 ### Changed
+- **mine.ui.controls：Button 组合式装配试点（手工 push 替换为 bind_property）**：
+
+  组合式外观架构（docs/22）的首个端到端验证。Border、ContentPresenter 外观完成 DP 化后，
+  本次把 Button → ContentPresenter 的外观同步从分散的手工 push 改为声明式 DP↔DP 绑定：
+  - 构造函数建立 3 条 OneWay `bind_property`：`Button.Content` → `ContentPresenter.Content`、
+    `Button.Padding` → `ContentPresenter.Padding`、`Button.Foreground` → `ContentPresenter.Foreground`，
+    绑定建立时自动完成一次初始同步，生命周期托管于 ContentPresenter 内置存储
+  - 移除手工 push 样板：`on_content_changed`/`on_padding_changed` 不再 `set_value` 到 ContentPresenter
+    （仅保留成员缓存同步）；删除 `on_foreground_changed` 回调（含 ForegroundProperty 的 `.changed` 注册）；
+    删除构造函数中的初始 Padding/Foreground 手工同步与 `set_font_face` 中的前景重推
+  - 验证了「复合控件以 bind_property 把宿主外观同步到子元素」的范式可去除样板代码，
+    且外观与逻辑分离；controls 测试 47 用例 116 断言、binding 测试 27 用例 60 断言全通过，
+    sample.02-controls-demo 构建通过
+
 - **mine.ui.controls：ContentPresenter 前景/字号完成依赖属性化（补齐基元集）**：
 
   延续 Border 的地基改造（docs/22）。此前 ContentPresenter 的前景画刷与字号为 plain member +
