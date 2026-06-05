@@ -79,8 +79,8 @@ void CounterWindow::build_(mine::text::FontFace* font)
 
     header_label_.set_text("MVVM + 数据绑定演示 — MineFramework");
     header_label_.set_font_size(18.0f);
-    header_label_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
-    header_label_.set_background(paint::Brush::solid_rgb(0x1A237E));   // 深靛蓝
+    header_label_.set_foreground(paint::Brush::solid_rgb(0x1A1A1A));
+    header_label_.set_background(paint::Brush::solid_rgb(0xE8DEF8));   // 浅紫色标题栏
     header_label_.set_padding(math::Thickness{ 20.0f, 14.0f, 20.0f, 14.0f });
     if (font) { header_label_.set_font_face(font); }
     body_panel_.add_child(&header_label_);
@@ -88,7 +88,7 @@ void CounterWindow::build_(mine::text::FontFace* font)
     // ── 计数信息卡片 ──────────────────────────────────────────────────────────
 
     counter_panel_.set_orientation(ui::Orientation::Vertical);
-    counter_card_.set_background(paint::Brush::solid_rgb(0x283593));   // 靛蓝卡片背景
+    counter_card_.set_background(paint::Brush::solid_rgb(0xFFFFFF));   // 白色卡片背景
     counter_card_.set_border_thickness(math::Thickness::uniform(0.0f));
     counter_card_.set_border_color(paint::Brush::solid(math::Color::Transparent));
     counter_card_.set_child(&counter_panel_);
@@ -101,7 +101,7 @@ void CounterWindow::build_(mine::text::FontFace* font)
     // 此时没有 Local 值存在，TemplateBind 可正常生效。
     //
     count_label_.set_font_size(42.0f);
-    count_label_.set_foreground(paint::Brush::solid_rgb(0xE8EAF6));    // 浅靛蓝文字
+    count_label_.set_foreground(paint::Brush::solid_rgb(0x1A1A1A));    // 深色文字
     count_label_.set_background(paint::Brush::solid(math::Color::Transparent));
     count_label_.set_padding(math::Thickness{ 20.0f, 28.0f, 20.0f, 12.0f });
     count_label_.set_margin(math::Thickness{ 0.0f, 0.0f, 0.0f, 0.0f });
@@ -112,7 +112,7 @@ void CounterWindow::build_(mine::text::FontFace* font)
     // 同上：不调用 set_text()，由绑定首次求值写入初始文字。
 
     hint_label_.set_font_size(13.0f);
-    hint_label_.set_foreground(paint::Brush::solid_rgb(0x9FA8DA));     // 灰蓝色
+    hint_label_.set_foreground(paint::Brush::solid_rgb(0x666666));     // 灰色提示
     hint_label_.set_background(paint::Brush::solid(math::Color::Transparent));
     hint_label_.set_padding(math::Thickness{ 20.0f, 0.0f, 20.0f, 16.0f });
     if (font) { hint_label_.set_font_face(font); }
@@ -124,8 +124,8 @@ void CounterWindow::build_(mine::text::FontFace* font)
     // 提示标签
     input_prompt_.set_text("【TextBox 双向绑定演示】在下方输入文字：");
     input_prompt_.set_font_size(14.0f);
-    input_prompt_.set_foreground(paint::Brush::solid_rgb(0xFFFFFF));
-    input_prompt_.set_background(paint::Brush::solid_rgb(0x37474F));  // 深蓝灰色
+    input_prompt_.set_foreground(paint::Brush::solid_rgb(0x333333));
+    input_prompt_.set_background(paint::Brush::solid_rgb(0xE0E0E0));  // 浅灰色
     input_prompt_.set_padding(math::Thickness{ 20.0f, 12.0f, 20.0f, 8.0f });
     input_prompt_.set_margin(math::Thickness{ 0.0f, 12.0f, 0.0f, 0.0f });
     if (font) { input_prompt_.set_font_face(font); }
@@ -144,8 +144,8 @@ void CounterWindow::build_(mine::text::FontFace* font)
     // 回显标签（绑定到 vm_.echo_text，展示双向绑定效果）
     // 不调用 set_text()，由绑定首次求值写入初始文字
     echo_label_.set_font_size(15.0f);
-    echo_label_.set_foreground(paint::Brush::solid_rgb(0xB39DDB));    // 浅紫色
-    echo_label_.set_background(paint::Brush::solid_rgb(0x37474F));
+    echo_label_.set_foreground(paint::Brush::solid_rgb(0x4A148C));    // 深紫色
+    echo_label_.set_background(paint::Brush::solid_rgb(0xE0E0E0));
     echo_label_.set_padding(math::Thickness{ 20.0f, 8.0f, 20.0f, 12.0f });
     echo_label_.set_text_wrapping(ui::TextWrapping::Wrap);
     if (font) { echo_label_.set_font_face(font); }
