@@ -36,6 +36,7 @@
 #include <mine/ui/animation/AnimationClock.h>
 #include <mine/text/FontFace.h>
 #include <mine/text/Utf8.h>
+#include <mine/text/TextLayout.h>
 #include <mine/core/Memory.h>
 
 #include <cmath>
@@ -56,138 +57,43 @@
 
 namespace mine::ui {
 
-// ============================================================================
-// 多行文本辅助（行分割与查找）
-// ============================================================================
+// ── 文本测量适配器（供 ::mine::text::split_lines 回调使用）──────────────────────────
 
-/// 行信息：起始字节偏移和字节长度
-struct LineInfo {
-    uint32_t start_offset;  ///< 行起始字节偏移
-    uint32_t byte_length;   ///< 行字节长度（不含换行符 \n）
-    uint32_t disp_length;   ///< 实际显示长度（可能被截断，用于省略号等）
-    float    disp_width;    ///< 显示宽度（像素）
-};
+namespace {
+    struct MeasureCtx {
+        void* font_face;
+        float font_size;
+    };
 
-/// 将文本按 \n 和可用宽度分割为行数组（支持自动换行）
-/// @param text 文本指针
-/// @param text_len 文本字节长度
-/// @param max_width 最大宽度（像素），0 = 无限制
-/// @param font_face FontFace 指针
-/// @param font_size 字号
-/// @param wrapping 换行模式
-static containers::Vector<LineInfo> split_lines(
-    const char* text,
-    size_t text_len,
-    float max_width,
-    void* font_face,
-    float font_size,
-    TextWrapping wrapping)
-{
-    containers::Vector<LineInfo> lines;
-    
-    // 是否启用宽度自动折叠
-    const bool use_width_limit = (wrapping != TextWrapping::NoWrap)
-                                  && (max_width > 0.0f)
-                                  && (max_width < 1.0e9f);
-
-    // 按字符折叠的辅助 lambda
-    auto measure_segment = [&](const char* p, uint32_t len) -> float {
+    float measure_for_layout(void* ctx, const char* data, uint32_t len) noexcept
+    {
+        auto* mc = static_cast<MeasureCtx*>(ctx);
         if (len == 0u) return 0.0f;
-        if (font_face != nullptr) {
-            auto* face = static_cast<text::FontFace*>(font_face);
-            return face->measure_text(p, len, font_size);
+        if (mc->font_face != nullptr) {
+            auto* face = static_cast<text::FontFace*>(mc->font_face);
+            return face->measure_text(data, len, mc->font_size);
         }
-        // 无字体：估算
-        return static_cast<float>(len) * font_size * 0.5f;
-    };
-
-    auto append_char_wrap = [&](uint32_t seg_start, uint32_t seg_end) {
-        if (seg_start == seg_end) {
-            // 空段落保留一个空行
-            lines.push_back({seg_start, 0u, 0u, 0.0f});
-            return;
-        }
-        uint32_t pos = seg_start;
-        while (pos < seg_end) {
-            // 找最长不超过 max_width 的前缀
-            uint32_t line_end = pos;
-            float    accum_w  = 0.0f;
-
-            while (line_end < seg_end) {
-                const uint32_t next_b = text::utf8_next(text, line_end, seg_end);
-                const float    cw     = measure_segment(text + line_end, next_b - line_end);
-                // 首字符强制放入，后续若超出则停止
-                if (line_end > pos && accum_w + cw > max_width) break;
-                accum_w  += cw;
-                line_end  = next_b;
-            }
-            // 保证至少放入一个字符（防死循环）
-            if (line_end == pos) {
-                line_end = text::utf8_next(text, pos, seg_end);
-                accum_w  = measure_segment(text + pos, line_end - pos);
-            }
-
-            lines.push_back({pos, line_end - pos, line_end - pos, accum_w});
-            pos = line_end;
-        }
-    };
-
-    // 按 '\n' 将文本分割为段落，逐段构建行
-    uint32_t seg_start   = 0u;
-    bool     last_was_nl = false;
-
-    for (uint32_t i = 0u; i <= text_len; ++i) {
-        const bool is_nl  = (i < text_len && text[i] == '\n');
-        const bool is_end = (i == text_len);
-        if (!is_nl && !is_end) continue;
-
-        const uint32_t seg_end = i;
-        last_was_nl = is_nl;
-
-        if (!use_width_limit) {
-            // NoWrap：整段作为一行
-            const float w = measure_segment(text + seg_start, seg_end - seg_start);
-            lines.push_back({seg_start, seg_end - seg_start, seg_end - seg_start, w});
-        } else {
-            // Wrap：字符边界折叠（暂不支持 WrapAtWord）
-            append_char_wrap(seg_start, seg_end);
-        }
-
-        seg_start = i + 1u;  // 跳过 '\n'
+        return static_cast<float>(len) * mc->font_size * 0.5f;
     }
+}  // namespace
 
-    // 文本以 '\n' 结尾时，追加一个空行
-    if (last_was_nl) {
-        lines.push_back({static_cast<uint32_t>(text_len), 0u, 0u, 0.0f});
-    }
-
-    // 保证至少一行（空文本）
-    if (lines.empty()) {
-        lines.push_back({0u, 0u, 0u, 0.0f});
-    }
-
-    return lines;
-}
-
-/// 根据字节偏移查找所在行号和行内偏移
-static bool find_line_by_offset(const containers::Vector<LineInfo>& lines,
-                                 uint32_t offset,
-                                 uint32_t* out_line_idx,
-                                 uint32_t* out_line_offset)
+/// 委托给 mine::text::split_lines
+containers::Vector<mine::text::LineInfo> TextBox::split_lines(
+    float max_width, TextWrapping wrapping) const
 {
-    for (uint32_t i = 0; i < static_cast<uint32_t>(lines.size()); ++i) {
-        const uint32_t line_start = lines[i].start_offset;
-        const uint32_t line_end   = line_start + lines[i].disp_length;  // 使用 disp_length
-        // 允许光标在行末尾（line_end，不含 \n 的位置）
-        if (offset >= line_start && offset <= line_end) {
-            *out_line_idx    = i;
-            *out_line_offset = offset - line_start;
-            return true;
-        }
-    }
-    return false;  // 不应发生（offset 超出文本范围）
+    MeasureCtx mc{font_face_, font_size_px_};
+    return mine::text::split_lines(
+        text_buf_.data(), text_buf_.size(), max_width,
+        measure_for_layout, &mc,
+        wrapping != TextWrapping::NoWrap);
 }
 
+bool TextBox::find_line_by_offset(
+    const containers::Vector<mine::text::LineInfo>& lines,
+    uint32_t offset, uint32_t* out_line_idx, uint32_t* out_line_offset) const
+{
+    return mine::text::find_line_by_offset(lines, offset, out_line_idx, out_line_offset);
+}
 
 // ============================================================================
 // 依赖属性注册
@@ -712,11 +618,7 @@ math::Size TextBox::measure_override(math::Size available)
             ? 1000.0f  // 无限宽度时使用较大默认值
             : (available.width - pad.left - pad.right);
 
-        const auto lines = split_lines(
-            text_buf_.data(), text_buf_.size(),
-            text_area_w,
-            font_face_, font_size_px_,
-            wrapping);
+        const auto lines = split_lines(text_area_w, wrapping);
         
         const float content_h = static_cast<float>(lines.size()) * line_h;
         desired_h = pad.top + pad.bottom + content_h + 2.0f;  // +2 边框厚度
@@ -735,11 +637,10 @@ math::Size TextBox::measure_override(math::Size available)
         if (use_multiline_layout) {
             // 多行模式：NoWrap 时取最长行，Wrap 时使用默认宽度
             if (wrapping == TextWrapping::NoWrap && !text_buf_.empty()) {
-                const auto lines = split_lines(
-                    text_buf_.data(), text_buf_.size(),
-                    0.0f,
-                    nullptr, 0.0f,
-                    TextWrapping::NoWrap);
+                MeasureCtx mc{nullptr, 0.0f};
+                const auto lines = mine::text::split_lines(
+                    text_buf_.data(), text_buf_.size(), 0.0f,
+                    measure_for_layout, &mc, false);
                 for (const auto& line : lines) {
                     const float w = measure_text_width(text_buf_.data() + line.start_offset, line.byte_length);
                     if (w > max_line_w) max_line_w = w;
@@ -928,11 +829,7 @@ void TextBox::render_text_content(paint::Canvas& canvas)
     else {
         const float text_area_w = rect.width - pad.left - pad.right;
         const auto wrapping = text_wrapping();
-        const auto lines = split_lines(
-            text_buf_.data(), text_buf_.size(),
-            text_area_w,
-            font_face_, font_size_px_,
-            wrapping);
+        const auto lines = split_lines(text_area_w, wrapping);
 
         if (!has_text && !placeholder_buf_.empty()) {
             // 无文字时显示占位文字（单行，不分割）
@@ -954,7 +851,7 @@ void TextBox::render_text_content(paint::Canvas& canvas)
                 const uint32_t sel_s = sel_start();
                 const uint32_t sel_e = sel_end();
                 for (uint32_t i = 0; i < static_cast<uint32_t>(lines.size()); ++i) {
-                    const LineInfo& line = lines[i];
+                    const mine::text::LineInfo& line = lines[i];
                     const uint32_t line_end = line.start_offset + line.byte_length;
                     // 该行与选区有交集
                     if (sel_s < line_end && sel_e > line.start_offset) {
@@ -987,7 +884,7 @@ void TextBox::render_text_content(paint::Canvas& canvas)
             }
 
             for (uint32_t i = 0; i < static_cast<uint32_t>(lines.size()); ++i) {
-                const LineInfo& line = lines[i];
+                const mine::text::LineInfo& line = lines[i];
                 if (line.byte_length > 0) {
                     canvas.draw_text(
                         core::StringView{ text_buf_.data() + line.start_offset, line.byte_length },
@@ -1005,7 +902,7 @@ void TextBox::render_text_content(paint::Canvas& canvas)
             uint32_t cursor_line_idx = 0u;
             uint32_t cursor_line_offset = 0u;
             if (find_line_by_offset(lines, cursor_pos_, &cursor_line_idx, &cursor_line_offset)) {
-                const LineInfo& cursor_line = lines[cursor_line_idx];
+                const mine::text::LineInfo& cursor_line = lines[cursor_line_idx];
                 const char* line_text = text_buf_.data() + cursor_line.start_offset;
                 const float cursor_x = text_x0 - scroll_offset_x_ + measure_text_width(line_text, cursor_line_offset);
                 const float cursor_y = text_y0 + static_cast<float>(cursor_line_idx) * line_h - scroll_offset_y_;
@@ -1830,11 +1727,7 @@ uint32_t TextBox::cursor_pos_from_xy(float click_x, float click_y) const noexcep
     
     const float text_area_w = final_rc.width - pad.left - pad.right;
     const auto wrapping = text_wrapping();
-    const auto lines = split_lines(
-        text_buf_.data(), text_buf_.size(),
-        text_area_w,
-        font_face_, font_size_px_,
-        wrapping);
+    const auto lines = split_lines(text_area_w, wrapping);
     const float line_h    = effective_line_height();
     const uint32_t line_idx = static_cast<uint32_t>(click_y / line_h);
 
@@ -1843,7 +1736,7 @@ uint32_t TextBox::cursor_pos_from_xy(float click_x, float click_y) const noexcep
         return len;
     }
 
-    const LineInfo& line       = lines[line_idx];
+    const mine::text::LineInfo& line       = lines[line_idx];
     const char*     line_start = text_buf_.data() + line.start_offset;
 
     // 在该行内按 x 坐标定位字符（与单行逻辑相同）
@@ -1876,11 +1769,7 @@ void TextBox::move_cursor_up()
     
     const float text_area_w = final_rc.width - pad.left - pad.right;
     const auto wrapping = text_wrapping();
-    const auto lines = split_lines(
-        text_buf_.data(), text_buf_.size(),
-        text_area_w,
-        font_face_, font_size_px_,
-        wrapping);
+    const auto lines = split_lines(text_area_w, wrapping);
     uint32_t     line_idx, line_offset;
     if (!find_line_by_offset(lines, cursor_pos_, &line_idx, &line_offset)) {
         return;
@@ -1891,13 +1780,13 @@ void TextBox::move_cursor_up()
     }
 
     // 上一行
-    const LineInfo& prev_line = lines[line_idx - 1];
+    const mine::text::LineInfo& prev_line = lines[line_idx - 1];
     const char*     prev_text = text_buf_.data() + prev_line.start_offset;
 
     // 使用 cursor_target_x_（左右移动时更新）保持水平位置，或用当前 x
     if (cursor_target_x_ == 0.0f) {
         // 首次垂直移动，记录当前 x
-        const LineInfo& curr_line = lines[line_idx];
+        const mine::text::LineInfo& curr_line = lines[line_idx];
         const char*     curr_text = text_buf_.data() + curr_line.start_offset;
         cursor_target_x_ = measure_text_width(curr_text, line_offset);
     }
@@ -1935,11 +1824,7 @@ void TextBox::move_cursor_down()
     
     const float text_area_w = final_rc.width - pad.left - pad.right;
     const auto wrapping = text_wrapping();
-    const auto lines = split_lines(
-        text_buf_.data(), text_buf_.size(),
-        text_area_w,
-        font_face_, font_size_px_,
-        wrapping);
+    const auto lines = split_lines(text_area_w, wrapping);
     uint32_t     line_idx, line_offset;
     if (!find_line_by_offset(lines, cursor_pos_, &line_idx, &line_offset)) {
         return;
@@ -1950,11 +1835,11 @@ void TextBox::move_cursor_down()
     }
 
     // 下一行
-    const LineInfo& next_line = lines[line_idx + 1];
+    const mine::text::LineInfo& next_line = lines[line_idx + 1];
     const char*     next_text = text_buf_.data() + next_line.start_offset;
 
     if (cursor_target_x_ == 0.0f) {
-        const LineInfo& curr_line = lines[line_idx];
+        const mine::text::LineInfo& curr_line = lines[line_idx];
         const char*     curr_text = text_buf_.data() + curr_line.start_offset;
         cursor_target_x_ = measure_text_width(curr_text, line_offset);
     }
@@ -2006,11 +1891,7 @@ float TextBox::total_content_width() const noexcept
     if (use_multiline_layout) {
         // 多行模式：对每一行测量宽度，取最大值
         const math::Size tas = text_area_size();
-        const auto lines = split_lines(
-            text_buf_.data(), text_buf_.size(),
-            text_wrapping() == TextWrapping::NoWrap ? 0.0f : tas.width,
-            font_face_, font_size_px_,
-            text_wrapping());
+        const auto lines = split_lines(text_wrapping() == TextWrapping::NoWrap ? 0.0f : tas.width, text_wrapping());
         for (const auto& line : lines) {
             if (line.disp_width > max_width) {
                 max_width = line.disp_width;
@@ -2034,11 +1915,7 @@ float TextBox::total_content_height() const noexcept
     }
 
     const math::Size tas = text_area_size();
-    const auto lines = split_lines(
-        text_buf_.data(), text_buf_.size(),
-        text_wrapping() == TextWrapping::NoWrap ? 0.0f : tas.width,
-        font_face_, font_size_px_,
-        text_wrapping());
+    const auto lines = split_lines(text_wrapping() == TextWrapping::NoWrap ? 0.0f : tas.width, text_wrapping());
     return static_cast<float>(lines.size()) * line_h;
 }
 
@@ -2082,11 +1959,7 @@ void TextBox::auto_scroll_to_cursor() noexcept
     float cursor_visual_x = 0.0f;
     if (use_multiline_layout) {
         // 多行：定位光标所在行的 x
-        const auto lines = split_lines(
-            text_buf_.data(), text_buf_.size(),
-            tas.width,
-            font_face_, font_size_px_,
-            text_wrapping());
+        const auto lines = split_lines(tas.width, text_wrapping());
         uint32_t line_idx = 0u, line_offset = 0u;
         if (find_line_by_offset(lines, cursor_pos_, &line_idx, &line_offset)) {
             const char* line_text = text_buf_.data() + lines[line_idx].start_offset;
@@ -2109,11 +1982,7 @@ void TextBox::auto_scroll_to_cursor() noexcept
 
     // ── 纵向自动滚动（仅多行模式）────────────────────────────────────────
     if (use_multiline_layout) {
-        const auto lines = split_lines(
-            text_buf_.data(), text_buf_.size(),
-            tas.width,
-            font_face_, font_size_px_,
-            text_wrapping());
+        const auto lines = split_lines(tas.width, text_wrapping());
         uint32_t line_idx = 0u, line_offset = 0u;
         if (find_line_by_offset(lines, cursor_pos_, &line_idx, &line_offset)) {
             const float cursor_visual_y = static_cast<float>(line_idx) * line_h - scroll_offset_y_;

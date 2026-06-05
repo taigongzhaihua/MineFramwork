@@ -10,6 +10,7 @@
 
 #include <mine/text/FontFace.h>
 #include <mine/text/Utf8.h>
+#include <mine/text/TextLayout.h>
 #include <mine/paint/Canvas.h>
 #include <mine/paint/Brush.h>
 #include <mine/ui/property/DependencyProperty.h>
@@ -512,35 +513,25 @@ void TextBlock::build_lines(float max_content_width)
         && (max_content_width > 0.0f)
         && (max_content_width < 1.0e9f);
 
-    // 字符级折叠辅助 lambda：将段落 [seg_start, seg_end) 按字符边界折叠
-    auto append_char_wrap = [&](uint32_t seg_start, uint32_t seg_end) {
+    // 字符级折叠辅助 lambda：委托给 mine::text::split_lines
+    auto char_wrap_segment = [&](uint32_t seg_start, uint32_t seg_end) {
+        // 空段落保留一个空行
         if (seg_start == seg_end) {
-            // 空段落保留一个空行
             cached_lines_.push_back({seg_start, 0u, 0u, 0.0f, false});
             return;
         }
-        uint32_t pos = seg_start;
-        while (pos < seg_end) {
-            // 找最长不超过 max_content_width 的前缀
-            uint32_t line_end = pos;
-            float    accum_w  = 0.0f;
-
-            while (line_end < seg_end) {
-                const uint32_t next_b = text::utf8_next(data, line_end, seg_end);
-                const float    cw     = measure_segment(data + line_end, next_b - line_end);
-                // 首字符强制放入，后续若超出则停止
-                if (line_end > pos && accum_w + cw > max_content_width) break;
-                accum_w  += cw;
-                line_end  = next_b;
-            }
-            // 保证至少放入一个字符（防死循环）
-            if (line_end == pos) {
-                line_end = text::utf8_next(data, pos, seg_end);
-                accum_w  = measure_segment(data + pos, line_end - pos);
-            }
-
-            cached_lines_.push_back({pos, line_end - pos, line_end - pos, accum_w, false});
-            pos = line_end;
+        // 适配器：static 包装 this->measure_segment
+        struct Ctx { TextBlock* self; };
+        Ctx ctx{this};
+        auto measure_fn = [](void* c, const char* d, uint32_t len) -> float {
+            return static_cast<Ctx*>(c)->self->measure_segment(d, len);
+        };
+        auto tl = mine::text::split_lines(
+            data + seg_start, seg_end - seg_start, max_content_width,
+            measure_fn, &ctx, true);
+        for (auto& l : tl) {
+            cached_lines_.push_back({seg_start + l.start_offset,
+                                     l.byte_length, l.byte_length, l.disp_width, false});
         }
     };
 
@@ -565,7 +556,7 @@ void TextBlock::build_lines(float max_content_width)
                                       w, false});
         } else if (text_wrapping_ == TextWrapping::Wrap) {
             // ── Wrap：字符边界折叠 ────────────────────────────────────────
-            append_char_wrap(seg_start, seg_end);
+            char_wrap_segment(seg_start, seg_end);
         } else {
             // ── WrapAtWord：单词边界折叠，回退到字符折叠 ─────────────────
             if (seg_start == seg_end) {
@@ -623,7 +614,7 @@ void TextBlock::build_lines(float max_content_width)
 
                         if (word_w > max_content_width) {
                             // 词太宽：字符级断行
-                            append_char_wrap(word_start, word_end);
+                            char_wrap_segment(word_start, word_end);
                             pos           = word_end;
                             line_start    = word_end;
                             last_word_end = word_end;

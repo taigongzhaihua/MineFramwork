@@ -25,6 +25,7 @@
 #include <mine/ui/event/RoutedEvent.h>
 #include <mine/ui/property/DependencyProperty.h>
 #include <mine/containers/InlineString.h>
+#include <mine/containers/Vector.h>
 #include <mine/paint/Brush.h>
 #include <mine/math/Thickness.h>
 #include <mine/math/CornerRadii.h>
@@ -34,6 +35,7 @@
 namespace mine::paint { class Canvas; }
 namespace mine::ui::input { class MouseEventArgs; class KeyEventArgs; class TextInputEventArgs; }
 namespace mine::ui { class Border; class Window; }
+namespace mine::text { struct LineInfo; }
 
 namespace mine::ui {
 
@@ -379,6 +381,15 @@ private:
      * @brief 测量 UTF-8 字符串片段的渲染宽度。
      */
     [[nodiscard]] float measure_text_width(const char* utf8, uint32_t len) const noexcept;
+
+    /// 委托给 mine::text::split_lines，避免调用点大量改动
+    [[nodiscard]] containers::Vector<mine::text::LineInfo> split_lines(
+        float max_width, TextWrapping wrapping) const;
+
+    /// 委托给 mine::text::find_line_by_offset
+    [[nodiscard]] bool find_line_by_offset(
+        const containers::Vector<mine::text::LineInfo>& lines,
+        uint32_t offset, uint32_t* out_line_idx, uint32_t* out_line_offset) const;
 
     // ── 选择区间辅助方法 ─────────────────────────────────────────────────
 
