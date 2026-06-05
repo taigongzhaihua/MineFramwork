@@ -718,11 +718,10 @@ void TextBox::render_text_content(paint::Canvas& canvas)
     // 每次渲染前确保滚动偏移在有效范围内
     clamp_scroll_offsets();
 
-    const core::Variant& cr_var = get_value(CornerRadiusProperty);
-    const math::CornerRadii bg_radii = cr_var.has<math::CornerRadii>()
-        ? cr_var.get<math::CornerRadii>()
-        : math::CornerRadii::uniform(4.0f);
-    const math::ComplexRoundedRect bg_crr{ rect, bg_radii };
+    // 使用局部坐标：TextBoxContentLayer 渲染时 canvas 已有 TextBox 的变换，
+    // 此处 (0,0) 即为 TextBox 内容区左上角
+    const float local_w = rect.width;
+    const float local_h = rect.height;
 
     // ── 准备文字绘制区域（减去内边距）─────────────────────────────────────
     const core::Variant& pad_var = get_value(PaddingProperty);
@@ -741,14 +740,14 @@ void TextBox::render_text_content(paint::Canvas& canvas)
     const float indicator_w = it_var.has<float>() ? it_var.get<float>() : 1.0f;
     if (!indicator_brush.is_transparent() && indicator_w > 0.0f) {
         canvas.fill_rect(
-            { rect.x, rect.y + rect.height - indicator_w, rect.width, indicator_w },
+            { 0.0f, local_h - indicator_w, local_w, indicator_w },
             indicator_brush);
     }
 
-    const float text_x0 = rect.x + pad.left;
-    const float text_y0 = rect.y + pad.top;
-    const float text_w  = rect.width  - pad.left - pad.right;
-    const float text_h  = rect.height - pad.top  - pad.bottom;
+    const float text_x0 = pad.left;
+    const float text_y0 = pad.top;
+    const float text_w  = local_w - pad.left - pad.right;
+    const float text_h  = local_h - pad.top  - pad.bottom;
     if (text_w <= 0.0f || text_h <= 0.0f) {
         return;
     }
