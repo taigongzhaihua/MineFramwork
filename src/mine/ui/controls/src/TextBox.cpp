@@ -331,7 +331,11 @@ public:
 
 protected:
     void on_render(paint::Canvas& canvas) override {
+        // 裁剪到本层边界，防止文字超界溢出
+        canvas.save();
+        canvas.clip_rect(bounds_rect());
         owner_->render_text_content(canvas);
+        canvas.restore();
     }
 
 private:
