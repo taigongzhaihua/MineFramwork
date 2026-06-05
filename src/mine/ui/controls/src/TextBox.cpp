@@ -718,8 +718,8 @@ void TextBox::render_text_content(paint::Canvas& canvas)
     // 每次渲染前确保滚动偏移在有效范围内
     clamp_scroll_offsets();
 
-    // 使用局部坐标：TextBoxContentLayer 渲染时 canvas 已有 TextBox 的变换，
-    // 此处 (0,0) 即为 TextBox 内容区左上角
+    // canvas 使用窗口绝对坐标系（框架渲染管线不做 translate 到局部原点），
+    // 绘制时必须以 bounds_rect().x/.y 为原点偏移。
     const float local_w = rect.width;
     const float local_h = rect.height;
 
@@ -740,12 +740,12 @@ void TextBox::render_text_content(paint::Canvas& canvas)
     const float indicator_w = it_var.has<float>() ? it_var.get<float>() : 1.0f;
     if (!indicator_brush.is_transparent() && indicator_w > 0.0f) {
         canvas.fill_rect(
-            { 0.0f, local_h - indicator_w, local_w, indicator_w },
+            { rect.x, rect.y + local_h - indicator_w, local_w, indicator_w },
             indicator_brush);
     }
 
-    const float text_x0 = pad.left;
-    const float text_y0 = pad.top;
+    const float text_x0 = rect.x + pad.left;
+    const float text_y0 = rect.y + pad.top;
     const float text_w  = local_w - pad.left - pad.right;
     const float text_h  = local_h - pad.top  - pad.bottom;
     if (text_w <= 0.0f || text_h <= 0.0f) {
