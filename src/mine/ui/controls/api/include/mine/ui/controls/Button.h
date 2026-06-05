@@ -9,11 +9,12 @@
  *   - ContentProperty / PaddingProperty / BackgroundProperty 等多个 DependencyProperty
  *   - 背景色、悬停色、按下色、前景色、边框色均通过 DependencyProperty 驱动
  *
- * 动画架构（F3 范式——三层分离）：
- *   背景色过渡由 VisualStateManager 的 Storyboard 管理：go_to_state() 先通过
- *   StyleTrigger(P4) 写入终值，再以 animate_dp()（仅声明路径）插值到该终值；
- *   Ripple 涟漪动画直接由 AnimationClock 驱动。两者共用 anim_tick_callback，
- *   在 on_visual_state_changed 中注册到 AnimationClock，tick 返回 false 时自动注销。
+ * 动画架构（组合式 + 状态机驱动）：
+ *   - State Layer（hover/press 反馈）：独立 StateLayerBorder 基元，背景色由
+ *     StateLayerColorProperty 经 VSM Storyboard 插值缓动，bind_property 实时同步绘制
+ *   - Background：仅 Disabled→Normal 从禁用灰缓动回基线；Hovered/Pressed 背景恒定
+ *   - Ripple 涟漪：由 AnimationClock 直接驱动
+ *   三者共用 anim_tick_callback，在 on_visual_state_changed 中注册到 AnimationClock。
  */
 
 #pragma once
@@ -64,8 +65,8 @@ public:
      * @brief 背景画刷属性（Variant 存储 paint::Brush）。
      *
      * Default(P0) = MD3 Primary #6750A4；默认样式以 StyleSetter(P5) 写入基线值；
-     * Hovered/Pressed/Disabled 状态由 StyleTrigger(P4) 写入终值，VSM Storyboard
-     * 以 Animation(P1) 进行插值过渡；on_render 通过 get_value 读取最高优先级层。
+     * 仅 Disabled 状态由 StyleTrigger(P4) 写入置灰终值（Hovered/Pressed 不写，
+     * 交互反馈完全交给 StateLayerColorProperty 驱动的半透明白叠加层）。
      * 用户调用 set_background() 写入 Local(P2)，高于 StyleTrigger，故不受状态影响。
      */
     static const DependencyProperty& BackgroundProperty;
