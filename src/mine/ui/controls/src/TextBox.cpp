@@ -763,10 +763,6 @@ void TextBox::render_text_content(paint::Canvas& canvas)
         baseline_y += line_h * 0.8f;  // 无字体时估算：ascender ≈ 80% line_height
     }
 
-    // 保存变换状态，裁剪到文字区域防止溢出
-    canvas.save();
-    canvas.clip_rect({ text_x0, text_y0, text_w, text_h });
-
     const bool has_text = !text_buf_.empty();
 
     // 自动换行布局默认开启：
@@ -778,6 +774,11 @@ void TextBox::render_text_content(paint::Canvas& canvas)
     // 单行模式快速路径
     // ────────────────────────────────────────────────────────────────────────
     if (!use_multiline_layout) {
+        // 裁剪到单行文字带（与选中矩形同范围）
+        const float text_band_top = text_y0 + (text_h - line_h) * 0.5f;
+        canvas.save();
+        canvas.clip_rect({ text_x0, text_band_top, text_w, line_h });
+
         // ── 4a-pre. 选择高亮（在文字下方渲染）──────────────────────────────
         if (is_focused_ && has_selection() && has_text) {
             const float x_sel0   = text_x0 - scroll_offset_x_ + measure_text_width(text_buf_.data(), sel_start());
@@ -825,11 +826,17 @@ void TextBox::render_text_content(paint::Canvas& canvas)
                 { cursor_x, cursor_top, 1.5f, line_h },
                 paint::Brush::solid_rgb(0x6750A4));
         }
+
+        canvas.restore();
     }
     // ────────────────────────────────────────────────────────────────────────
     // 多行模式
     // ────────────────────────────────────────────────────────────────────────
     else {
+        // 裁剪到多行文字带（与选中矩形同范围）
+        canvas.save();
+        canvas.clip_rect({ text_x0, text_y0, text_w, text_h });
+
         const float text_area_w = rect.width - pad.left - pad.right;
         const auto wrapping = text_wrapping();
         const auto lines = split_lines(text_area_w, wrapping);
@@ -914,9 +921,9 @@ void TextBox::render_text_content(paint::Canvas& canvas)
                     paint::Brush::solid_rgb(0x6750A4));
             }
         }
-    }
 
-    canvas.restore();
+        canvas.restore();
+    }
 }
 
 // ============================================================================
