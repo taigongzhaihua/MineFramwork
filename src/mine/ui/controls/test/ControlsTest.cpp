@@ -142,6 +142,30 @@ TEST_CASE("controls_Button_Normal到Disabled再回Normal时恢复Normal外观")
     check_solid_brush(button, normal);
 }
 
+TEST_CASE("controls_Button_禁用状态下背景值非用户自定义色")
+{
+    // 验证：set_background (Local P50) 后 set_enabled(false)，
+    // Background 的生效值应为 Disabled 灰色（P60 覆盖），而非用户自定义色。
+    Button button;
+    button.set_bounds_rect({0.0f, 0.0f, 100.0f, 40.0f});
+    const auto normal = mine::paint::Brush::solid_rgb(0x1565C0);
+    button.set_background(normal);
+
+    button.set_enabled(false);
+    // Disabled 是即时跳变（apply_state_animation 以 P60 写入），无需 advance
+
+    const mine::core::Variant& v = button.get_value(Button::BackgroundProperty);
+    REQUIRE(v.has<mine::paint::Brush>());
+    const auto& brush = v.get<mine::paint::Brush>();
+    REQUIRE(brush.kind() == mine::paint::BrushKind::SolidColor);
+    // Disabled 样式灰色：OnSurface 12% = rgba(0.11,0.11,0.12,0.12)
+    const auto disabled_gray = mine::math::Color{0.11f, 0.11f, 0.12f, 0.12f};
+    CHECK(brush.color().r == doctest::Approx(disabled_gray.r).epsilon(0.01f));
+    CHECK(brush.color().g == doctest::Approx(disabled_gray.g).epsilon(0.01f));
+    CHECK(brush.color().b == doctest::Approx(disabled_gray.b).epsilon(0.01f));
+    CHECK(brush.color().a == doctest::Approx(disabled_gray.a).epsilon(0.01f));
+}
+
 TEST_CASE("controls_Button_Pressed到Hovered再回Normal时恢复Normal外观")
 {
     Button button;

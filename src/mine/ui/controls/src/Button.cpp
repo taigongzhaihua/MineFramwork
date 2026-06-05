@@ -383,7 +383,15 @@ Button::Button()
                           animation::Duration::milliseconds(120.0f),
                           animation::QuadEaseOut);
         });
-
+    vsm.add_transition("*", "Normal",
+        [btn_ptr](animation::Storyboard& sb) {
+            sb.animate_dp(*btn_ptr, Button::StateLayerBrushProperty,
+                          animation::Duration::milliseconds(100.0f),
+                          animation::QuadEaseOut);
+            sb.animate_dp(*btn_ptr, Button::BackgroundProperty,
+                          animation::Duration::milliseconds(100.0f),
+                          animation::QuadEaseOut);
+        });
     vsm.add_transition("*", "Pressed",
         [btn_ptr](animation::Storyboard& sb) {
             sb.animate_dp(*btn_ptr, Button::StateLayerBrushProperty,
@@ -393,15 +401,10 @@ Button::Button()
                           animation::Duration::milliseconds(60.0f),
                           animation::QuadEaseIn);
         });
-    vsm.add_transition("*", "Disabled",
-        [btn_ptr](animation::Storyboard& sb) {
-            sb.animate_dp(*btn_ptr, Button::StateLayerBrushProperty,
-                          animation::Duration::milliseconds(120.0f),
-                          animation::QuadEaseOut);
-            sb.animate_dp(*btn_ptr, Button::ForegroundProperty,
-                          animation::Duration::milliseconds(120.0f),
-                          animation::QuadEaseOut);
-        });
+    // 注意：Disabled 不配置过渡——它是权限状态，必须即时跳变：
+    // 走无动画路径 → apply_state_animation 以 P60 覆盖 Local(P50)，
+    // 确保用户 set_background 自定义色仍可被禁用灰覆盖。
+    // Normal 过渡的 Background animate_dp 负责 Disabled→Normal 回弹缓动。
 
     // 连接样式层（若用户已通过 set_vsm_style 指定自定义样式则使用该样式）
     style::Style& active_style = vsm_style_ ? *vsm_style_ : default_button_style();
