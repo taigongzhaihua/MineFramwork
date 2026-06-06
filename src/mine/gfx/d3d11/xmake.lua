@@ -15,8 +15,23 @@ target("mine.gfx.d3d11")
     add_syslinks(
         "d3d11",        -- Direct3D 11 运行时
         "dxgi",         -- DXGI 交换链、适配器枚举
-        "d3dcompiler"   -- HLSL 运行时编译（M0 阶段，后续改为预编译字节码）
+        "d3dcompiler"   -- HLSL 运行时编译（保留作为回退，主路径使用预编译字节码）
     )
     add_includedirs("api/include", {public = true})
     add_headerfiles("api/include/(**.h)")
+
+    -- 预编译 HLSL 着色器 → ShaderBytecode.h
+    local shaderDir  = path.join(os.projectdir(), "src/mine/gfx/d3d11/shaders")
+    local genDir     = path.join(os.projectdir(), "build/.generated/mine.gfx.d3d11")
+    local outHeader  = path.join(genDir, "ShaderBytecode.h")
+
+    before_build(function (target)
+        local script = path.join(os.projectdir(), "scripts/build_shaders.ps1")
+        os.runv("powershell", {"-ExecutionPolicy", "Bypass", "-File", script,
+                                "-ShaderDir", shaderDir,
+                                "-OutputHeader", outHeader})
+    end)
+
+    -- 将生成目录加入 include 路径
+    add_includedirs(genDir, {public = false})
 target_end()
