@@ -5,6 +5,21 @@
 ## [Unreleased]
 
 ### Fixed
+- **mine.paint / mine.ui.controls：修复 TextBox 文字溢出未被裁剪的问题**：
+
+  本次先回退了 TextBox 上连续几次围绕 `clip_rect` 坐标与层级的试探性修改，恢复到
+  裁剪问题出现前的基线，再重新定位根因。最终确认问题不在 TextBox：
+  - `Canvas::clip_rect()`、`ClipPushRect/ClipPop` 与 `DrawText` 确实在同一命令流中
+  - 但 `mine.paint` 的 `k_text_pixel_shader_hlsl` 此前只采样字形图集并输出 alpha，**没有**
+    参与统一的 `evaluate_clip_coverage()` 软裁剪计算
+  - 结果是：选区高亮、光标、边框等几何命令会被裁剪，而文字字形本身不会被裁掉，
+    因而看起来像是 `TextBox` 的 `clip_rect` 完全失效
+  - 修复方式：为文字像素着色器补齐 `ClipSdfCB` + `evaluate_clip_coverage()`，并在字形 alpha
+    输出前乘以裁剪覆盖率，使文字与几何命令共用同一套裁剪链路
+  - 同时撤销 TextBox 上无效的局部裁剪试探，保留原始 `render_text_content()` 裁剪逻辑
+  - 验证：`mine.ui.controls.test` 50 用例 124 断言全部通过；`sample.01-mvvm-binding`
+    可成功链接并启动到渲染初始化阶段
+
 - **mine.ui.controls：修复自定义背景 Button 的 Hovered/Pressed 过渡瞬时跳变（State Layer 蒙版改缓动）**：
 
   根因定位：当 Button 调用 `set_background()`（写入 Local P50）后，VSM 背景色动画在

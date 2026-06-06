@@ -331,11 +331,7 @@ public:
 
 protected:
     void on_render(paint::Canvas& canvas) override {
-        // 裁剪到本层边界，防止文字超界溢出
-        canvas.save();
-        canvas.clip_rect(bounds_rect());
         owner_->render_text_content(canvas);
-        canvas.restore();
     }
 
 private:
@@ -718,10 +714,11 @@ void TextBox::render_text_content(paint::Canvas& canvas)
     // 每次渲染前确保滚动偏移在有效范围内
     clamp_scroll_offsets();
 
-    // canvas 使用窗口绝对坐标系（框架渲染管线不做 translate 到局部原点），
-    // 绘制时必须以 bounds_rect().x/.y 为原点偏移。
-    const float local_w = rect.width;
-    const float local_h = rect.height;
+    const core::Variant& cr_var = get_value(CornerRadiusProperty);
+    const math::CornerRadii bg_radii = cr_var.has<math::CornerRadii>()
+        ? cr_var.get<math::CornerRadii>()
+        : math::CornerRadii::uniform(4.0f);
+    const math::ComplexRoundedRect bg_crr{ rect, bg_radii };
 
     // ── 准备文字绘制区域（减去内边距）─────────────────────────────────────
     const core::Variant& pad_var = get_value(PaddingProperty);
@@ -740,14 +737,14 @@ void TextBox::render_text_content(paint::Canvas& canvas)
     const float indicator_w = it_var.has<float>() ? it_var.get<float>() : 1.0f;
     if (!indicator_brush.is_transparent() && indicator_w > 0.0f) {
         canvas.fill_rect(
-            { rect.x, rect.y + local_h - indicator_w, local_w, indicator_w },
+            { rect.x, rect.y + rect.height - indicator_w, rect.width, indicator_w },
             indicator_brush);
     }
 
     const float text_x0 = rect.x + pad.left;
     const float text_y0 = rect.y + pad.top;
-    const float text_w  = local_w - pad.left - pad.right;
-    const float text_h  = local_h - pad.top  - pad.bottom;
+    const float text_w  = rect.width  - pad.left - pad.right;
+    const float text_h  = rect.height - pad.top  - pad.bottom;
     if (text_w <= 0.0f || text_h <= 0.0f) {
         return;
     }
@@ -763,6 +760,10 @@ void TextBox::render_text_content(paint::Canvas& canvas)
         baseline_y += line_h * 0.8f;  // 无字体时估算：ascender ≈ 80% line_height
     }
 
+    // 保存变换状态，裁剪到文字区域防止溢出
+    canvas.save();
+    canvas.clip_rect({ text_x0, text_y0, text_w, text_h });
+
     const bool has_text = !text_buf_.empty();
 
     // 自动换行布局默认开启：
@@ -774,11 +775,6 @@ void TextBox::render_text_content(paint::Canvas& canvas)
     // 单行模式快速路径
     // ────────────────────────────────────────────────────────────────────────
     if (!use_multiline_layout) {
-        // 裁剪到单行文字带（与选中矩形同范围）
-        const float text_band_top = text_y0 + (text_h - line_h) * 0.5f;
-        canvas.save();
-        canvas.clip_rect({ text_x0, text_band_top, text_w, line_h });
-
         // ── 4a-pre. 选择高亮（在文字下方渲染）──────────────────────────────
         if (is_focused_ && has_selection() && has_text) {
             const float x_sel0   = text_x0 - scroll_offset_x_ + measure_text_width(text_buf_.data(), sel_start());
@@ -826,17 +822,11 @@ void TextBox::render_text_content(paint::Canvas& canvas)
                 { cursor_x, cursor_top, 1.5f, line_h },
                 paint::Brush::solid_rgb(0x6750A4));
         }
-
-        canvas.restore();
     }
     // ────────────────────────────────────────────────────────────────────────
     // 多行模式
     // ────────────────────────────────────────────────────────────────────────
     else {
-        // 裁剪到多行文字带（与选中矩形同范围）
-        canvas.save();
-        canvas.clip_rect({ text_x0, text_y0, text_w, text_h });
-
         const float text_area_w = rect.width - pad.left - pad.right;
         const auto wrapping = text_wrapping();
         const auto lines = split_lines(text_area_w, wrapping);
@@ -921,9 +911,9 @@ void TextBox::render_text_content(paint::Canvas& canvas)
                     paint::Brush::solid_rgb(0x6750A4));
             }
         }
-
-        canvas.restore();
     }
+
+    canvas.restore();
 }
 
 // ============================================================================
