@@ -15,9 +15,41 @@
 #pragma once
 
 #include <mine/core/Memory.h>
+#include <mine/containers/Vector.h>
 #include <cstdint>
 
 namespace mine::text {
+
+// ============================================================================
+// HarfBuzz 文字塑形结果类型
+// ============================================================================
+
+/**
+ * @brief HarfBuzz 塑形后的单个字形信息。
+ *
+ * 包含字形索引、原始文本偏移、位置和前进量，可直接用于光栅化和排版。
+ */
+struct ShapedGlyph {
+    uint32_t codepoint   = 0;  ///< Unicode 码点（用于光栅化）
+    uint32_t glyph_index = 0;  ///< 字体内部字形索引
+    uint32_t cluster     = 0;  ///< 原始 UTF-8 文本中的字节偏移
+    float    x_advance   = 0;  ///< 水平前进量（像素）
+    float    y_advance   = 0;  ///< 垂直前进量（像素，横排时通常为 0）
+    float    x_offset    = 0;  ///< 水平偏移（像素，用于标记定位等）
+    float    y_offset    = 0;  ///< 垂直偏移（像素，横排时通常为 0）
+};
+
+/**
+ * @brief HarfBuzz 文字塑形完整结果。
+ */
+struct ShapeResult {
+    containers::Vector<ShapedGlyph> glyphs;     ///< 塑形后的字形序列
+    float                           advance = 0; ///< 总水平前进量（像素）
+};
+
+// ============================================================================
+// 字形度量 / 光栅化（FreeType 层，与 HarfBuzz 协同）
+// ============================================================================
 
 /**
  * @brief 字形度量信息（单位：像素）。
@@ -188,6 +220,26 @@ public:
                                                         size_t      len,
                                                         float       font_size_px,
                                                         float       character_spacing = 0.0f) const;
+
+    /**
+     * @brief 使用 HarfBuzz 对一段 UTF-8 文字进行塑形（shaping）。
+     *
+     * 塑形过程包括：字符到字形的映射（cmap）、连字（ligature）替换、
+     * 标记定位（mark positioning）、kerning 等 OpenType 特性处理。
+     *
+     * 返回的 ShapedGlyph 序列可直接用于光栅化和排版：
+     *   - codepoint / glyph_index → 传给 rasterize() 获取位图
+     *   - x_advance / x_offset → 累加得到笔触位置
+     *   - cluster → 关联回原始 UTF-8 文本字节偏移
+     *
+     * @param utf8          UTF-8 编码文字缓冲区
+     * @param len           缓冲区字节数
+     * @param font_size_px  字号（逻辑像素）
+     * @return 塑形结果；len==0 或字体无效时返回空 glyphs
+     */
+    [[nodiscard]] ShapeResult shape_text(const char* utf8,
+                                         size_t      len,
+                                         float       font_size_px) const;
 
     /**
      * @brief 默认构造（仅供内部工厂函数使用，直接构造得到的对象无效）。

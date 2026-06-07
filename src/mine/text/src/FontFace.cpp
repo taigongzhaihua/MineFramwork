@@ -14,6 +14,10 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
+// HarfBuzz 文字塑形
+#include <hb.h>
+#include <hb-ft.h>
+
 #include <algorithm>
 #include <cstring>
 
@@ -70,10 +74,17 @@ struct FontFace::Impl {
     bool     is_memory_font; ///< 是否为内存加载（影响析构路径）
     FT_UInt  cached_pixel_h{0}; ///< 上次通过 FT_Set_Pixel_Sizes 设置的字号（0=未设置）
 
+    // ── HarfBuzz 塑形上下文（惰性创建）─────────────────────────────────
+    hb_font_t* hb_font{nullptr};  ///< HarfBuzz 字体对象（绑定到此 FT_Face）
+
     explicit Impl(FT_Face f, bool from_memory)
         : face(f), is_memory_font(from_memory) {}
 
     ~Impl() {
+        if (hb_font != nullptr) {
+            hb_font_destroy(hb_font);
+            hb_font = nullptr;
+        }
         if (face != nullptr) {
             FT_Done_Face(face);
             face = nullptr;
@@ -305,9 +316,16 @@ float FontFace::measure_text(const char* utf8,
         return 0.0f;
     }
 
+    // ── 优先使用 HarfBuzz 塑形 ──────────────────────────────────────────
+    const ShapeResult shaped = shape_text(utf8, len, font_size_px);
+    if (!shaped.glyphs.empty()) {
+        return shaped.advance;
+    }
+
+    // ── 回退：FreeType 逐字测量 ──────────────────────────────────────────
     FT_Face face = impl_->face;
 
-    // 仅在字号变更时才调用 FT_Set_Pixel_Sizes（缓存上次设置的字号，避免冗余调用）
+    // 仅在字号变更时才调用 FT_Set_Pixel_Sizes（缓存上次设置的字号）
     const FT_UInt pixel_h = static_cast<FT_UInt>(font_size_px + 0.5f);
     if (pixel_h != impl_->cached_pixel_h) {
         if (FT_Set_Pixel_Sizes(face, 0, pixel_h) != 0) {
@@ -324,18 +342,15 @@ float FontFace::measure_text(const char* utf8,
     while (p < end) {
         const uint32_t cp = utf8_decode_one(p, end);
         if (cp == 0xFFFDu) {
-            continue;   // 跳过无效字节序列，不累加宽度
+            continue;
         }
 
         const FT_UInt glyph_idx = FT_Get_Char_Index(face, static_cast<FT_ULong>(cp));
 
-        // FT_LOAD_FORCE_AUTOHINT：与渲染器 rasterize() 使用相同 hinting 模式，
-        // 保证 advance 值与实际渲染一致；无需光栅化，只读 advance
         if (FT_Load_Glyph(face, glyph_idx, FT_LOAD_FORCE_AUTOHINT) != 0) {
             continue;
         }
 
-        // advance.x 单位为 1/64 像素，右移 6 位转整像素（与渲染器 AtlasEntry::advance_x 存储方式一致）
         total_width += static_cast<float>(face->glyph->advance.x >> 6);
     }
 
@@ -425,6 +440,181 @@ TextInkBounds FontFace::measure_text_ink_bounds(const char* utf8,
         bounds.height = max_y - min_y;
     }
     return bounds;
+}
+
+// ============================================================================
+// HarfBuzz 文字塑形
+// ============================================================================
+
+// ── HarfBuzz 字体函数回调（桥接 FreeType）─────────────────────────────────
+
+namespace {
+
+/** 获取名义字形索引：码点 → 字体内部 glyph index */
+hb_bool_t ft_get_nominal_glyph(hb_font_t* /*font*/, void* font_data,
+                                hb_codepoint_t unicode, hb_codepoint_t* glyph,
+                                void* /*user_data*/)
+{
+    auto* face = static_cast<FT_Face>(font_data);
+    const FT_UInt gindex = FT_Get_Char_Index(face, static_cast<FT_ULong>(unicode));
+    if (gindex == 0) return false;
+    *glyph = static_cast<hb_codepoint_t>(gindex);
+    return true;
+}
+
+/** 获取字形水平前进量 */
+hb_position_t ft_get_glyph_h_advance(hb_font_t* /*font*/, void* font_data,
+                                      hb_codepoint_t glyph,
+                                      void* /*user_data*/)
+{
+    auto* face = static_cast<FT_Face>(font_data);
+    if (FT_Load_Glyph(face, static_cast<FT_UInt>(glyph), FT_LOAD_FORCE_AUTOHINT) != 0) {
+        return 0;
+    }
+    // FreeType advance.x 单位为 1/64 像素 → HarfBuzz 单位为 1/64 像素（天然一致）
+    return static_cast<hb_position_t>(face->glyph->advance.x);
+}
+
+/** 获取字体度量（上行/下行/行距） */
+hb_bool_t ft_get_font_h_extents(hb_font_t* /*font*/, void* font_data,
+                                 hb_font_extents_t* metrics,
+                                 void* /*user_data*/)
+{
+    auto* face = static_cast<FT_Face>(font_data);
+    const FT_Size_Metrics& m = face->size->metrics;
+    metrics->ascender  = static_cast<hb_position_t>(m.ascender);
+    metrics->descender = static_cast<hb_position_t>(m.descender);
+    metrics->line_gap  = static_cast<hb_position_t>(m.height - m.ascender + m.descender);
+    return true;
+}
+
+/** 获取字形水平原点偏移（用于标记定位 marks positioning） */
+hb_bool_t ft_get_glyph_h_origin(hb_font_t* /*font*/, void* font_data,
+                                 hb_codepoint_t glyph,
+                                 hb_position_t* x, hb_position_t* y,
+                                 void* /*user_data*/)
+{
+    auto* face = static_cast<FT_Face>(font_data);
+    if (FT_Load_Glyph(face, static_cast<FT_UInt>(glyph), FT_LOAD_FORCE_AUTOHINT) != 0) {
+        *x = 0; *y = 0;
+        return false;
+    }
+    *x = static_cast<hb_position_t>(face->glyph->metrics.horiBearingX);
+    *y = static_cast<hb_position_t>(face->glyph->metrics.horiBearingY);
+    return true;
+}
+
+}  // namespace
+
+/** 惰性创建 HarfBuzz 字体对象（绑定到 FT_Face） */
+static hb_font_t* ensure_hb_font(FT_Face ft_face) {
+    // 直接使用 hb-ft 桥接：从 FT_Face 创建 hb_face_t，再创建 hb_font_t
+    hb_face_t* hb_face = hb_ft_face_create_referenced(ft_face);
+    if (hb_face == nullptr) return nullptr;
+
+    hb_font_t* hb_font = hb_font_create(hb_face);
+    hb_face_destroy(hb_face);  // hb_font 持有引用
+
+    // 设置自有字体函数（桥接 FreeType），提供更精确的度量
+    hb_font_funcs_t* funcs = hb_font_funcs_create();
+    hb_font_funcs_set_nominal_glyph_func(funcs, ft_get_nominal_glyph, ft_face, nullptr);
+    hb_font_funcs_set_glyph_h_advance_func(funcs, ft_get_glyph_h_advance, ft_face, nullptr);
+    hb_font_funcs_set_font_h_extents_func(funcs, ft_get_font_h_extents, ft_face, nullptr);
+    hb_font_funcs_set_glyph_h_origin_func(funcs, ft_get_glyph_h_origin, ft_face, nullptr);
+    hb_font_set_funcs(hb_font, funcs, ft_face, nullptr);
+    hb_font_funcs_destroy(funcs);
+
+    return hb_font;
+}
+
+// ── shape_text 公开 API ────────────────────────────────────────────────────
+
+ShapeResult FontFace::shape_text(const char* utf8,
+                                  size_t      len,
+                                  float       font_size_px) const
+{
+    // Vector 为 explicit 默认构造，需显式初始化
+    ShapeResult result;
+    result.glyphs = containers::Vector<ShapedGlyph>(core::default_allocator());
+    result.advance = 0.0f;
+
+    if (impl_ == nullptr || impl_->face == nullptr || utf8 == nullptr || len == 0) {
+        return result;
+    }
+
+    FT_Face ft_face = impl_->face;
+
+    // 1. 设置字号（复用 cached_pixel_h 优化）
+    const FT_UInt pixel_h = static_cast<FT_UInt>(font_size_px + 0.5f);
+    if (pixel_h != impl_->cached_pixel_h) {
+        if (FT_Set_Pixel_Sizes(ft_face, 0, pixel_h) != 0) {
+            return result;
+        }
+        impl_->cached_pixel_h = pixel_h;
+    }
+
+    // 2. 惰性创建 HarfBuzz 字体对象
+    if (impl_->hb_font == nullptr) {
+        impl_->hb_font = ensure_hb_font(ft_face);
+        if (impl_->hb_font == nullptr) return result;
+    }
+
+    // 3. 设置字体缩放（FreeType set_pixel_size 后从 face->size->metrics 读取）
+    const FT_Size_Metrics& m = ft_face->size->metrics;
+    // x_scale / y_scale: 将字体设计单位 (upem) 映射到 1/64 像素
+    const int x_scale = static_cast<int>(
+        (static_cast<int64_t>(m.x_ppem) << 16) / ft_face->units_per_EM);
+    const int y_scale = static_cast<int>(
+        (static_cast<int64_t>(m.y_ppem) << 16) / ft_face->units_per_EM);
+    hb_font_set_scale(impl_->hb_font, x_scale, y_scale);
+    hb_font_set_ppem(impl_->hb_font, m.x_ppem, m.y_ppem);
+
+    // 4. 创建塑形缓冲，添加文本
+    hb_buffer_t* buf = hb_buffer_create();
+    hb_buffer_add_utf8(buf, utf8, static_cast<int>(len), 0, static_cast<int>(len));
+    hb_buffer_set_direction(buf, HB_DIRECTION_LTR);
+    hb_buffer_set_script(buf, HB_SCRIPT_COMMON);     // 自动检测
+    hb_buffer_set_language(buf, hb_language_get_default());
+
+    // 5. 执行塑形
+    hb_shape(impl_->hb_font, buf, nullptr, 0);
+
+    // 6. 提取结果
+    unsigned int glyph_count = 0;
+    hb_glyph_info_t*     glyph_infos = hb_buffer_get_glyph_infos(buf, &glyph_count);
+    hb_glyph_position_t* glyph_pos   = hb_buffer_get_glyph_positions(buf, &glyph_count);
+
+    result.glyphs.reserve(glyph_count);
+
+    float total_advance = 0.0f;
+    const char* text_base = utf8;
+
+    for (unsigned int i = 0; i < glyph_count; ++i) {
+        ShapedGlyph sg;
+        sg.glyph_index = glyph_infos[i].codepoint;  // HarfBuzz 用 "codepoint" 字段存 glyph index
+        sg.cluster     = glyph_infos[i].cluster;
+
+        // 从原始 UTF-8 文本的 cluster 位置解码 Unicode 码点
+        if (sg.cluster < len) {
+            const char* p = text_base + sg.cluster;
+            sg.codepoint = utf8_decode_one(p, text_base + len);
+        }
+
+        // HarfBuzz position 单位为 1/64 像素，转为浮点像素
+        sg.x_advance = static_cast<float>(glyph_pos[i].x_advance) / 64.0f;
+        sg.y_advance = static_cast<float>(glyph_pos[i].y_advance) / 64.0f;
+        sg.x_offset  = static_cast<float>(glyph_pos[i].x_offset)  / 64.0f;
+        sg.y_offset  = static_cast<float>(glyph_pos[i].y_offset)  / 64.0f;
+
+        total_advance += sg.x_advance;
+
+        result.glyphs.push_back(sg);
+    }
+
+    result.advance = total_advance;
+
+    hb_buffer_destroy(buf);
+    return result;
 }
 
 } // namespace mine::text

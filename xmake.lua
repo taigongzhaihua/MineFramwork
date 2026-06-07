@@ -4,14 +4,14 @@ set_xmakever("2.9.9")
 
 add_rules("mode.debug", "mode.release")
 
+add_requires("doctest", {system = false})
+add_requires("freetype", {system = false})
+
 includes("xmake/options.lua")
 includes("xmake/toolchains.lua")
 includes("xmake/rules/mine_module.lua")
 includes("xmake/rules/mml_compile.lua")
 includes("xmake/rules/pkg_export.lua")
-
-add_requires("doctest", {system = false})
-add_requires("freetype", {system = false})
 
 local function include_if_exists(script)
     if os.isfile(path.join(os.scriptdir(), script)) then
