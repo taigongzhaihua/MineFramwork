@@ -4,8 +4,31 @@ set_xmakever("2.9.9")
 
 add_rules("mode.debug", "mode.release")
 
+-- 从 xmake 本地缓存查找 harfbuzz（绕过 GitHub 下载）
+-- 若本地缓存缺失，回退到 xmake-repo 远程下载
+package("harfbuzz", function ()
+    set_kind("library")
+    on_fetch(function (package, opt)
+        if opt.system then return nil end
+        -- 搜索 xmake 包缓存目录下的所有 harfbuzz 版本
+        local cachedir = path.join(os.getenv("LOCALAPPDATA") or "", ".xmake/packages/h/harfbuzz")
+        for _, ver in ipairs(os.dirs(cachedir .. "/*") or {}) do
+            for _, hash in ipairs(os.dirs(path.join(ver, "*")) or {}) do
+                if os.isfile(path.join(hash, "lib/harfbuzz.lib")) then
+                    return {
+                        includedirs = path.join(hash, "include/harfbuzz"),
+                        linkdirs    = path.join(hash, "lib"),
+                        links       = {"harfbuzz"},
+                    }
+                end
+            end
+        end
+    end)
+end)
+
 add_requires("doctest", {system = false})
 add_requires("freetype", {system = false})
+add_requires("harfbuzz")
 
 includes("xmake/options.lua")
 includes("xmake/toolchains.lua")
