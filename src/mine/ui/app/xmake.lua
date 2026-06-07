@@ -17,6 +17,7 @@ mine_module("mine.ui.app", {
         "mine.platform.abi",
         "mine.gfx.rhi",
         "mine.paint",
+        "mine.paint.d3d11",    -- create_renderer 工厂实现（D3D11 渲染后端）
         "mine.ui.window",
         "mine.ui.style",       -- 主题资源字典（Application::set_theme / global_resources）
         "mine.ui.animation",   -- AnimationClock::tick_all（Application::tick_and_render 驱动）

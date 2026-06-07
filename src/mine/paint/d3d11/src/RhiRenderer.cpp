@@ -6,33 +6,27 @@
  * 实现 IRenderer 接口，不依赖任何具体图形 API（D3D11/D3D12/Vulkan）。
  *
  * M0 阶段支持：
- *   - FillRect / StrokeRect：矩形 SDF 渲染，抗锯齿填充与中心对齐描边
- *   - FillRoundedRect / StrokeRoundedRect：均匀圆角矩形 SDF
- *   - FillComplexRoundedRect / StrokeComplexRoundedRect：四角独立圆角矩形 SDF
- *   - FillEllipse / StrokeEllipse：椭圆 SDF（IQ 近似公式）
- *   - StrokeBorderedRect：四边各自独立宽度的矩形内侧描边 SDF（kind=4）
- *   - StrokeBorderedRoundedRect：四边独立宽度 + 四角独立圆角的内侧描边 SDF（kind=5）
- *   - StrokeLine：线段 SDF 描边，天然抗锯齿，支持 Flat/Round/Square 端点样式（kind=6）
- *   - StrokeArc：圆弧 SDF 描边（IQ 旋转坐标系法），支持 Flat/Round cap（kind=7）
- *   - StrokeQuadBezier：二次贝塞尔曲线 SDF 描边（IQ 解析解），支持 Flat/Round cap（kind=8）
- *   - StrokeCubicBezier：三次贝塞尔曲线 SDF 描边（数値迭代：17步采样+Newton精化），支持 Flat/Round cap（kind=9）
+ *   - FillRect / StrokeRect / FillRoundedRect / StrokeRoundedRect 等 SDF 形状渲染
+ *   - 亚克力背景模糊（高斯模糊分离通道）
+ *   - 文字渲染（字形图集采样 + 统一软裁剪）
+ *   - 裁剪系统（ClipSdfCB 像素着色器软裁剪，无模板缓冲锯齿）
  *
  * 渲染架构：
- *   - 规则形状与曲线描边走 SDF 管线，SDF 参数编入顶点，逐像素精确 AA
- *   - FillPath / StrokePath 在 CPU 端先扁平化 Path，再分别走多边形 SDF 填充与折线三角带描边
- *
- * SDF 顶点格式（SdfVertex，80 字节）：
- *   pos(2) + color(4) + local(2) + params0(4) + params1(4) + extra(4) float
- * 视口变换：顶点着色器将屏幕像素坐标映射到 NDC（Y 轴翻转）
+ *   - 着色器字节码由 build_shaders.ps1 预编译，通过 ShaderBytecode.h 引入
+ *   - 顶点格式和常量缓冲结构体定义在 PaintShaderTypes.h
+ *   - 字形图集管理见 GlyphAtlas.h/cpp
+ *   - Path 扁平化辅助见 PathFlattener.h/cpp
  *
  * SDF kind 常量：
  *   0=矩形, 1=均匀圆角矩形, 2=四角独立圆角矩形, 3=椭圆
  *   4=四边不等宽矩形内侧描边, 5=四边不等宽+四角独立圆角内侧描边
- *   6=线段描边（Flat/Round/Square 端点样式）
- *   7=圆弧描边（Flat/Round cap，IQ 旋转坐标系）
- *   8=二次贝塞尔曲线描边（Flat/Round cap，IQ 解析解）
- *   9=三次贝塞尔曲线描边（Flat/Round cap，17步采样+Newton数値迭代）
+ *   6=线段描边, 7=圆弧描边, 8=二次贝塞尔描边, 9=三次贝塞尔描边
  */
+
+#include "RhiRenderer.h"
+#include "PaintShaderTypes.h"
+#include "GlyphAtlas.h"
+#include "PathFlattener.h"
 
 #include <mine/paint/IRenderer.h>
 #include <mine/paint/DisplayList.h>
@@ -51,1921 +45,25 @@
 #include <algorithm>
 #include <cmath>
 
+// 预编译着色器字节码（由 scripts/build_shaders.ps1 生成）
+#include <mine/gfx/d3d11/ShaderBytecode.h>
+
 namespace mine::paint {
 
-// ── HLSL 着色器源码（M0 阶段运行时编译，后续改为预编译字节码）──────────────
-
-/// 顶点着色器：将屏幕像素坐标转换为 NDC，透传颜色
-static constexpr const char k_vertex_shader_hlsl[] = R"hlsl(
-// 常量缓冲：视口尺寸（字节大小必须为 16 的倍数）
-cbuffer ViewportCB : register(b0) {
-    float2 viewport_size;
-    float2 _padding;
-};
-
-struct VSIn {
-    float2 pos   : POSITION;
-    float4 color : COLOR;
-};
-
-struct VSOut {
-    float4 pos   : SV_Position;
-    float4 color : COLOR;
-};
-
-VSOut main(VSIn input) {
-    VSOut output;
-    // 屏幕像素坐标 → NDC
-    //   X：[0, width]  → [-1,  1]
-    //   Y：[0, height] → [ 1, -1]（屏幕 Y 向下，NDC Y 向上，故翻转）
-    output.pos.x =  (input.pos.x / viewport_size.x) * 2.0f - 1.0f;
-    output.pos.y = -(input.pos.y / viewport_size.y) * 2.0f + 1.0f;
-    output.pos.z =  0.0f;
-    output.pos.w =  1.0f;
-    output.color =  input.color;
-    return output;
-}
-)hlsl";
-
-/// 像素着色器：直接输出顶点插值颜色
-static constexpr const char k_pixel_shader_hlsl[] = R"hlsl(
-struct PSIn {
-    float4 pos   : SV_Position;
-    float4 color : COLOR;
-};
-
-float4 main(PSIn input) : SV_Target {
-    return input.color;
-}
-)hlsl";
-
-// ── SDF 着色器源码（用于矩形/圆角矩形/复杂圆角/椭圆的填充与描边）──────────
-
-/// SDF 顶点着色器：坐标变换，透传 SDF 参数
-static constexpr const char k_sdf_vertex_shader_hlsl[] = R"hlsl(
-cbuffer ViewportCB : register(b0) {
-    float2 viewport_size;       // 逻辑像素尺寸（NDC 变换用）
-    float2 phys_viewport_size;  // 物理像素尺寸（像素着色器使用）
-};
-
-struct SdfVSIn {
-    float2 pos     : POSITION;   // 屏幕像素坐标（包围盒顶点）
-    float4 color   : COLOR;      // 线性 RGBA 颜色
-    float2 local   : TEXCOORD0;  // 本地坐标（以形状中心为原点，像素单位）
-    float4 params0 : TEXCOORD1;  // (kind, half_w, half_h, p0)
-    float4 params1 : TEXCOORD2;  // (p1, p2, p3, stroke_w)
-    float4 extra   : TEXCOORD3;  // 扩展参数（StrokeBorderedRoundedRect 的四角圆角半径）
-};
-
-struct SdfVSOut {
-    float4 pos     : SV_Position;
-    float4 color   : COLOR;
-    float2 local   : TEXCOORD0;
-    float4 params0 : TEXCOORD1;
-    float4 params1 : TEXCOORD2;
-    float4 extra   : TEXCOORD3;
-};
-
-SdfVSOut main(SdfVSIn i) {
-    SdfVSOut o;
-    // 屏幕像素坐标 → NDC（Y 轴翻转）
-    o.pos.x =  (i.pos.x / viewport_size.x) * 2.0f - 1.0f;
-    o.pos.y = -(i.pos.y / viewport_size.y) * 2.0f + 1.0f;
-    o.pos.z =  0.0f;
-    o.pos.w =  1.0f;
-    o.color   = i.color;
-    o.local   = i.local;
-    o.params0 = i.params0;
-    o.params1 = i.params1;
-    o.extra   = i.extra;
-    return o;
-}
-)hlsl";
-
-/// SDF 像素着色器：根据形状类型计算有向距离场，实现亚像素抗锯齿
-/// 注：此着色器源码因 MSVC 单字符串常量不超过 16380 字节的限制，被拆分为多段相邻字符串常量。
-static constexpr const char k_sdf_pixel_shader_hlsl[] =
-// ── 段 1：常量缓冲声明、纹理绑定、渐变辅助函数 ────────────────────────────
-R"hlsl(
-// 视口常量缓冲（b0 槽，与顶点着色器共享）
-cbuffer ViewportCB : register(b0) {
-    float2 viewport_size;       // 逻辑像素尺寸（NDC 变换用）
-    float2 phys_viewport_size;  // 物理像素尺寸（SV_Position → UV 用）
-};
-
-// 画刷数据常量缓冲（b2 槽，每个 DrawCall 更新一次）
-// 总大小：128 字节（8 × float4，16 字节对齐）
-cbuffer BrushDataCB : register(b2) {
-    uint   brush_kind;       // 画刷类型：0=纯色，1=线性渐变，2=径向渐变，3=亚克力
-    uint   stop_count;       // 渐变色标数量 [2..4]（brush_kind=1/2 时有效）
-    float  _brush_pad0;
-    float  _brush_pad1;
-    //   linear:  xy=起点 local 坐标（像素，相对形状中心），zw=渐变方向向量 local
-    //   radial:  xy=圆心 local 坐标（像素），z=外径（像素），w=内径（像素）
-    //   acrylic: xyzw=色调颜色（rgba，线性空间）
-    float4 grad_params;
-    //   acrylic: x=色调混合比例 [0,1]，y=饱和度增益（1.0=原始）
-    float4 grad_extra;
-    float4 stop_colors[4];   // 渐变色标颜色（rgba，线性空间，最多 4 个）
-    float4 stop_offsets;     // 色标偏移量（x=off0, y=off1, z=off2, w=off3）
-};
-
-// 裁剪 SDF 常量缓冲（b3 槽，每次裁剪状态变化时更新）
-// 最多 4 层嵌套裁剪，每层含内联顶点数据（多边形裁剪用）
-struct ClipSdfLayer {
-    float4 bounds;          // (cx, cy, half_w, half_h)：裁剪形状的中心和半尺寸（逻辑像素）
-    float4 kind_p0_p1_p2;  // (kind, p0, p1, p2)：形状类型及圆角参数
-    float4 p3_nv_pad;       // (p3, poly_vert_count_f, _, _)：左上圆角/多边形顶点数/填充
-    float4 poly_verts[64];  // 多边形顶点（xy=相对裁剪区域中心的本地坐标，zw=0）
-};
-cbuffer ClipSdfCB : register(b3) {
-    int   clip_count;   // 当前活跃裁剪层数（0=无裁剪）
-    float _cpad0;
-    float _cpad1;
-    float _cpad2;
-    ClipSdfLayer clip_layers[4];  // 最多 4 层嵌套裁剪
-};
-
-// 亚克力模糊背景纹理（t0 槽，仅亚克力 DrawCall 绑定时有效）
-Texture2D    acrylic_backdrop : register(t0);
-SamplerState acrylic_sampler  : register(s0);  // 线性双线性采样器
-
-// 根据归一化参数 t [0,1] 在色标数组中插值，返回 rgba 颜色
-float4 sample_gradient(float t) {
-    t = saturate(t);
-    float o0 = stop_offsets.x;
-    float o1 = stop_offsets.y;
-    float o2 = stop_offsets.z;
-    float o3 = stop_offsets.w;
-    float t01 = saturate((t - o0) / max(o1 - o0, 1e-6f));
-    float t12 = saturate((t - o1) / max(o2 - o1, 1e-6f));
-    float t23 = saturate((t - o2) / max(o3 - o2, 1e-6f));
-    float4 c01 = lerp(stop_colors[0], stop_colors[1], t01);
-    float4 c12 = lerp(stop_colors[1], stop_colors[2], t12);
-    float4 c23 = lerp(stop_colors[2], stop_colors[3], t23);
-    float4 c = c01;
-    if (stop_count >= 3u && t > o1) c = c12;
-    if (stop_count >= 4u && t > o2) c = c23;
-    return c;
-}
-)hlsl"
-// ── 段 2：SDF 函数（外正内负，IQ 标准约定）─────────────────────────────────
-R"hlsl(
-
-// 矩形 SDF：p=本地坐标，b=半尺寸
-float box_sdf(float2 p, float2 b) {
-    float2 q = abs(p) - b;
-    return length(max(q, 0.0f)) + min(max(q.x, q.y), 0.0f);
-}
-
-// 均匀圆角矩形 SDF：r = 统一圆角半径
-float rounded_box_sdf(float2 p, float2 b, float r) {
-    float2 q = abs(p) - b + r;
-    return length(max(q, 0.0f)) + min(max(q.x, q.y), 0.0f) - r;
-}
-
-// 四角独立圆角矩形 SDF
-// r = (右下, 右上, 左下, 左上) 各向同性圆角半径
-float complex_rounded_box_sdf(float2 p, float2 b, float4 r) {
-    r.xy = (p.x > 0.0f) ? r.xy : r.zw;
-    r.x  = (p.y > 0.0f) ? r.x  : r.y;
-    float2 q = abs(p) - b + r.x;
-    return length(max(q, 0.0f)) + min(max(q.x, q.y), 0.0f) - r.x;
-}
-
-// 椭圆精确 SDF（IQ 解析公式，通过三次方程求最近点，任意椭圆率均精确）
-// 来源：https://iquilezles.org/articles/ellipsedist/
-// 算法：将椭圆最近点问题转化为一元三次方程，分两个分支求解（d<0 用 acos，d>=0 用立方根）。
-// 约定：外正内负（返回值正=外部，负=内部），与其余 SDF 保持一致。
-float ellipse_sdf(float2 p, float2 ab) {
-    // 将问题折叠到第一象限；确保 ab.y >= ab.x（长轴在 y 方向）
-    // 若 a > b（x 轴为长轴），交换两轴，将问题等价变换为 b' > a' 的情况
-    p = abs(p);
-    if (ab.x > ab.y) { p = p.yx; ab = ab.yx; }
-    // 圆形特殊处理（l = 0 → m/n 分母为零）
-    float l = ab.y*ab.y - ab.x*ab.x;
-    if (l < 1e-4f) return length(p) - ab.x;
-    float m  = ab.x*p.x / l;   float m2 = m*m;
-    float n  = ab.y*p.y / l;   float n2 = n*n;
-    float c  = (m2 + n2 - 1.0f) / 3.0f;
-    float c3 = c*c*c;
-    float q  = c3 + m2*n2*2.0f;
-    float d  = c3 + m2*n2;
-    float g  = m + m*n2;
-
-    float co;
-    if (d < 0.0f) {
-        // 三个实根分支：用 acos 公式
-        // d<0 分支中 c<0（故 c3<0），直接除（无零值风险），再 clamp 至 [-1,1] 保证 acos 稳定
-        float h  = acos(clamp(q / c3, -1.0f, 1.0f)) / 3.0f;
-        float s  = cos(h);
-        float t  = sin(h) * 1.7320508f;  // sqrt(3)
-        float rx = sqrt(max(-c*(s + t + 2.0f) + m2, 0.0f));
-        float ry = sqrt(max(-c*(s - t + 2.0f) + m2, 0.0f));
-        co = (ry + sign(l)*rx + abs(g) / max(rx*ry, 1e-7f) - m) / 2.0f;
-    } else {
-        // 一个实根分支：用立方根公式
-        float h  = 2.0f*m*n*sqrt(d);
-        float s  = sign(q + h) * pow(abs(q + h), 1.0f/3.0f);
-        float u  = sign(q - h) * pow(abs(q - h), 1.0f/3.0f);
-        float rx = -s - u - c*4.0f + 2.0f*m2;
-        float ry = (s - u) * 1.7320508f;
-        float rm = sqrt(rx*rx + ry*ry);
-        // ry/sqrt(rm-rx) = sign(ry)*sqrt(rm+rx)（代数等价，避免 rm≈rx 时的下溢）
-        co = (sign(ry)*sqrt(max(rm + rx, 0.0f)) + 2.0f*g / max(rm, 1e-7f) - m) / 2.0f;
-    }
-
-    // co 为最近椭圆点的 x 归一化坐标，clamp 防止数值漂移超出 [0,1]
-    co = clamp(co, 0.0f, 1.0f);
-    float2 r = ab * float2(co, sqrt(max(1.0f - co*co, 0.0f)));
-    // 用椭圆方程判断内外：(p/ab)² - 1 < 0 = 内部（负）；> 0 = 外部（正）
-    // 比 sign(p.y-r.y) 更稳健，避免 p 在 x 轴时两者均为 0 导致 sign=0 的歧义
-    float inside = dot(p / ab, p / ab) - 1.0f;
-    return length(r - p) * sign(inside);
-}
-
-// ── 像素着色器主函数 ─────────────────────────────────────────────────────────
-
-// ── 多边形顶点常量缓冲（b1 槽，仅多边形 DrawCall 绑定）────────────────────
-// 内存布局（16 字节对齐）：
-//   偏移   0: poly_vert_count（int）— 实际顶点数（3..64）
-//   偏移   4: _poly_pad0/1/2（填充）
-//   偏移  16: poly_verts[0..63]（float4，每顶点 xy=本地坐标，zw 填充为0）
-cbuffer PolygonVertsCB : register(b1) {
-    int   poly_vert_count;  // 多边形实际顶点数（3..64）
-    float _poly_pad0;
-    float _poly_pad1;
-    float _poly_pad2;
-    float4 poly_verts[64];  // 顶点本地坐标（x=local_x, y=local_y，zw 不使用）
-};
-
-// 多边形 SDF（IQ 绕数法，支持凸多边形和凹多边形，任意简单多边形均正确）
-// 算法来源：https://iquilezles.org/articles/distfunctions2d/
-// 参数 p：当前像素的本地坐标（以 AABB 中心为原点，单位像素）
-// 返回值：外正内负的有向距离（像素单位）
-float sdPolygon(float2 p) {
-    int n = poly_vert_count;
-    // 以第一条边到 p 的最近点距离平方作为初始最小距离
-    float d = dot(p - poly_verts[0].xy, p - poly_verts[0].xy);
-    float s = 1.0f;  // 符号（1=外部，-1=内部）
-    [loop]
-    for (int i = 0, j = n - 1; i < n; j = i, i++) {
-        float2 vi = poly_verts[i].xy;
-        float2 vj = poly_verts[j].xy;
-        // 点 p 到边 (vi, vj) 的最近点投影，计算距离平方
-        float2 e = vj - vi;
-        float2 w = p - vi;
-        float2 b = w - e * clamp(dot(w, e) / dot(e, e), 0.0f, 1.0f);
-        d = min(d, dot(b, b));
-        // 用射线法（绕数法变体）判断 p 是否在多边形内部，确定 SDF 符号
-        // 三个条件同为 true 或同为 false 时翻转符号（等价于 all(cond) || all(!cond)）
-        bool c0 = (p.y >= vi.y);
-        bool c1 = (p.y <  vj.y);
-        bool c2 = (e.x * w.y > e.y * w.x);
-        if ((c0 && c1 && c2) || (!c0 && !c1 && !c2)) s = -s;
-    }
-    return s * sqrt(d);
-}
-
-struct SdfPSIn {
-    float4 pos     : SV_Position;
-    float4 color   : COLOR;
-    float2 local   : TEXCOORD0;
-    float4 params0 : TEXCOORD1;  // (kind, half_w, half_h, p0)
-    float4 params1 : TEXCOORD2;  // (p1, p2, p3, stroke_w)
-    float4 extra   : TEXCOORD3;  // 扩展参数（圆角四边独立描边：x=r_tl, y=r_tr, z=r_br, w=r_bl）
-};
-)hlsl"
-// ── 字符串拆分（MSVC 原始字符串长度限制），以下为裁剪 SDF 辅助函数 ──────────
-R"hlsl(
-// ── 裁剪 SDF 辅助函数 ──────────────────────────────────────────────────────────
-
-// 内联多边形 SDF（使用 ClipSdfCB 层内顶点，以裁剪 AABB 中心为原点）
-// li = 裁剪层索引，nv = 多边形顶点数
-float sdClipPolygon(float2 p, int li, int nv) {
-    float d2 = dot(p - clip_layers[li].poly_verts[0].xy,
-                   p - clip_layers[li].poly_verts[0].xy);
-    float s = 1.0f;
-    [loop]
-    for (int vi = 0, vj = nv - 1; vi < nv; vj = vi, vi++) {
-        float2 vvi = clip_layers[li].poly_verts[vi].xy;
-        float2 vvj = clip_layers[li].poly_verts[vj].xy;
-        float2 e = vvj - vvi;
-        float2 w = p - vvi;
-        float2 b2 = w - e * clamp(dot(w, e) / dot(e, e), 0.0f, 1.0f);
-        d2 = min(d2, dot(b2, b2));
-        bool c0 = (p.y >= vvi.y);
-        bool c1 = (p.y <  vvj.y);
-        bool c2 = (e.x * w.y > e.y * w.x);
-        if ((c0 && c1 && c2) || (!c0 && !c1 && !c2)) s = -s;
-    }
-    return s * sqrt(d2);
-}
-
-// 评估所有裁剪层的综合覆盖率（0=完全裁剪，1=完全可见，[0,1]=抗锯齿过渡）
-// sv_pos：像素着色器 SV_Position.xy（物理像素坐标）
-float evaluate_clip_coverage(float2 sv_pos) {
-    if (clip_count <= 0) return 1.0f;
-    // 物理像素坐标 → 逻辑像素坐标（使用视口缩放比）
-    float2 lp = sv_pos * viewport_size / phys_viewport_size;
-    float coverage = 1.0f;
-    [loop]
-    for (int ci = 0; ci < clip_count; ci++) {
-        float2 cp  = lp - clip_layers[ci].bounds.xy;  // 相对裁剪中心的偏移
-        float  chw = clip_layers[ci].bounds.z;
-        float  chh = clip_layers[ci].bounds.w;
-        int    ck  = (int)(clip_layers[ci].kind_p0_p1_p2.x + 0.5f);
-        float  dc;
-        if (ck == 1) {
-            // 均匀圆角矩形
-            dc = rounded_box_sdf(cp, float2(chw, chh), clip_layers[ci].kind_p0_p1_p2.y);
-        } else if (ck == 2) {
-            // 四角独立圆角矩形（p0=r_br, p1=r_tr, p2=r_bl, p3=r_tl）
-            float r0 = clip_layers[ci].kind_p0_p1_p2.y;
-            float r1 = clip_layers[ci].kind_p0_p1_p2.z;
-            float r2 = clip_layers[ci].kind_p0_p1_p2.w;
-            float r3 = clip_layers[ci].p3_nv_pad.x;
-            dc = complex_rounded_box_sdf(cp, float2(chw, chh), float4(r0, r1, r2, r3));
-        } else if (ck == 10) {
-            // 多边形
-            int nv = clamp((int)(clip_layers[ci].p3_nv_pad.y + 0.5f), 3, 64);
-            dc = sdClipPolygon(cp, ci, nv);
-        } else {
-            // 矩形（ck == 0）
-            dc = box_sdf(cp, float2(chw, chh));
-        }
-        float fw_c = max(fwidth(dc), 0.5f);
-        coverage *= 1.0f - smoothstep(-fw_c, fw_c, dc);
-    }
-    return coverage;
-}
-
-float4 main(SdfPSIn i) : SV_Target {
-    // 解包 SDF 参数
-    int   kind     = (int)(i.params0.x + 0.5f);
-    float half_w   = i.params0.y;
-    float half_h   = i.params0.z;
-    float p0       = i.params0.w;  // 圆角半径参数 0（均匀圆角/右下）
-    float p1       = i.params1.x;  // 圆角半径参数 1（右上）
-    float p2       = i.params1.y;  // 圆角半径参数 2（左下）
-    float p3       = i.params1.z;  // 圆角半径参数 3（左上）
-    float stroke_w = i.params1.w;  // 描边总宽度（0 = 填充模式）
-
-    float2 p = i.local;
-    float2 b = float2(half_w, half_h);
-
-    // 根据形状类型计算有向距离场（外正内负）
-    float d;
-    if (kind == 0) {
-        // 矩形
-        d = box_sdf(p, b);
-    } else if (kind == 1) {
-        // 均匀圆角矩形
-        d = rounded_box_sdf(p, b, p0);
-    } else if (kind == 2) {
-        // 四角独立圆角矩形（p0=右下, p1=右上, p2=左下, p3=左上）
-        d = complex_rounded_box_sdf(p, b, float4(p0, p1, p2, p3));
-    } else if (kind == 4) {
-        // 四边不等宽矩形内侧描边（p0=top_w, p1=right_w, p2=bottom_w, p3=left_w）
-        //
-        // 算法：对四条边各自独立计算描边遮罩，取联集（max）。
-        //   - 到上边缘的距离：dist_top    = p.y + b.y  （0 在上边缘，正值向下）
-        //   - 到下边缘的距离：dist_bottom = b.y - p.y  （0 在下边缘，正值向上）
-        //   - 到左边缘的距离：dist_left   = p.x + b.x
-        //   - 到右边缘的距离：dist_right  = b.x - p.x
-        // 当 dist < edge_width 时该像素在对应边的描边带内；用 smoothstep AA 过渡。
-        // 宽度为 0 的边直接返回 0，不产生任何描边，彻底避免宽度相等时的 SDF 叠乘伪影。
-        float d_outer = box_sdf(p, b);
-        float fw_o = max(fwidth(d_outer), 0.5f);
-        float a_outer = 1.0f - smoothstep(-fw_o, fw_o, d_outer);  // 1=矩形内，外侧 AA
-
-        float fy = max(fwidth(p.y), 0.5f);
-        float fx = max(fwidth(p.x), 0.5f);
-        // 各边遮罩：dist < edge_width → 1.0（在带内），dist > edge_width → 0.0（带外），smoothstep AA
-        float a_top    = p0 > 0.0f ? 1.0f - smoothstep(p0 - fy, p0 + fy, p.y + b.y) : 0.0f;
-        float a_bottom = p2 > 0.0f ? 1.0f - smoothstep(p2 - fy, p2 + fy, b.y - p.y) : 0.0f;
-        float a_left   = p3 > 0.0f ? 1.0f - smoothstep(p3 - fx, p3 + fx, p.x + b.x) : 0.0f;
-        float a_right  = p1 > 0.0f ? 1.0f - smoothstep(p1 - fx, p1 + fx, b.x - p.x) : 0.0f;
-        // 联集：任意一边有描边即显示；乘以外矩形遮罩确保超出矩形外的部分透明
-        float a_stroke = max(max(a_top, a_bottom), max(a_left, a_right));
-        float al = a_outer * a_stroke;
-        float4 c2 = i.color;
-        al *= evaluate_clip_coverage(i.pos.xy);
-        return float4(c2.rgb * c2.a * al, c2.a * al);
-    } else if (kind == 5) {
-        // 四边不等宽 + 四角独立圆角内侧描边
-        //
-        // 算法：外轮廓圆角矩形 SDF 减去内轮廓圆角矩形 SDF，描边区域 = 外内之差。
-        // 内矩形由 Thickness 向各边收缩：
-        //   inner_b.x = b.x - (left + right) / 2
-        //   inner_b.y = b.y - (top  + bottom) / 2
-        //   inner_p   = p - float2((left - right) / 2, (top - bottom) / 2)
-        // 内圆角（仿 ComplexRoundedRect::inner_rect 公式，各向同性化后取 min）：
-        //   ir_tl = max(0, r_tl - max(left, top))   ← x=r_tl-left, y=r_tl-top 的标量化
-        //   其余角依此类推
-        //
-        // p0=top_w, p1=right_w, p2=bottom_w, p3=left_w（math::Thickness 字段顺序：left,top,right,bottom）
-        // extra.x=r_tl（左上）, extra.y=r_tr（右上）, extra.z=r_br（右下）, extra.w=r_bl（左下）
-        float r_tl = i.extra.x;
-        float r_tr = i.extra.y;
-        float r_br = i.extra.z;
-        float r_bl = i.extra.w;
-
-        // 外轮廓（含圆角）
-        float d_outer = complex_rounded_box_sdf(p, b, float4(r_br, r_tr, r_bl, r_tl));
-        float fw_o = max(fwidth(d_outer), 0.5f);
-        float a_outer = 1.0f - smoothstep(-fw_o, fw_o, d_outer);
-
-        // 内矩形：各边内缩，中心随非对称边宽偏移。
-        //
-        // 问题：当某边宽为0时，内矩形该侧边界与外矩形边界重合，
-        //       两个 smoothstep 过渡同时激活，产生 a*(1-a)≤0.25 的 ghost 细线。
-        //
-        // 修复：对宽度为0的边，将内矩形对应侧边界向外扩展 (fw_o+1)px，
-        //       超出外矩形 AA 区，使该侧 a_inner→1，消除 ghost。
-        //       扩展时只移动零宽那侧边界，通过同步调整内矩形中心保证对侧边界不变。
-        //
-        // 设 la/ra/ta/ba 为各侧扩展量（零宽边取 fw_o+1，否则取 0）：
-        //   inner_center_x 偏移 = (p3-p1-la+ra)/2  （向右为正）
-        //   inner_b.x = b.x - (p3+p1)/2 + (la+ra)/2
-        //   inner_p.x = p.x - (p3-p1-la+ra)/2
-        float ghost = fw_o + 1.0f;
-        float la = p3 < 0.0001f ? ghost : 0.0f;  // 左边宽=0时，内矩形左侧外扩
-        float ra = p1 < 0.0001f ? ghost : 0.0f;  // 右边宽=0时，内矩形右侧外扩
-        float ta = p0 < 0.0001f ? ghost : 0.0f;  // 上边宽=0时，内矩形上侧外扩
-        float ba = p2 < 0.0001f ? ghost : 0.0f;  // 下边宽=0时，内矩形下侧外扩
-        float2 inner_b = max(float2(b.x - (p3 + p1) * 0.5f + (la + ra) * 0.5f,
-                                    b.y - (p0 + p2) * 0.5f + (ta + ba) * 0.5f),
-                             float2(0.0f, 0.0f));
-        float2 inner_p = p - float2((p3 - p1 - la + ra) * 0.5f, (p0 - p2 - ta + ba) * 0.5f);
-
-        // 内圆角（对应 ComplexRoundedRect::inner_rect：x 分量减水平边宽，y 分量减垂直边宽）
-        // 各向同性化后：min(r - left, r - top) = r - max(left, top)，再 clamp 到 0
-        float ir_tl = max(0.0f, r_tl - max(p3, p0));  // 左上：left=p3, top=p0
-        float ir_tr = max(0.0f, r_tr - max(p1, p0));  // 右上：right=p1, top=p0
-        float ir_br = max(0.0f, r_br - max(p1, p2));  // 右下：right=p1, bottom=p2
-        float ir_bl = max(0.0f, r_bl - max(p3, p2));  // 左下：left=p3, bottom=p2
-
-        // 内轮廓
-        float d_inner = complex_rounded_box_sdf(inner_p, inner_b, float4(ir_br, ir_tr, ir_bl, ir_tl));
-        float fw_i = max(fwidth(d_inner), 0.5f);
-        float a_inner = 1.0f - smoothstep(-fw_i, fw_i, d_inner);
-
-        // 外轮廓内 且 内轮廓外 → 描边带
-        float al = a_outer * (1.0f - a_inner);
-        float4 c3 = i.color;
-        al *= evaluate_clip_coverage(i.pos.xy);
-        return float4(c3.rgb * c3.a * al, c3.a * al);
-    } else if (kind == 6) {
-        // ── 线段 SDF 描边（天然抗锯齿，含独立起止端点样式）──────────────
-        //
-        // 参数映射：
-        //   extra.xy = 端点 A 本地坐标（起点，以线段中心为原点）
-        //   extra.zw = 端点 B 本地坐标（终点，以线段中心为原点）
-        //   p0       = start_cap（0=Flat 截断, 1=Round 圆形, 2=Square 方形延伸）
-        //   p1       = end_cap（同上）
-        //   stroke_w = 线宽（总宽度，非半宽）
-        //
-        // 算法：将像素投影到线段方向和法线方向，
-        //   按投影位置分三段（A 端/主体/B 端）分别计算 SDF，
-        //   最终用 smoothstep AA 过渡。
-        float2 a = i.extra.xy;             // 端点 A（本地坐标）
-        float2 b = i.extra.zw;             // 端点 B（本地坐标）
-        float half_sw = stroke_w * 0.5f;  // 线宽一半
-
-        float2 ba = b - a;
-        float seg_len = length(ba);
-        // 线段单位方向向量（零长线段退化为水平方向）
-        float2 dir = seg_len > 1e-6f ? ba / seg_len : float2(1.0f, 0.0f);
-        // 法线单位向量（左旋 90°）
-        float2 nor = float2(-dir.y, dir.x);
-
-        float2 pa = p - a;                      // 像素相对于端点 A 的向量
-        float proj_along = dot(pa, dir);        // 沿线段方向的投影（0=A点, seg_len=B点）
-        float v = abs(dot(pa, nor));            // 垂直线段方向的距离（取绝对值）
-
-        int scap = (int)(p0 + 0.5f);           // start_cap 类型
-        int ecap = (int)(p1 + 0.5f);           // end_cap 类型
-
-        float d6;
-        if (proj_along < 0.0f) {
-            // A 端 cap 区域（投影超出 A 点之外）
-            if (scap == 1) {
-                // Round：圆形端点，到端点 A 的欧氏距离 - 半线宽
-                d6 = length(pa) - half_sw;
-            } else if (scap == 2) {
-                // Square：从 A 点向外延伸 half_sw 的矩形角
-                d6 = length(float2(max(-proj_along - half_sw, 0.0f),
-                                   max(v - half_sw, 0.0f)));
-            } else {
-                // Flat（默认）：在 A 端面精确截断，超出端面即外部
-                d6 = length(float2(-proj_along, max(v - half_sw, 0.0f)));
-            }
-        } else if (proj_along > seg_len) {
-            // B 端 cap 区域（投影超出 B 点之外）
-            float2 pb = p - b;                  // 像素相对于端点 B 的向量
-            float pb_over = proj_along - seg_len; // 超出 B 端的量（>0）
-            if (ecap == 1) {
-                // Round：圆形端点，到端点 B 的欧氏距离 - 半线宽
-                d6 = length(pb) - half_sw;
-            } else if (ecap == 2) {
-                // Square：从 B 点向外延伸 half_sw 的矩形角
-                d6 = length(float2(max(pb_over - half_sw, 0.0f),
-                                   max(v - half_sw, 0.0f)));
-            } else {
-                // Flat（默认）：在 B 端面精确截断
-                d6 = length(float2(pb_over, max(v - half_sw, 0.0f)));
-            }
-        } else {
-            // 主体区域（投影在线段内 [0, seg_len]）：仅垂直方向距离
-            d6 = v - half_sw;
-        }
-
-        float fw6 = max(fwidth(d6), 0.5f);
-        float al6 = 1.0f - smoothstep(-fw6, fw6, d6);
-        float4 cs = i.color;
-        al6 *= evaluate_clip_coverage(i.pos.xy);
-        return float4(cs.rgb * cs.a * al6, cs.a * al6);
-    }
-)hlsl"
-// ── 字符串拆分（MSVC 原始字符串长度限制），以下为 kind=7/8 续接 ──────────
-R"hlsl(
-    else if (kind == 7) {
-        // ── 圆弧 SDF 描边（IQ 旋转坐标系法，支持 Flat/Round 端点）────────
-        //
-        // 参数映射：
-        //   p0       = 圆弧半径 r
-        //   p1       = 弧中心角（弧度，= start_angle + sweep * 0.5）
-        //   p2       = 半张角（弧度，= |sweep| * 0.5）
-        //   p3       = cap 样式（0=Flat 截断, 1=Round 圆形；两端使用相同 cap）
-        //   stroke_w = 线宽（总宽度，非半宽）
-        //   extra.xy = 圆心本地坐标（Quad 中心通常即为圆心，故通常为 (0,0)）
-        //
-        // 算法（IQ arc SDF）：
-        //   1. 将 p 旋转到以弧中心角方向为 y 轴正方向的坐标系（q）
-        //   2. 利用弧对称性，折叠 q.x → abs(q.x)（化为单侧端点判断）
-        //   3. 条件 sc.y*qa.x > sc.x*qa.y 判断 qa 是否在端点扇形区域外
-        //      是 → 端点 cap SDF；否 → 圆环 SDF（abs(|qa|-r) - half_sw）
-        //   Flat cap：用端点处切线截断矩形截面 SDF（类比线段 Flat cap）
-        //   Round cap：到端点的欧氏距离 - half_sw
-        float arc_r   = p0;
-        float mid     = p1;                    // 弧中心角（弧度）
-        float hs      = p2;                    // 半张角（弧度，= |sweep| * 0.5）
-        float half_sw7 = stroke_w * 0.5f;
-
-        // 相对圆心的本地向量（圆心本地坐标 = extra.xy，通常为 (0,0)）
-        float2 pc7 = p - i.extra.xy;
-
-        // 旋转坐标系：令弧中心角方向 (cos(mid), sin(mid)) 对齐 y 轴正方向
-        //   新 x 轴 = (-sin(mid), cos(mid))（左旋 90°）
-        //   新 y 轴 = ( cos(mid), sin(mid))（弧中心角方向）
-        float cm = cos(mid), sm = sin(mid);
-        float2 q7;
-        q7.x = -pc7.x * sm + pc7.y * cm;  // 垂直弧中心角方向
-        q7.y =  pc7.x * cm + pc7.y * sm;  // 沿弧中心角方向
-
-        // 端点方向向量（旋转坐标系中）：sc = (sin(hs), cos(hs))
-        //   弧端点在 ±hs 处，旋转坐标系中为 (±sin(hs), cos(hs))
-        float2 sc = float2(sin(hs), cos(hs));
-
-        // 利用弧的左右对称性（关于 y 轴），折叠 q7.x → abs(q7.x)
-        float2 qa = float2(abs(q7.x), q7.y);
-
-        float d7;
-        if (sc.y * qa.x > sc.x * qa.y) {
-            // qa 在弧端点外侧扇形区域（角度超出 hs）→ 端点 cap 处理
-            // 端点坐标（折叠坐标系）：Pend = sc * r = (sin(hs)*r, cos(hs)*r)
-            float2 Pend = sc * arc_r;
-
-            int cap7 = (int)(p3 + 0.5f);  // abs 折叠后两端对称，使用统一 cap
-            if (cap7 == 1) {
-                // Round cap：到端点的欧氏距离 - 半线宽
-                d7 = length(qa - Pend) - half_sw7;
-            } else {
-                // Flat cap：在端点处沿切线方向截断（矩形截面 SDF）
-                // 端点处切线方向（沿弧增大方向）：tc = (cos(hs), -sin(hs)) = (sc.y, -sc.x)
-                // 沿切线超出端点的量（在端点外侧区域内，此值 > 0）
-                float along7 = qa.x * sc.y - qa.y * sc.x;
-                // 到圆弧的径向距离（在半线宽内为负，超出为正）
-                float rdist7 = abs(length(qa) - arc_r) - half_sw7;
-                // 类比线段 Flat cap：length(along, max(rdist, 0))
-                d7 = length(float2(along7, max(rdist7, 0.0f)));
-            }
-        } else {
-            // qa 在弧段范围内（角度 ≤ hs）→ 圆环 SDF
-            d7 = abs(length(qa) - arc_r) - half_sw7;
-        }
-
-        float fw7 = max(fwidth(d7), 0.5f);
-        float al7 = 1.0f - smoothstep(-fw7, fw7, d7);
-        float4 cs7 = i.color;
-        al7 *= evaluate_clip_coverage(i.pos.xy);
-        return float4(cs7.rgb * cs7.a * al7, cs7.a * al7);
-    } else if (kind == 8) {
-        // ── 二次贝塞尔曲线描边 SDF（IQ 解析法，支持 Flat/Round cap）────
-        //
-        // 参数映射：
-        //   half_w, half_h = P2 本地坐标（终点）← 借用"半尺寸"槽
-        //   p0        = start_cap（0=Flat 截断, 1=Round 圆形）
-        //   p1        = end_cap（同上）
-        //   stroke_w  = 线宽（总宽度）
-        //   extra.xy  = P0 本地坐标（起点，t=0）
-        //   extra.zw  = P1 本地坐标（控制点）
-        //
-        // 算法（IQ sdBezier，闭合解析解）：
-        //   将"点到曲线最近点"问题转化为解三次方程，通过 Cardano 公式求解。
-        //   clamp(t,0,1) 天然处理端点 → Round cap（端点圆形延伸）。
-        //   Flat cap：额外用端点处切线半平面截断（CSG max 操作）。
-        float2 Bz_A = i.extra.xy;              // P0（起点）
-        float2 Bz_B = i.extra.zw;              // P1（控制点）
-        float2 Bz_C = float2(half_w, half_h);  // P2（终点，借用 half_w/half_h 槽）
-        float half_sw8 = stroke_w * 0.5f;
-
-        // IQ sdBezier 核心：求 p 到二次贝塞尔曲线的最小距离
-        float2 bz_a = Bz_B - Bz_A;                         // 一次项系数 / 2
-        float2 bz_b = Bz_A - 2.0f * Bz_B + Bz_C;          // 二次项系数（曲率向量）
-        float2 bz_c = bz_a * 2.0f;                         // 切线系数
-        float2 bz_d = Bz_A - p;                             // 常数项
-
-        // 三次方程系数（通过换元 u = t - kx 消去二次项）
-        float kk = 1.0f / max(dot(bz_b, bz_b), 1e-10f);    // 防除零（曲线退化为直线）
-        float kx = kk * dot(bz_a, bz_b);
-        float ky = kk * (2.0f * dot(bz_a, bz_a) + dot(bz_d, bz_b)) / 3.0f;
-        float kz = kk * dot(bz_d, bz_a);
-
-        // 压缩三次方程为标准形式 u³ + p*u + q = 0
-        float bz_p = ky - kx * kx;
-        float bz_p3 = bz_p * bz_p * bz_p;
-        float bz_q = kx * (2.0f * kx * kx - 3.0f * ky) + kz;
-        float bz_h = bz_q * bz_q + 4.0f * bz_p3;          // 判别式
-
-        float d8_sq;
-        if (bz_h >= 0.0f) {
-            // 判别式 ≥ 0：一个实根（另两个复根）
-            float sq_h = sqrt(bz_h);
-            float2 x_vec = (float2(sq_h, -sq_h) - bz_q) * 0.5f;
-            // 实数立方根（保留符号）
-            float2 uv = sign(x_vec) * pow(abs(x_vec), float2(1.0f / 3.0f, 1.0f / 3.0f));
-            float t_cand = clamp(uv.x + uv.y - kx, 0.0f, 1.0f);
-            float2 pt_cand = Bz_A + (bz_c + bz_b * t_cand) * t_cand;
-            d8_sq = dot(p - pt_cand, p - pt_cand);
-        } else {
-            // 判别式 < 0：三个实根，逐一计算取最小距离
-            float bz_z = sqrt(-bz_p);
-            float bz_v = acos(clamp(bz_q / (bz_p * bz_z * 2.0f), -1.0f, 1.0f)) / 3.0f;
-            float bz_m = cos(bz_v);
-            float bz_n = sin(bz_v) * 1.7320508075688772f;  // √3
-            float3 t3  = clamp(float3(bz_m + bz_m, -bz_n - bz_m, bz_n - bz_m) * bz_z - kx,
-                               0.0f, 1.0f);
-            float2 pt0 = Bz_A + (bz_c + bz_b * t3.x) * t3.x;
-            float2 pt1 = Bz_A + (bz_c + bz_b * t3.y) * t3.y;
-            float2 pt2 = Bz_A + (bz_c + bz_b * t3.z) * t3.z;
-            float d0_sq = dot(p - pt0, p - pt0);
-            float d1_sq = dot(p - pt1, p - pt1);
-            float d2_sq = dot(p - pt2, p - pt2);
-            d8_sq = min(min(d0_sq, d1_sq), d2_sq);
-        }
-
-        float d8 = sqrt(d8_sq) - half_sw8;
-
-        // Flat cap 截断（CSG max：用端点切线半平面限制描边区域）
-        //   P0 处切线方向（指向曲线内侧）：normalize(Bz_B - Bz_A)
-        //   当 p 在 P0 外侧（与切线方向相反），dot(A - p, t0) > 0，截断生效
-        int scap8 = (int)(p0 + 0.5f);
-        int ecap8 = (int)(p1 + 0.5f);
-        if (scap8 == 0) {
-            // P0 Flat cap：切线 = Bz_B - Bz_A（归一化）
-            float2 t0_len = Bz_B - Bz_A;
-            float t0_l = length(t0_len);
-            float2 t0  = t0_l > 1e-6f ? t0_len / t0_l : float2(1.0f, 0.0f);
-            // dot(Bz_A - p, t0) > 0 表示 p 在 P0 外侧（切线背面），截断
-            d8 = max(d8, dot(Bz_A - p, t0));
-        }
-        if (ecap8 == 0) {
-            // P2 Flat cap：切线 = Bz_C - Bz_B（归一化）
-            float2 t1_len = Bz_C - Bz_B;
-            float t1_l = length(t1_len);
-            float2 t1  = t1_l > 1e-6f ? t1_len / t1_l : float2(1.0f, 0.0f);
-            // dot(p - Bz_C, t1) > 0 表示 p 在 P2 外侧（切线正面），截断
-            d8 = max(d8, dot(p - Bz_C, t1));
-        }
-
-        float fw8 = max(fwidth(d8), 0.5f);
-        float al8 = 1.0f - smoothstep(-fw8, fw8, d8);
-        float4 cs8 = i.color;
-        al8 *= evaluate_clip_coverage(i.pos.xy);
-        return float4(cs8.rgb * cs8.a * al8, cs8.a * al8);
-    } else if (kind == 9) {
-        // ── 三次贝塞尔曲线描边 SDF（四区间候选 + Newton 精化）──
-        //
-        // 参数映射：
-        //   half_w, half_h = P3 本地坐标；p2, p3 = P2 本地坐标
-        //   p0=start_cap, p1=end_cap, stroke_w=线宽
-        //   extra.xy=P0, extra.zw=P1
-        //
-        // 三次贝塞尔点到曲线的距离函数最多有 3 个局部极小值。
-        // 三段方案的中段 [1/3,2/3] 对于 S 形曲线可能包含两个极小值（拐点
-        // 附近像素），两者都在中段内时候选 tb 只能覆盖其一，导致孤立亮斑。
-        // 改为四段方案 [0,1/4]、[1/4,1/2]、[1/2,3/4]、[3/4,1]，将中间区域
-        // 分成两段，保证两个极小值各自被不同候选覆盖。
-        float2 Cb_A = i.extra.xy;               // P0（起点）
-        float2 Cb_B = i.extra.zw;               // P1（第一控制点）
-        float2 Cb_C = float2(p2, p3);           // P2（第二控制点）← 借用 p2/p3 槽
-        float2 Cb_D = float2(half_w, half_h);   // P3（终点）← 借用 half_w/half_h 槽
-        float half_sw9 = stroke_w * 0.5f;
-
-        // 三次贝塞尔多项式系数（Horner 展开）
-        float2 cb3 = -Cb_A + 3.0f * Cb_B - 3.0f * Cb_C + Cb_D;
-        float2 cb2 =  3.0f * Cb_A - 6.0f * Cb_B + 3.0f * Cb_C;
-        float2 cb1 = -3.0f * Cb_A + 3.0f * Cb_B;
-        float2 cb0 =  Cb_A;
-
-        // ── 阶段 1：四区间各 12 步采样，找四个独立候选 t ────────────────────
-        float ta = 0.0f, tb = 0.375f, tc = 0.625f, td = 1.0f;
-        float da_sq = 1e20f, db_sq = 1e20f, dc_sq = 1e20f, dd_sq = 1e20f;
-        [unroll]
-        for (int si = 0; si <= 48; si++) {
-            float t = float(si) / 48.0f;
-            float2 q = ((cb3 * t + cb2) * t + cb1) * t + cb0;
-            float  dd = dot(p - q, p - q);
-            if (t <= 0.25f) {
-                if (dd < da_sq) { ta = t; da_sq = dd; }
-            } else if (t <= 0.5f) {
-                if (dd < db_sq) { tb = t; db_sq = dd; }
-            } else if (t <= 0.75f) {
-                if (dd < dc_sq) { tc = t; dc_sq = dd; }
-            } else {
-                if (dd < dd_sq) { td = t; dd_sq = dd; }
-            }
-        }
-
-        // ── 阶段 2：四个候选各做 6 步 Newton-Raphson 精化 ──────────────────
-        // f(t) = dot(Q(t)-p, Q'(t)) = 0，牛顿步：t -= f / f'
-        [unroll]
-        for (int ni = 0; ni < 6; ni++) {
-            // 候选 a
-            float2 qa   = ((cb3 * ta + cb2) * ta + cb1) * ta + cb0;
-            float2 dqa  = (3.0f * cb3 * ta + 2.0f * cb2) * ta + cb1;
-            float2 d2qa = 6.0f * cb3 * ta + 2.0f * cb2;
-            float2 dfa  = qa - p;
-            float  fa   = dot(dfa, dqa);
-            float  fpa  = dot(dqa, dqa) + dot(dfa, d2qa);
-            if (abs(fpa) > 1e-10f) ta -= fa / fpa;
-            ta = clamp(ta, 0.0f, 1.0f);
-            // 候选 b
-            float2 qb   = ((cb3 * tb + cb2) * tb + cb1) * tb + cb0;
-            float2 dqb  = (3.0f * cb3 * tb + 2.0f * cb2) * tb + cb1;
-            float2 d2qb = 6.0f * cb3 * tb + 2.0f * cb2;
-            float2 dfb  = qb - p;
-            float  fb   = dot(dfb, dqb);
-            float  fpb  = dot(dqb, dqb) + dot(dfb, d2qb);
-            if (abs(fpb) > 1e-10f) tb -= fb / fpb;
-            tb = clamp(tb, 0.0f, 1.0f);
-            // 候选 c
-            float2 qc   = ((cb3 * tc + cb2) * tc + cb1) * tc + cb0;
-            float2 dqc  = (3.0f * cb3 * tc + 2.0f * cb2) * tc + cb1;
-            float2 d2qc = 6.0f * cb3 * tc + 2.0f * cb2;
-            float2 dfc  = qc - p;
-            float  fc   = dot(dfc, dqc);
-            float  fpc  = dot(dqc, dqc) + dot(dfc, d2qc);
-            if (abs(fpc) > 1e-10f) tc -= fc / fpc;
-            tc = clamp(tc, 0.0f, 1.0f);
-            // 候选 d
-            float2 qd   = ((cb3 * td + cb2) * td + cb1) * td + cb0;
-            float2 dqd  = (3.0f * cb3 * td + 2.0f * cb2) * td + cb1;
-            float2 d2qd = 6.0f * cb3 * td + 2.0f * cb2;
-            float2 dfd  = qd - p;
-            float  fd   = dot(dfd, dqd);
-            float  fpd  = dot(dqd, dqd) + dot(dfd, d2qd);
-            if (abs(fpd) > 1e-10f) td -= fd / fpd;
-            td = clamp(td, 0.0f, 1.0f);
-        }
-
-        // ── 阶段 3：取四候选精化结果中距离最小者 ─────────────────────────
-        float2 cla = ((cb3 * ta + cb2) * ta + cb1) * ta + cb0;
-        float2 clb = ((cb3 * tb + cb2) * tb + cb1) * tb + cb0;
-        float2 clc = ((cb3 * tc + cb2) * tc + cb1) * tc + cb0;
-        float2 cld = ((cb3 * td + cb2) * td + cb1) * td + cb0;
-        float d9 = min(min(length(p - cla), length(p - clb)),
-                       min(length(p - clc), length(p - cld))) - half_sw9;
-
-        // Flat cap 截断（CSG max：端点切线半平面截断）
-        int scap9 = (int)(p0 + 0.5f);
-        int ecap9 = (int)(p1 + 0.5f);
-        if (scap9 == 0) {
-            float2 t0_vec = Cb_B - Cb_A;
-            float  t0_l   = length(t0_vec);
-            float2 t0     = t0_l > 1e-6f ? t0_vec / t0_l : float2(1.0f, 0.0f);
-            d9 = max(d9, dot(Cb_A - p, t0));
-        }
-        if (ecap9 == 0) {
-            float2 t1_vec = Cb_D - Cb_C;
-            float  t1_l   = length(t1_vec);
-            float2 t1     = t1_l > 1e-6f ? t1_vec / t1_l : float2(1.0f, 0.0f);
-            d9 = max(d9, dot(p - Cb_D, t1));
-        }
-
-        float fw9 = max(fwidth(d9), 0.5f);
-        float al9 = 1.0f - smoothstep(-fw9, fw9, d9);
-        float4 cs9 = i.color;
-        al9 *= evaluate_clip_coverage(i.pos.xy);
-        return float4(cs9.rgb * cs9.a * al9, cs9.a * al9);
-    }
-)hlsl"
-// ── 字符串拆分（MSVC 原始字符串长度限制），以下为 kind=10/11 多边形续接 ──
-R"hlsl(
-    else if (kind == 10 || kind == 11) {
-        // ── kind=10：FillPolygon（填充多边形 SDF）─────────────────────────
-        // ── kind=11：StrokePolygon（描边多边形 SDF）──────────────────────
-        //
-        // 顶点数据来自 PolygonVertsCB（b1 槽），坐标为本地坐标（以 AABB 中心为原点）。
-        // sdPolygon() 使用 IQ 绕数法，同时支持凸多边形和凹多边形。
-        float dpoly = sdPolygon(p);
-
-        float fpoly = max(fwidth(dpoly), 0.5f);
-        float apoly;
-        if (kind == 10) {
-            // 填充：多边形内部（d<0）不透明，边界处平滑过渡
-            apoly = 1.0f - smoothstep(-fpoly, fpoly, dpoly);
-        } else {
-            // 描边：围绕多边形轮廓向内外各扩展 stroke_w/2
-            float half_sw11 = stroke_w * 0.5f;
-            float a_outer   = 1.0f - smoothstep(-fpoly, fpoly, dpoly - half_sw11);
-            float a_inner   = smoothstep(-fpoly, fpoly, dpoly + half_sw11);
-            apoly = a_outer * a_inner;
-        }
-        float4 cpoly = i.color;
-        float  apre  = cpoly.a * apoly;
-        apre *= evaluate_clip_coverage(i.pos.xy);
-        return float4(cpoly.rgb * apre, apre);
-    } else {
-        // 椭圆（half_w = X 半径, half_h = Y 半径）
-        d = ellipse_sdf(p, b);
-    }
-
-    // 基于 fwidth 的像素级抗锯齿过渡宽度
-    float fw = max(fwidth(d), 0.5f);
-
-    // 计算不透明度
-    float alpha;
-    if (stroke_w <= 0.0f) {
-        // 填充模式：d < 0 为内部，smoothstep 在边界处平滑过渡
-        alpha = 1.0f - smoothstep(-fw, fw, d);
-    } else {
-        // 描边模式（中心对齐）：描边覆盖 [-half_sw, half_sw] 区间
-        float half_sw = stroke_w * 0.5f;
-        // 外边缘 AA：d < half_sw 时显示
-        float a_outer = 1.0f - smoothstep(-fw, fw, d - half_sw);
-        // 内边缘 AA：d > -half_sw 时显示（往内消失）
-        float a_inner = smoothstep(-fw, fw, d + half_sw);
-        alpha = a_outer * a_inner;
-    }
-
-    // ── 画刷颜色计算（根据 brush_kind 决定颜色来源）──────────────────────────
-    float4 c;
-    if (brush_kind == 1u) {
-        // 线性渐变：t = 像素本地坐标在渐变轴上的投影（归一化）
-        float2 grad_start = grad_params.xy;
-        float2 grad_dir   = grad_params.zw;  // 终点 - 起点（local 坐标，像素）
-        float  len_sq     = dot(grad_dir, grad_dir);
-        float  t_lin      = (len_sq > 1e-8f)
-            ? dot(p - grad_start, grad_dir) / len_sq
-            : 0.0f;
-        c = sample_gradient(t_lin);
-    } else if (brush_kind == 2u) {
-        // 径向渐变：t = (像素到圆心距离 - 内径) / (外径 - 内径)
-        float2 center  = grad_params.xy;
-        float  outer_r = grad_params.z;
-        float  inner_r = grad_params.w;
-        float  dist    = length(p - center);
-        float  range   = outer_r - inner_r;
-        float  t_rad   = (range > 1e-6f) ? (dist - inner_r) / range : 0.0f;
-        c = sample_gradient(t_rad);
-    } else if (brush_kind == 3u) {
-        // 亚克力：采样模糊背景纹理，叠加饱和度调整和色调
-        float2 backdrop_uv = i.pos.xy / phys_viewport_size;
-        float4 backdrop    = acrylic_backdrop.Sample(acrylic_sampler, backdrop_uv);
-        // 饱和度调整（基于亮度保留法）
-        float  luma = dot(backdrop.rgb, float3(0.2126f, 0.7152f, 0.0722f));
-        backdrop.rgb = lerp(float3(luma, luma, luma), backdrop.rgb, grad_extra.y);
-        // 色调叠加（线性混合）
-        float4 tint   = grad_params;               // rgba 色调颜色
-        float  tint_a = grad_extra.x * tint.a;    // 实际混合比例
-        c = float4(lerp(backdrop.rgb, tint.rgb, tint_a), 1.0f);
-    } else {
-        // 纯色（brush_kind == 0）：使用顶点插值颜色
-        c = i.color;
-    }
-
-    // 预乘 Alpha 输出（匹配预乘混合模式 ONE / INV_SRC_ALPHA）
-    alpha *= evaluate_clip_coverage(i.pos.xy);
-    float  a = c.a * alpha;
-    return float4(c.rgb * a, a);
-}
-)hlsl";
-
-// ── 顶点结构体 ────────────────────────────────────────────────────────────────
-
-/// 折线描边顶点：屏幕像素坐标 + 线性 RGBA 颜色（用于 StrokeLine 等折线命令）
-struct PaintVertex {
-    float x, y;        ///< 屏幕像素坐标（左上角为原点）
-    float r, g, b, a;  ///< 线性 RGBA 颜色（[0,1]）
-};
-
-/**
- * @brief SDF 形状顶点（64 字节）。
- *
- * 用于矩形/圆角矩形/复杂圆角/椭圆的填充与描边。
- * 每个形状生成一个覆盖包围盒的矩形（6 顶点），
- * 像素着色器逐像素计算有向距离场（SDF）确定覆盖度。
- *
- * 内存布局（16 float）：
- *   [0..7]   POSITION (float2)  — 屏幕像素坐标
- *   [8..23]  COLOR    (float4)  — 线性 RGBA 颜色
- *   [24..31] TEXCOORD0 (float2) — 本地坐标（以形状中心为原点，像素单位）
- *   [32..47] TEXCOORD1 (float4) — (kind, half_w, half_h, p0)
- *   [48..63] TEXCOORD2 (float4) — (p1, p2, p3, stroke_w)
- *
- * kind 取值：0=矩形，1=均匀圆角矩形，2=四角独立圆角矩形，3=椭圆
- * p0..p3：四角圆角半径（各向同性），顺序 = (右下, 右上, 左下, 左上)
- * stroke_w：描边总宽度（中心对齐），0 = 填充模式
- */
-struct SdfVertex {
-    float x, y;           ///< 屏幕像素坐标（offset 0）
-    float r, g, b, a;     ///< 线性 RGBA 颜色（offset 8）
-    float lx, ly;         ///< 本地坐标，形状中心为原点（offset 24）
-    float kind;           ///< 形状类型（offset 32）
-    float half_w, half_h; ///< 形状半尺寸（像素，offset 36）
-    float p0;             ///< 圆角半径参数 0（均匀圆角 / 右下角，offset 44）
-    float p1, p2, p3;     ///< 圆角半径参数 1-3（右上/左下/左上，offset 48）
-    float stroke_w;       ///< 描边总宽度（0=填充，offset 60）
-    float e0, e1, e2, e3; ///< 扩展参数（offset 64）—— TEXCOORD3，供 kind=5 存放四角圆角半径
-};
-
-/// 视口常量缓冲布局（必须为 16 字节倍数，D3D11 硬性要求）
-struct ViewportCB {
-    float width;        ///< 逻辑宽度（physical/dpi_scale，用于 NDC 变换）
-    float height;       ///< 逻辑高度
-    float phys_width;   ///< 物理宽度（用于 SV_Position → UV 转换，亚克力采样用）
-    float phys_height;  ///< 物理高度
-};
-
-/**
- * @brief 画刷数据常量缓冲（b2 槽，每 DrawCall 更新一次）。
- *
- * 总大小：128 字节（8 × float4，16 字节对齐）
- * 与 HLSL BrushDataCB 内存布局完全一致。
- */
-struct alignas(16) BrushDataCB {
-    uint32_t brush_kind;         ///< 画刷类型：0=纯色，1=线性渐变，2=径向渐变，3=亚克力
-    uint32_t stop_count;         ///< 渐变色标数量 [2..4]
-    float    _pad0{0.0f};
-    float    _pad1{0.0f};
-    // grad_params（16 字节）
-    float    grad_params[4];     ///< 渐变参数（见 HLSL BrushDataCB 注释）
-    // grad_extra（16 字节）
-    float    grad_extra[4];      ///< 附加参数（亚克力：x=色调混合比例，y=饱和度增益）
-    // stop_colors[4]（64 字节）
-    float    stop_colors[4][4];  ///< 色标颜色（rgba，线性空间）
-    // stop_offsets（16 字节）
-    float    stop_offsets[4];    ///< 色标偏移量（x=off0, y=off1, z=off2, w=off3）
-    // 总大小：4+4+4+4+16+16+64+16 = 128 字节 ✓
-};
-static_assert(sizeof(BrushDataCB) == 128, "BrushDataCB 大小必须为 128 字节");
-
-// ── 裁剪 SDF 常量缓冲结构体（b3 槽，与 HLSL ClipSdfCB 内存布局完全一致）─────
-
-/// 最大嵌套裁剪层数（对应 HLSL ClipSdfCB.clip_layers 数组大小）
-static constexpr int k_max_clip_layers     = 4;
-/// 每层多边形顶点上限（对应 HLSL ClipSdfLayer.poly_verts 数组大小）
-static constexpr int k_max_clip_poly_verts = 64;
-
-/**
- * @brief 裁剪 SDF 单层结构体（304 字节，16 字节对齐）。
- *
- * 与 HLSL ClipSdfLayer 内存布局完全一致：
- *   float4 bounds          — (cx, cy, half_w, half_h) 逻辑像素坐标中心和半尺寸
- *   float4 kind_p0_p1_p2   — (kind, p0, p1, p2) 形状类型（0=rect,1=rr,2=crr,10=poly）及参数
- *   float4 p3_nv_pad        — (p3, poly_vert_count_f, _, _) 左上圆角/多边形顶点数
- *   float4 poly_verts[64]  — 多边形顶点（xy=local 坐标，zw=0）
- */
-struct alignas(16) ClipSdfLayer {
-    float cx, cy, half_w, half_h;                       ///< 裁剪形状中心和半尺寸（逻辑像素）
-    float kind, p0, p1, p2;                             ///< 形状类型及圆角参数
-    float p3, poly_vert_count_f, _pad0, _pad1;          ///< r_tl / 多边形顶点数 / 填充
-    float poly_verts[k_max_clip_poly_verts][4];          ///< 多边形顶点（xy=local，zw=0）
-    // 总大小：3 × 16 + 64 × 16 = 48 + 1024 = 1072 字节
-};
-static_assert(sizeof(ClipSdfLayer) == 1072, "ClipSdfLayer 大小必须为 1072 字节");
-
-/**
- * @brief 裁剪 SDF 常量缓冲（1232 字节，16 字节对齐）。
- *
- * 与 HLSL ClipSdfCB 内存布局完全一致：
- *   int   clip_count        — 当前活跃裁剪层数
- *   float _pad0/1/2         — 填充
- *   ClipSdfLayer layers[4]  — 最多 4 层嵌套裁剪
- */
-struct alignas(16) ClipSdfCB {
-    int   clip_count;         ///< 当前活跃裁剪层数（0=无裁剪）
-    float _pad0, _pad1, _pad2;
-    ClipSdfLayer layers[k_max_clip_layers];
-    // 总大小：16 + 4 × 1072 = 16 + 4288 = 4304 字节
-};
-static_assert(sizeof(ClipSdfCB) == 4304, "ClipSdfCB 大小必须为 4304 字节");
-
-// ── 文字渲染 HLSL 着色器 ──────────────────────────────────────────────────────
-
-/// 文字顶点着色器：屏幕像素坐标 → NDC，透传 UV 和颜色
-static constexpr const char k_text_vertex_shader_hlsl[] = R"hlsl(
-cbuffer ViewportCB : register(b0) {
-    float2 viewport_size;       // 逻辑像素尺寸（NDC 变换用）
-    float2 phys_viewport_size;  // 物理像素尺寸（与像素着色器共享布局）
-};
-
-struct TextVSIn {
-    float2 pos   : POSITION;   // 屏幕像素坐标
-    float2 uv    : TEXCOORD0;  // 字形图集 UV（归一化 [0,1]）
-    float4 color : COLOR;      // 线性 RGBA 颜色（预乘 alpha）
-};
-
-struct TextVSOut {
-    float4 pos   : SV_Position;
-    float2 uv    : TEXCOORD0;
-    float4 color : COLOR;
-};
-
-TextVSOut main(TextVSIn i) {
-    TextVSOut o;
-    // 屏幕像素坐标 → NDC（Y 轴翻转）
-    o.pos.x =  (i.pos.x / viewport_size.x) * 2.0f - 1.0f;
-    o.pos.y = -(i.pos.y / viewport_size.y) * 2.0f + 1.0f;
-    o.pos.z =  0.0f;
-    o.pos.w =  1.0f;
-    o.uv    =  i.uv;
-    o.color =  i.color;
-    return o;
-}
-)hlsl";
-
-/// 文字像素着色器：采样 R8 字形图集，输出预乘 Alpha 颜色，并参与统一软裁剪
-static constexpr const char k_text_pixel_shader_hlsl[] = R"hlsl(
-cbuffer ViewportCB : register(b0) {
-    float2 viewport_size;       // 逻辑像素尺寸（NDC/裁剪坐标换算用）
-    float2 phys_viewport_size;  // 物理像素尺寸（SV_Position → 逻辑像素用）
-};
-
-struct ClipSdfLayer {
-    float4 bounds;          // (cx, cy, half_w, half_h)
-    float4 kind_p0_p1_p2;   // (kind, p0, p1, p2)
-    float4 p3_nv_pad;       // (p3, poly_vert_count_f, _, _)
-    float4 poly_verts[64];  // xy=相对裁剪中心的本地坐标
-};
-
-cbuffer ClipSdfCB : register(b3) {
-    int   clip_count;
-    float _cpad0;
-    float _cpad1;
-    float _cpad2;
-    ClipSdfLayer clip_layers[4];
-};
-
-Texture2D    glyph_atlas   : register(t0);  // R8 字形灰度图集
-SamplerState glyph_sampler : register(s0);  // 线性双线性采样器（CLAMP）
-
-float box_sdf(float2 p, float2 b) {
-    float2 q = abs(p) - b;
-    return length(max(q, 0.0f)) + min(max(q.x, q.y), 0.0f);
-}
-
-float rounded_box_sdf(float2 p, float2 b, float r) {
-    float2 q = abs(p) - b + r;
-    return length(max(q, 0.0f)) + min(max(q.x, q.y), 0.0f) - r;
-}
-
-float complex_rounded_box_sdf(float2 p, float2 b, float4 r) {
-    r.xy = (p.x > 0.0f) ? r.xy : r.zw;
-    r.x  = (p.y > 0.0f) ? r.x  : r.y;
-    float2 q = abs(p) - b + r.x;
-    return length(max(q, 0.0f)) + min(max(q.x, q.y), 0.0f) - r.x;
-}
-
-float sdClipPolygon(float2 p, int li, int nv) {
-    float d2 = dot(p - clip_layers[li].poly_verts[0].xy,
-                   p - clip_layers[li].poly_verts[0].xy);
-    float s = 1.0f;
-    [loop]
-    for (int vi = 0, vj = nv - 1; vi < nv; vj = vi, vi++) {
-        float2 vvi = clip_layers[li].poly_verts[vi].xy;
-        float2 vvj = clip_layers[li].poly_verts[vj].xy;
-        float2 e = vvj - vvi;
-        float2 w = p - vvi;
-        float2 b2 = w - e * clamp(dot(w, e) / dot(e, e), 0.0f, 1.0f);
-        d2 = min(d2, dot(b2, b2));
-        bool c0 = (p.y >= vvi.y);
-        bool c1 = (p.y <  vvj.y);
-        bool c2 = (e.x * w.y > e.y * w.x);
-        if ((c0 && c1 && c2) || (!c0 && !c1 && !c2)) s = -s;
-    }
-    return s * sqrt(d2);
-}
-
-float evaluate_clip_coverage(float2 sv_pos) {
-    if (clip_count <= 0) return 1.0f;
-
-    float2 lp = sv_pos * viewport_size / phys_viewport_size;
-    float coverage = 1.0f;
-    [loop]
-    for (int ci = 0; ci < clip_count; ci++) {
-        float2 cp  = lp - clip_layers[ci].bounds.xy;
-        float  chw = clip_layers[ci].bounds.z;
-        float  chh = clip_layers[ci].bounds.w;
-        int    ck  = (int)(clip_layers[ci].kind_p0_p1_p2.x + 0.5f);
-        float  dc;
-        if (ck == 1) {
-            dc = rounded_box_sdf(cp, float2(chw, chh), clip_layers[ci].kind_p0_p1_p2.y);
-        } else if (ck == 2) {
-            float r0 = clip_layers[ci].kind_p0_p1_p2.y;
-            float r1 = clip_layers[ci].kind_p0_p1_p2.z;
-            float r2 = clip_layers[ci].kind_p0_p1_p2.w;
-            float r3 = clip_layers[ci].p3_nv_pad.x;
-            dc = complex_rounded_box_sdf(cp, float2(chw, chh), float4(r0, r1, r2, r3));
-        } else if (ck == 10) {
-            int nv = clamp((int)(clip_layers[ci].p3_nv_pad.y + 0.5f), 3, 64);
-            dc = sdClipPolygon(cp, ci, nv);
-        } else {
-            dc = box_sdf(cp, float2(chw, chh));
-        }
-        float fw_c = max(fwidth(dc), 0.5f);
-        coverage *= 1.0f - smoothstep(-fw_c, fw_c, dc);
-    }
-    return coverage;
-}
-
-struct TextPSIn {
-    float4 pos   : SV_Position;
-    float2 uv    : TEXCOORD0;
-    float4 color : COLOR;
-};
-
-float4 main(TextPSIn i) : SV_Target {
-    // 采样字形灰度值（R 通道即 alpha 遮罩）
-    float alpha = glyph_atlas.Sample(glyph_sampler, i.uv).r;
-    // 文字与几何命令共用同一套 ClipSdf 软裁剪，避免 clip_rect 只裁选区不裁字形
-    alpha *= evaluate_clip_coverage(i.pos.xy);
-    // 预乘 Alpha 输出（匹配 ONE / INV_SRC_ALPHA 混合模式）
-    return float4(i.color.rgb * alpha, i.color.a * alpha);
-}
-)hlsl";
-
-// ── 文字顶点格式 ──────────────────────────────────────────────────────────────
-
-/**
- * @brief 文字渲染顶点（32 字节）。
- *
- * 内存布局：
- *   [0..7]   POSITION (float2) — 屏幕像素坐标（左上角原点）
- *   [8..15]  TEXCOORD0 (float2) — 字形图集 UV（归一化 [0,1]）
- *   [16..31] COLOR (float4)    — 线性 RGBA 颜色（已由 Canvas 写入）
- */
-struct TextVertex {
-    float x, y;        ///< 屏幕像素坐标
-    float u, v;        ///< 字形图集 UV（归一化 [0,1]）
-    float r, g, b, a;  ///< 线性 RGBA 颜色
-};
-
-// ── 高斯模糊着色器（亚克力背景模糊用）────────────────────────────────────────
-
-/// 模糊通道顶点着色器：直接透传 NDC 坐标，无需视口转换
-static constexpr const char k_blur_vertex_shader_hlsl[] = R"hlsl(
-struct BlurVSIn {
-    float2 pos : POSITION;   // NDC 坐标（[-1,1]×[-1,1]）
-    float2 uv  : TEXCOORD0;  // 源纹理 UV（[0,1]×[0,1]）
-};
-
-struct BlurVSOut {
-    float4 pos : SV_Position;
-    float2 uv  : TEXCOORD0;
-};
-
-BlurVSOut main(BlurVSIn i) {
-    BlurVSOut o;
-    o.pos = float4(i.pos, 0.0f, 1.0f);  // 直接传入 NDC，无需视口变换
-    o.uv  = i.uv;
-    return o;
-}
-)hlsl";
-
-/// 高斯模糊像素着色器（分离式，方向由 texel_step 常量缓冲控制）
-/// 使用 9-tap 高斯核（σ ≈ 2.5），权重归一化 = 1.0
-/// 采样间距 = texel_step × [-4, -3, ..., 3, 4]（方向由 xy 分量决定）
-static constexpr const char k_blur_pixel_shader_hlsl[] = R"hlsl(
-// 模糊步进常量缓冲（b1 槽）
-cbuffer BlurCB : register(b1) {
-    float2 texel_step;   // 采样步进：(step/tex_w, 0) 水平 或 (0, step/tex_h) 垂直
-    float  _blur_pad0;
-    float  _blur_pad1;
-};
-
-Texture2D    blur_src     : register(t0);
-SamplerState blur_sampler : register(s0);
-
-// 9-tap 高斯核权重（σ ≈ 2.5，总和 = 1.0）
-static const float k_gauss_weights[9] = {
-    0.0162162162f, 0.0540540541f, 0.1216216216f,
-    0.1945945946f, 0.2270270270f, 0.1945945946f,
-    0.1216216216f, 0.0540540541f, 0.0162162162f
-};
-
-struct BlurPSIn {
-    float4 pos : SV_Position;
-    float2 uv  : TEXCOORD0;
-};
-
-float4 main(BlurPSIn i) : SV_Target {
-    float4 color = float4(0.0f, 0.0f, 0.0f, 0.0f);
-    [unroll]
-    for (int k = -4; k <= 4; ++k) {
-        float2 sample_uv = i.uv + texel_step * float(k);
-        color += blur_src.Sample(blur_sampler, sample_uv) * k_gauss_weights[k + 4];
-    }
-    return color;
-}
-)hlsl";
-
-// ── 模糊通道顶点格式 ──────────────────────────────────────────────────────────
-
-/**
- * @brief 模糊通道顶点（16 字节）。
- *
- * 用于全屏四边形的 H/V 高斯模糊通道。
- * pos 使用 NDC 坐标（直接传入，顶点着色器不做视口变换）。
- */
-struct BlurVertex {
-    float x, y;  ///< NDC 坐标（[-1,1]）
-    float u, v;  ///< 源纹理 UV（[0,1]）
-};
-/// 模糊常量缓冲（b1 槽，每个模糊通道更新一次）
-struct alignas(16) BlurCB {
-    float texel_step_x;  ///< 采样步进 X（水平通道 = blur_step/tex_w，垂直通道 = 0）
-    float texel_step_y;  ///< 采样步进 Y（水平通道 = 0，垂直通道 = blur_step/tex_h）
-    float _pad0{0.0f};
-    float _pad1{0.0f};
-};
-
-/// 多边形顶点常量缓冲（b1 槽，仅多边形 DrawCall 绑定）
-/// 内存布局与 HLSL PolygonVertsCB 完全一致（16 字节对齐）：
-///   偏移   0: vert_count（int）
-///   偏移   4: pad[3]（3 × float 填充）
-///   偏移  16: verts[64][4]（每顶点 float4，xy=本地坐标，zw=0）
-/// 总大小：16 + 64×16 = 1040 字节（65 × 16，符合 D3D11 16 字节倍数要求）
-struct alignas(16) PolygonVertsCB {
-    int   vert_count;  ///< 多边形顶点数（3..64）
-    float pad[3];      ///< 填充至 16 字节
-    float verts[64][4]; ///< 各顶点本地坐标（[k][0]=local_x, [k][1]=local_y, [k][2..3]=0）
-};
-
-// ── 裁剪写入像素着色器（SDF clip() 内置函数方案）─────────────────────────────
-//
-// 与普通 SDF PS 使用相同的顶点格式和顶点着色器（k_sdf_vertex_shader_hlsl）。
-// 与普通 SDF PS 的差异：
-//   1. 计算 SDF 距离 d
-//   2. 调用 clip(-d) 丢弃形状外部像素（SDF 外正内负：d > 0 时 -d < 0 → clip 丢弃）
-//   3. 不输出颜色（被 ClipWrite/ClipErase 管线的 RenderTargetWriteMask=0 屏蔽）
-//
-// 支持的 kind 值：
-//   0 = 矩形，1 = 均匀圆角矩形，2 = 四角独立圆角矩形，10 = 多边形
-//   其他 kind 退化为矩形处理
-static constexpr const char k_sdf_clip_pixel_shader_hlsl[] = R"hlsl(
-// 多边形顶点常量缓冲（b1 槽，仅多边形裁剪时绑定）
-cbuffer PolygonVertsCB : register(b1) {
-    int   poly_vert_count;
-    float _poly_pad0;
-    float _poly_pad1;
-    float _poly_pad2;
-    float4 poly_verts[64];
-};
-
-// 矩形 SDF（外正内负）
-float clip_box_sdf(float2 p, float2 b) {
-    float2 q = abs(p) - b;
-    return length(max(q, 0.0f)) + min(max(q.x, q.y), 0.0f);
-}
-
-// 均匀圆角矩形 SDF（r = 统一圆角半径）
-float clip_rounded_box_sdf(float2 p, float2 b, float r) {
-    float2 q = abs(p) - b + r;
-    return length(max(q, 0.0f)) + min(max(q.x, q.y), 0.0f) - r;
-}
-
-// 四角独立圆角矩形 SDF（r = (右下, 右上, 左下, 左上)）
-float clip_complex_rounded_box_sdf(float2 p, float2 b, float4 r) {
-    r.xy = (p.x > 0.0f) ? r.xy : r.zw;
-    r.x  = (p.y > 0.0f) ? r.x  : r.y;
-    float2 q = abs(p) - b + r.x;
-    return length(max(q, 0.0f)) + min(max(q.x, q.y), 0.0f) - r.x;
-}
-
-// 多边形 SDF（IQ 绕数法，支持凸多边形和凹多边形）
-float clip_sdPolygon(float2 p) {
-    int n = poly_vert_count;
-    float d = dot(p - poly_verts[0].xy, p - poly_verts[0].xy);
-    float s = 1.0f;
-    [loop]
-    for (int i = 0, j = n - 1; i < n; j = i, i++) {
-        float2 vi = poly_verts[i].xy;
-        float2 vj = poly_verts[j].xy;
-        float2 e  = vj - vi;
-        float2 w  = p - vi;
-        float2 b2 = w - e * clamp(dot(w, e) / dot(e, e), 0.0f, 1.0f);
-        d = min(d, dot(b2, b2));
-        bool c0 = (p.y >= vi.y);
-        bool c1 = (p.y <  vj.y);
-        bool c2 = (e.x * w.y > e.y * w.x);
-        if ((c0 && c1 && c2) || (!c0 && !c1 && !c2)) s = -s;
-    }
-    return s * sqrt(d);
-}
-
-struct SdfClipPSIn {
-    float4 pos     : SV_Position;
-    float4 color   : COLOR;
-    float2 local   : TEXCOORD0;
-    float4 params0 : TEXCOORD1;  // (kind, half_w, half_h, p0)
-    float4 params1 : TEXCOORD2;  // (p1, p2, p3, stroke_w)
-    float4 extra   : TEXCOORD3;
-};
-
-float4 main(SdfClipPSIn i) : SV_Target {
-    int    kind   = (int)(i.params0.x + 0.5f);
-    float  half_w = i.params0.y;
-    float  half_h = i.params0.z;
-    float  p0     = i.params0.w;
-    float  p1     = i.params1.x;
-    float  p2     = i.params1.y;
-    float  p3     = i.params1.z;
-    float2 p      = i.local;
-    float2 b      = float2(half_w, half_h);
-
-    float d;
-    if (kind == 1) {
-        d = clip_rounded_box_sdf(p, b, p0);
-    } else if (kind == 2) {
-        d = clip_complex_rounded_box_sdf(p, b, float4(p0, p1, p2, p3));
-    } else if (kind == 10) {
-        d = clip_sdPolygon(p);
-    } else {
-        // 默认：矩形（kind == 0 或其他未支持类型）
-        d = clip_box_sdf(p, b);
-    }
-
-    // 丢弃形状外部像素（d > 0 = 外部，-d < 0 → clip 丢弃）
-    clip(-d);
-
-    // 颜色输出被 RenderTargetWriteMask=0 屏蔽，返回值无实际影响
-    return float4(0.0f, 0.0f, 0.0f, 0.0f);
-}
-)hlsl";
-
-// ── Path 扁平化辅助函数（FillPath / StrokePath）──────────────────────────────
-
-/// 扁平化后的单个子路径（MoveTo 起始，直到下一个 MoveTo 或 Close）。
-struct FlattenedSubpath {
-    containers::Vector<math::Vec2> points;  ///< 子路径顶点（按绘制顺序）
-    bool closed{false};                     ///< 是否为闭合子路径（遇到 Close）
-};
-
-/// 计算点到直线（ab）的距离（用于贝塞尔平坦度判定）。
-static float point_line_distance(math::Vec2 p, math::Vec2 a, math::Vec2 b) {
-    const math::Vec2 ab = b - a;
-    const float len = ab.length();
-    if (len <= 1e-6f) {
-        return (p - a).length();
-    }
-    return std::abs((p - a).cross(ab)) / len;
-}
-
-/// 二次贝塞尔扁平化（递归细分，直到平坦度满足阈值）。
-static void flatten_quad_recursive(
-    math::Vec2 p0, math::Vec2 p1, math::Vec2 p2,
-    float tolerance,
-    int depth,
-    containers::Vector<math::Vec2>& out_points)
-{
-    if (depth >= 10 || point_line_distance(p1, p0, p2) <= tolerance) {
-        out_points.push_back(p2);
-        return;
-    }
-
-    const math::Vec2 p01  = (p0 + p1) * 0.5f;
-    const math::Vec2 p12  = (p1 + p2) * 0.5f;
-    const math::Vec2 p012 = (p01 + p12) * 0.5f;
-
-    flatten_quad_recursive(p0, p01, p012, tolerance, depth + 1, out_points);
-    flatten_quad_recursive(p012, p12, p2, tolerance, depth + 1, out_points);
-}
-
-/// 三次贝塞尔扁平化（递归细分，直到平坦度满足阈值）。
-static void flatten_cubic_recursive(
-    math::Vec2 p0, math::Vec2 p1, math::Vec2 p2, math::Vec2 p3,
-    float tolerance,
-    int depth,
-    containers::Vector<math::Vec2>& out_points)
-{
-    const float d1 = point_line_distance(p1, p0, p3);
-    const float d2 = point_line_distance(p2, p0, p3);
-    if (depth >= 10 || std::max(d1, d2) <= tolerance) {
-        out_points.push_back(p3);
-        return;
-    }
-
-    const math::Vec2 p01   = (p0 + p1) * 0.5f;
-    const math::Vec2 p12   = (p1 + p2) * 0.5f;
-    const math::Vec2 p23   = (p2 + p3) * 0.5f;
-    const math::Vec2 p012  = (p01 + p12) * 0.5f;
-    const math::Vec2 p123  = (p12 + p23) * 0.5f;
-    const math::Vec2 p0123 = (p012 + p123) * 0.5f;
-
-    flatten_cubic_recursive(p0, p01, p012, p0123, tolerance, depth + 1, out_points);
-    flatten_cubic_recursive(p0123, p123, p23, p3, tolerance, depth + 1, out_points);
-}
-
-/// 将 Path 扁平化为多个子路径（支持 LineTo / QuadTo / CubicTo / Close）。
-static void flatten_path_to_subpaths(
-    const Path& path,
-    containers::Vector<FlattenedSubpath>& out_subpaths,
-    float tolerance = 0.35f)
-{
-    out_subpaths.clear();
-
-    FlattenedSubpath cur;
-    bool has_cur = false;
-    math::Vec2 cur_pt{};
-    math::Vec2 subpath_start{};
-
-    auto flush_cur = [&]() {
-        if (!has_cur || cur.points.size() < 2) {
-            cur.points.clear();
-            cur.closed = false;
-            has_cur = false;
-            return;
-        }
-
-        // 若闭合路径尾点与首点重复，则去重以避免退化边。
-        if (cur.closed && cur.points.size() >= 2) {
-            const auto& first = cur.points.front();
-            const auto& last  = cur.points.back();
-            if (std::abs(first.x - last.x) < 1e-5f && std::abs(first.y - last.y) < 1e-5f) {
-                cur.points.pop_back();
-            }
-        }
-
-        if (cur.points.size() >= 2) {
-            out_subpaths.push_back(std::move(cur));
-        }
-        cur.points.clear();
-        cur.closed = false;
-        has_cur = false;
-    };
-
-    for (const auto& pc : path.cmds()) {
-        if (pc.kind == PathCmdKind::MoveTo) {
-            flush_cur();
-            has_cur = true;
-            subpath_start = pc.pt[0];
-            cur_pt = subpath_start;
-            cur.closed = false;
-            cur.points.push_back(subpath_start);
-        }
-        else if (pc.kind == PathCmdKind::LineTo) {
-            if (!has_cur) {
-                has_cur = true;
-                subpath_start = pc.pt[0];
-                cur_pt = subpath_start;
-                cur.closed = false;
-                cur.points.push_back(subpath_start);
-            }
-            else {
-                cur.points.push_back(pc.pt[0]);
-                cur_pt = pc.pt[0];
-            }
-        }
-        else if (pc.kind == PathCmdKind::QuadTo) {
-            if (!has_cur) continue;
-            flatten_quad_recursive(cur_pt, pc.pt[0], pc.pt[1], tolerance, 0, cur.points);
-            cur_pt = pc.pt[1];
-        }
-        else if (pc.kind == PathCmdKind::CubicTo) {
-            if (!has_cur) continue;
-            flatten_cubic_recursive(cur_pt, pc.pt[0], pc.pt[1], pc.pt[2], tolerance, 0, cur.points);
-            cur_pt = pc.pt[2];
-        }
-        else if (pc.kind == PathCmdKind::Close) {
-            if (!has_cur) continue;
-            cur.closed = true;
-            cur_pt = subpath_start;
-            flush_cur();
-        }
-    }
-
-    flush_cur();
-}
-
-/// 将顶点数量压缩到 max_count（等距抽样，保留首顶点顺序）。
-static void reduce_vertices_evenly(
-    const containers::Vector<math::Vec2>& input,
-    containers::Vector<math::Vec2>& output,
-    size_t max_count)
-{
-    output.clear();
-    if (input.empty() || max_count == 0) return;
-    if (input.size() <= max_count) {
-        output = input;
-        return;
-    }
-    output.reserve(max_count);
-    const float step = static_cast<float>(input.size()) / static_cast<float>(max_count);
-    for (size_t i = 0; i < max_count; ++i) {
-        size_t idx = static_cast<size_t>(static_cast<float>(i) * step);
-        if (idx >= input.size()) idx = input.size() - 1;
-        output.push_back(input[idx]);
-    }
-}
-
-// ── RhiRenderer 类 ────────────────────────────────────────────────────────────
-
-/**
- * @brief 字形 Atlas 打包器（Shelf Packer 算法）。
- *
- * 从图集左上角开始，按行（shelf）分配空间。当前行放不下时换行。
- */
-struct ShelfPacker {
-    uint32_t atlas_w{0};   ///< 图集宽度（像素）
-    uint32_t atlas_h{0};   ///< 图集高度（像素）
-    uint32_t cur_x{0};     ///< 当前行已用宽度
-    uint32_t cur_y{0};     ///< 当前行顶部 Y 坐标
-    uint32_t shelf_h{0};   ///< 当前行已分配的最大高度
-
-    /**
-     * @brief 尝试在图集中分配一块 w×h 的区域。
-     * @return true=分配成功，out_x/out_y 为左上角坐标；false=图集已满。
-     */
-    bool pack(uint32_t w, uint32_t h, uint32_t& out_x, uint32_t& out_y) {
-        // 当前行容纳不下时，换到新行
-        if (cur_x + w > atlas_w) {
-            cur_x  = 0;
-            cur_y += shelf_h;
-            shelf_h = 0;
-        }
-        if (cur_y + h > atlas_h) {
-            return false;  // 图集已满
-        }
-        out_x    = cur_x;
-        out_y    = cur_y;
-        cur_x   += w;
-        if (h > shelf_h) shelf_h = h;
-        return true;
-    }
-};
-
-/**
- * @brief 字形图集条目（缓存键 + 图集位置 + 度量）。
- */
-struct GlyphKey {
-    void*    face;       ///< FontFace* 指针（用于区分不同字体）
-    uint32_t codepoint;  ///< Unicode 码点
-    uint32_t size_px;    ///< 字号（整像素）
-};
-
-struct AtlasEntry {
-    GlyphKey key;         ///< 缓存键
-    uint16_t atlas_x;     ///< 字形在图集中的 X 坐标（像素）
-    uint16_t atlas_y;     ///< 字形在图集中的 Y 坐标（像素）
-    uint16_t atlas_w;     ///< 字形宽度（像素，0 表示空白字形）
-    uint16_t atlas_h;     ///< 字形高度（像素）
-    int16_t  bearing_x;   ///< 左边距（像素，相对基线笔触点）
-    int16_t  bearing_y;   ///< 顶边距（像素，基线上方为正）
-    int16_t  advance_x;   ///< 水平步进（像素）
-};
-
-/**
- * @brief 字形 GPU 图集管理器。
- *
- * 职责：
- *   - 维护一块 1024×1024 R8_UNorm CPU 位图（所有字形灰度数据）
- *   - 维护相应的 GPU 纹理（懒创建，首次 flush 时创建）
- *   - 字形缓存（线性查找，最多 kMaxGlyphs 条目）
- *   - Shelf Packer 分配图集区域
- *   - 脏标记机制：有新字形加入时标记 dirty，flush() 时上传到 GPU
- *
- * 注意：
- *   - cpu_data_ 为 1MB 堆内存（GlyphAtlas 通过 MINE_NEW 分配）
- *   - 非线程安全，在单一渲染线程中使用
- */
-class GlyphAtlas {
-public:
-    static constexpr uint32_t kAtlasSize = 1024;   ///< 图集边长（像素）
-    static constexpr uint32_t kMaxGlyphs = 2048;   ///< 最大字形缓存条目数
-    static constexpr uint32_t kGlyphPad  = 1;      ///< 字形间距（防采样越界）
-
-    GlyphAtlas() {
-        packer_.atlas_w = kAtlasSize;
-        packer_.atlas_h = kAtlasSize;
-        // cpu_data_ 已在构造时零初始化（全黑透明图集）
-    }
-
-    ~GlyphAtlas() = default;
-
-    // 禁止拷贝
-    GlyphAtlas(const GlyphAtlas&)            = delete;
-    GlyphAtlas& operator=(const GlyphAtlas&) = delete;
-
-    /**
-     * @brief 查找或插入一个字形到图集。
-     *
-     * 若字形已在缓存中，直接返回；否则调用 FreeType 光栅化并写入图集。
-     *
-     * @param face      FontFace 对象（用于光栅化）
-     * @param codepoint Unicode 码点
-     * @param size_px   字号（整像素）
-     * @return 字形条目指针；若图集已满或光栅化失败则返回 nullptr。
-     */
-    const AtlasEntry* get_or_insert(text::FontFace* face, uint32_t codepoint, uint32_t size_px);
-
-    /**
-     * @brief 将图集数据上传到 GPU 纹理（若 dirty）。
-     *
-     * 首次调用时创建 GPU 纹理。M0 阶段全量上传（1024×1024 = 1MB R8 数据）。
-     *
-     * @param device 图形设备（用于创建纹理和上传数据）
-     */
-    void flush(gfx::IDevice* device);
-
-    /// 获取 GPU 纹理（flush() 之后有效；首次 flush 前为 nullptr）
-    [[nodiscard]] gfx::ITexture* texture() const noexcept { return gpu_texture_.get(); }
-
-private:
-    uint8_t     cpu_data_[kAtlasSize * kAtlasSize]{};  ///< R8 灰度图集（CPU 端，全零初始化）
-    ShelfPacker packer_{};                              ///< Shelf 打包器
-    bool        dirty_{false};                         ///< 是否有新字形未上传 GPU
-
-    core::OwnedPtr<gfx::ITexture> gpu_texture_;        ///< GPU 纹理（R8_UNorm，ShaderResource）
-
-    AtlasEntry  entries_[kMaxGlyphs]{};                ///< 字形缓存（线性数组）
-    uint32_t    entry_count_{0};                       ///< 已缓存字形数量
-
-    /// 在已缓存条目中查找（线性扫描）
-    const AtlasEntry* find(void* face, uint32_t codepoint, uint32_t size_px) const noexcept {
-        for (uint32_t i = 0; i < entry_count_; ++i) {
-            const AtlasEntry& e = entries_[i];
-            if (e.key.face == face &&
-                e.key.codepoint == codepoint &&
-                e.key.size_px == size_px) {
-                return &e;
-            }
-        }
-        return nullptr;
-    }
-};
-
-// ── GlyphAtlas 方法实现 ───────────────────────────────────────────────────────
-
-const AtlasEntry* GlyphAtlas::get_or_insert(
-    text::FontFace* face, uint32_t codepoint, uint32_t size_px) {
-
-    if (face == nullptr) return nullptr;
-
-    // 1. 缓存命中直接返回
-    const AtlasEntry* cached = find(face, codepoint, size_px);
-    if (cached != nullptr) return cached;
-
-    // 2. 缓存已满
-    if (entry_count_ >= kMaxGlyphs) return nullptr;
-
-    // 3. 设置字号并光栅化
-    if (!face->set_pixel_size(0, size_px)) return nullptr;
-
-    text::GlyphBitmap bitmap{};
-    if (!face->rasterize(codepoint, bitmap)) return nullptr;
-
-    // 4. 构造新条目
-    AtlasEntry& entry = entries_[entry_count_];
-    entry.key.face      = face;
-    entry.key.codepoint = codepoint;
-    entry.key.size_px   = size_px;
-    entry.bearing_x     = static_cast<int16_t>(bitmap.metrics.bearing_x);
-    entry.bearing_y     = static_cast<int16_t>(bitmap.metrics.bearing_y);
-    entry.advance_x     = static_cast<int16_t>(bitmap.metrics.advance_x);
-    entry.atlas_w       = static_cast<uint16_t>(bitmap.metrics.width);
-    entry.atlas_h       = static_cast<uint16_t>(bitmap.metrics.height);
-
-    // 5. 空白字形（空格等）：仅记录步进，不占图集空间
-    if (bitmap.metrics.width == 0 || bitmap.metrics.height == 0) {
-        entry.atlas_x = 0;
-        entry.atlas_y = 0;
-        entry.atlas_w = 0;
-        entry.atlas_h = 0;
-        ++entry_count_;
-        return &entries_[entry_count_ - 1];
-    }
-
-    // 6. 在图集中分配区域（含 1px 边距防采样越界）
-    uint32_t ax = 0, ay = 0;
-    const uint32_t alloc_w = entry.atlas_w + kGlyphPad;
-    const uint32_t alloc_h = entry.atlas_h + kGlyphPad;
-    if (!packer_.pack(alloc_w, alloc_h, ax, ay)) {
-        // 图集空间不足，返回失败（M0 不做动态扩容）
-        return nullptr;
-    }
-    entry.atlas_x = static_cast<uint16_t>(ax);
-    entry.atlas_y = static_cast<uint16_t>(ay);
-
-    // 7. 将字形位图逐行写入 CPU 图集
-    if (bitmap.data != nullptr) {
-        for (uint32_t row = 0; row < entry.atlas_h; ++row) {
-            const uint8_t* src_row = bitmap.data + row * bitmap.pitch;
-            uint8_t*       dst_row = cpu_data_ + (ay + row) * kAtlasSize + ax;
-            for (uint32_t col = 0; col < entry.atlas_w; ++col) {
-                dst_row[col] = src_row[col];
-            }
-        }
-    }
-
-    dirty_ = true;
-    ++entry_count_;
-    return &entries_[entry_count_ - 1];
-}
-
-void GlyphAtlas::flush(gfx::IDevice* device) {
-    if (device == nullptr) return;
-
-    // 首次 flush：创建 GPU 纹理（R8_UNorm，ShaderResource 绑定）
-    if (!gpu_texture_) {
-        gfx::TextureDesc tex_desc{};
-        tex_desc.width      = kAtlasSize;
-        tex_desc.height     = kAtlasSize;
-        tex_desc.format     = gfx::PixelFormat::R8_UNorm;
-        tex_desc.bind_flags = gfx::TextureBindFlags::ShaderResource;
-        tex_desc.mip_levels = 1;
-        tex_desc.array_size = 1;
-
-        gpu_texture_ = device->create_texture(tex_desc);
-        if (!gpu_texture_) return;
-
-        // 创建时上传一次全量数据（全零初始化图集）
-        dirty_ = true;
-    }
-
-    // 有新字形加入：全量上传 CPU 图集到 GPU（M0 简化策略）
-    if (dirty_) {
-        device->update_texture_region(
-            gpu_texture_.get(),
-            0, 0,              // 目标区域左上角
-            kAtlasSize,        // 宽度
-            kAtlasSize,        // 高度
-            cpu_data_,         // CPU 数据指针
-            kAtlasSize);       // 每行字节数（R8，每像素 1 字节，故 = 宽度）
-        dirty_ = false;
-    }
-}
-
-/**
- * @brief 基于 RHI 的 2D 渲染器。
- *
- * 所有 GPU 调用都通过 mine.gfx.rhi 抽象层进行，不直接使用具体图形 API。
- *
- * 包含的渲染管线：
- *   - solid_pipeline_：用于折线描边展开（StrokePath），POSITION + COLOR 顶点
- *   - sdf_pipeline_  ：用于 SDF 形状（矩形/圆角/椭圆），SdfVertex 顶点（含 BrushDataCB 渐变支持）
- *   - text_pipeline_ ：用于文字渲染（字形图集四边形），TextVertex 顶点
- *   - blur_pipeline_ ：用于亚克力背景高斯模糊（全屏四边形，BlurVertex），方向由 BlurCB 控制
- */
-class RhiRenderer final : public IRenderer {
-public:
-    explicit RhiRenderer(gfx::IDevice* device);
-    ~RhiRenderer() override = default;
-
-    RhiRenderer(const RhiRenderer&)            = delete;
-    RhiRenderer& operator=(const RhiRenderer&) = delete;
-
-    void begin_frame() override;
-    void end_frame()   override;
-    void render(const DisplayList& dl, gfx::ITexture* target) override;
-    void set_dpi_scale(float scale) override;
-
-    /// 判断渲染器是否初始化成功
-    [[nodiscard]] bool is_valid() const noexcept { return valid_; }
-
-private:
-    /// 创建折线描边渲染管线（solid，POSITION + COLOR 顶点）
-    bool create_solid_pipeline();
-
-    /// 创建 SDF 形状渲染管线（SdfVertex，含 SDF 参数）
-    bool create_sdf_pipeline();
-
-    /// 创建文字渲染管线（TextVertex，字形图集采样）
-    bool create_text_pipeline();
-
-    /// 创建高斯模糊管线（BlurVertex，全屏四边形，用于亚克力背景模糊）
-    bool create_blur_pipeline();
-
-    /**
-     * @brief 创建裁剪相关管线（SDF ClipWrite/ClipErase/ClipTest 以及对应变体）。
-     *
-     * 裁剪系统使用模板缓冲实现：
-     *   - sdf_clip_write_pipeline_  : SDF 几何 + ClipWrite 模板（压入裁剪层）
-     *   - sdf_clip_erase_pipeline_  : SDF 几何 + ClipErase 模板（弹出裁剪层）
-     *   - sdf_clip_test_pipeline_   : SDF 几何 + ClipTest 模板（裁剪状态下普通 SDF 绘制）
-     *   - text_clip_test_pipeline_  : 文字 + ClipTest 模板（裁剪状态下文字绘制）
-     *   - solid_clip_test_pipeline_ : 折线 + ClipTest 模板（裁剪状态下折线绘制）
-     *
-     * @return true = 所有管线创建成功
-     */
-    bool create_clip_pipelines();
-
-    /**
-     * @brief 确保裁剪模板纹理已创建且尺寸匹配目标渲染纹理。
-     *
-     * 模板纹理格式为 D24_UNorm_S8_UInt（24 位深度 + 8 位模板），同时绑定 DepthStencil。
-     * 首次调用或目标尺寸变化时（懒创建）才实际创建 GPU 纹理。
-     *
-     * @param target  主渲染目标纹理（用于获取需要的尺寸）
-     * @return true = 模板纹理可用，false = 创建失败（将禁用裁剪功能）
-     */
-    bool ensure_stencil_texture(gfx::ITexture* target);
-
-    /**
-     * @brief 确保亚克力 scratch 纹理已创建且尺寸匹配目标渲染纹理。
-     *
-     * 两个 scratch 纹理均为 RGBA8_UNorm 格式，同时绑定 ShaderResource 和 RenderTarget。
-     * 首次调用或目标尺寸变化时（懒创建）才实际创建 GPU 纹理。
-     *
-     * @param target  主渲染目标纹理（用于获取需要的尺寸和格式）
-     * @return true = scratch 纹理可用，false = 创建失败
-     */
-    bool ensure_scratch_textures(gfx::ITexture* target);
-
-    /**
-     * @brief 生成 SDF 形状包围盒的 6 个顶点（2 个三角形），追加到 vertices。
-     *
-     * @param vertices        输出顶点列表
-     * @param cx, cy          形状中心（屏幕像素坐标）
-     * @param half_w, half_h  形状半尺寸（像素）
-     * @param padding         包围盒额外 padding（描边外扩 + 1px AA 余量）
-     * @param r,g,b,a         颜色（线性 RGBA）
-     * @param kind            形状类型（0=矩形，1=均匀圆角，2=复杂圆角，3=椭圆）
-     * @param p0,p1,p2,p3     圆角半径参数（右下/右上/左下/左上）
-     * @param stroke_w        描边总宽度（0 = 填充模式）
-     * @param e0,e1,e2,e3     扩展参数（TEXCOORD3，供 kind=5 传入四角圆角半径，默认 0）
-     */
-    static void push_sdf_quad_vertices(
-        containers::Vector<SdfVertex>& vertices,
-        float cx, float cy,
-        float half_w, float half_h, float padding,
-        float r, float g, float b, float a,
-        float kind,
-        float p0, float p1, float p2, float p3,
-        float stroke_w,
-        float e0 = 0.0f, float e1 = 0.0f, float e2 = 0.0f, float e3 = 0.0f);
-
-    /**
-     * @brief 构建画刷数据常量缓冲（BrushDataCB）。
-     *
-     * 将 Brush 中存储的画刷数据（归一化坐标）转换为 HLSL 着色器使用的 local 坐标（像素）。
-     *
-     * @param brush   画刷对象
-     * @param cx,cy   形状中心（屏幕像素坐标）
-     * @param half_w  形状包围盒半宽（像素）
-     * @param half_h  形状包围盒半高（像素）
-     * @return 填充好的 BrushDataCB 结构体
-     */
-    static BrushDataCB make_brush_cb(
-        const Brush& brush,
-        float cx, float cy,
-        float half_w, float half_h) noexcept;
-
-    bool  valid_{false};
-    float dpi_scale_{1.0f};  ///< 物理像素 / 逻辑像素缩放因子，默认 1（不缩放）
-
-    gfx::IDevice*                        device_{nullptr};       ///< 图形设备（不拥有）
-    core::OwnedPtr<gfx::IQueue>          queue_;                 ///< 提交队列
-    core::OwnedPtr<gfx::ICommandList>    cmd_list_;              ///< 命令录制列表
-    core::OwnedPtr<gfx::IPipeline>       solid_pipeline_;        ///< 折线描边管线（POSITION+COLOR）
-    core::OwnedPtr<gfx::IPipeline>       sdf_pipeline_;          ///< SDF 形状管线（SdfVertex）
-    core::OwnedPtr<gfx::IPipeline>       text_pipeline_;         ///< 文字渲染管线（TextVertex）
-    core::OwnedPtr<gfx::IPipeline>       blur_pipeline_;         ///< 高斯模糊管线（BlurVertex，亚克力用）
-    core::OwnedPtr<gfx::ITexture>        blur_scratch_a_;        ///< 亚克力模糊 scratch 纹理 A（捕获/结果）
-    core::OwnedPtr<gfx::ITexture>        blur_scratch_b_;        ///< 亚克力模糊 scratch 纹理 B（中间结果）
-    core::OwnedPtr<GlyphAtlas>           glyph_atlas_;           ///< 字形 GPU 图集管理器
-
-    // ── 裁剪系统（模板缓冲方案）────────────────────────────────────────────────
-    core::OwnedPtr<gfx::ITexture>        clip_stencil_;              ///< D24_S8 深度模板纹理（懒创建）
-    core::OwnedPtr<gfx::IPipeline>       sdf_clip_write_pipeline_;   ///< SDF + ClipWrite（压入裁剪层）
-    core::OwnedPtr<gfx::IPipeline>       sdf_clip_erase_pipeline_;   ///< SDF + ClipErase（弹出裁剪层）
-    core::OwnedPtr<gfx::IPipeline>       sdf_clip_test_pipeline_;    ///< SDF + ClipTest（裁剪状态 SDF 绘制）
-    core::OwnedPtr<gfx::IPipeline>       text_clip_test_pipeline_;   ///< 文字 + ClipTest（裁剪状态文字绘制）
-    core::OwnedPtr<gfx::IPipeline>       solid_clip_test_pipeline_;  ///< 折线 + ClipTest（裁剪状态折线绘制）
-};
+inline constexpr const auto& g_ps_basic_bytecode = mine::gfx::d3d11::shaders::g_ps_basic_bytecode;
+inline constexpr const auto& g_ps_blur_bytecode = mine::gfx::d3d11::shaders::g_ps_blur_bytecode;
+inline constexpr const auto& g_ps_sdf_bytecode = mine::gfx::d3d11::shaders::g_ps_sdf_bytecode;
+inline constexpr const auto& g_ps_sdf_clip_bytecode = mine::gfx::d3d11::shaders::g_ps_sdf_clip_bytecode;
+inline constexpr const auto& g_ps_text_bytecode = mine::gfx::d3d11::shaders::g_ps_text_bytecode;
+inline constexpr const auto& g_vs_basic_bytecode = mine::gfx::d3d11::shaders::g_vs_basic_bytecode;
+inline constexpr const auto& g_vs_blur_bytecode = mine::gfx::d3d11::shaders::g_vs_blur_bytecode;
+inline constexpr const auto& g_vs_sdf_bytecode = mine::gfx::d3d11::shaders::g_vs_sdf_bytecode;
+inline constexpr const auto& g_vs_text_bytecode = mine::gfx::d3d11::shaders::g_vs_text_bytecode;
+
+// ── 已提取的代码模块 ─────────────────────────────────────────────────────────
+// 顶点格式与常量缓冲 → PaintShaderTypes.h
+// 字形图集管理       → GlyphAtlas.h / GlyphAtlas.cpp
+// Path 扁平化辅助    → PathFlattener.h / PathFlattener.cpp
 
 // ── 构造 ──────────────────────────────────────────────────────────────────────
 
@@ -2011,17 +109,17 @@ bool RhiRenderer::create_solid_pipeline() {
     // 顶点布局：POSITION（float2）+ COLOR（float4），共 24 字节
     gfx::PipelineDesc desc{};
 
-    desc.vertex_shader.data        = k_vertex_shader_hlsl;
-    desc.vertex_shader.size        = sizeof(k_vertex_shader_hlsl) - 1;
+    desc.vertex_shader.data = g_vs_basic_bytecode;
+    desc.vertex_shader.size        = sizeof(g_vs_basic_bytecode);
     desc.vertex_shader.language    = gfx::ShaderLanguage::HLSL;
     desc.vertex_shader.entry_point = "main";
-    desc.vertex_shader.is_source   = true;
+    desc.vertex_shader.is_source   = false;
 
-    desc.pixel_shader.data        = k_pixel_shader_hlsl;
-    desc.pixel_shader.size        = sizeof(k_pixel_shader_hlsl) - 1;
+    desc.pixel_shader.data = g_ps_basic_bytecode;
+    desc.pixel_shader.size        = sizeof(g_ps_basic_bytecode);
     desc.pixel_shader.language    = gfx::ShaderLanguage::HLSL;
     desc.pixel_shader.entry_point = "main";
-    desc.pixel_shader.is_source   = true;
+    desc.pixel_shader.is_source   = false;
 
     desc.vertex_element_count = 2;
     desc.vertex_elements[0].semantic       = gfx::VertexSemantic::Position;
@@ -2048,17 +146,17 @@ bool RhiRenderer::create_sdf_pipeline() {
     // 顶点布局：SdfVertex（64 字节），5 个顶点元素
     gfx::PipelineDesc desc{};
 
-    desc.vertex_shader.data        = k_sdf_vertex_shader_hlsl;
-    desc.vertex_shader.size        = sizeof(k_sdf_vertex_shader_hlsl) - 1;
+    desc.vertex_shader.data = g_vs_sdf_bytecode;
+    desc.vertex_shader.size        = sizeof(g_vs_sdf_bytecode);
     desc.vertex_shader.language    = gfx::ShaderLanguage::HLSL;
     desc.vertex_shader.entry_point = "main";
-    desc.vertex_shader.is_source   = true;
+    desc.vertex_shader.is_source   = false;
 
-    desc.pixel_shader.data        = k_sdf_pixel_shader_hlsl;
-    desc.pixel_shader.size        = sizeof(k_sdf_pixel_shader_hlsl) - 1;
+    desc.pixel_shader.data = g_ps_sdf_bytecode;
+    desc.pixel_shader.size        = sizeof(g_ps_sdf_bytecode);
     desc.pixel_shader.language    = gfx::ShaderLanguage::HLSL;
     desc.pixel_shader.entry_point = "main";
-    desc.pixel_shader.is_source   = true;
+    desc.pixel_shader.is_source   = false;
 
     // POSITION (float2) — offset 0，屏幕像素坐标
     desc.vertex_elements[0].semantic       = gfx::VertexSemantic::Position;
@@ -2115,17 +213,17 @@ bool RhiRenderer::create_text_pipeline() {
     // 文字顶点布局：POSITION(float2) + TEXCOORD0(float2) + COLOR(float4) = 32 字节
     gfx::PipelineDesc desc{};
 
-    desc.vertex_shader.data        = k_text_vertex_shader_hlsl;
-    desc.vertex_shader.size        = sizeof(k_text_vertex_shader_hlsl) - 1;
+    desc.vertex_shader.data = g_vs_text_bytecode;
+    desc.vertex_shader.size        = sizeof(g_vs_text_bytecode);
     desc.vertex_shader.language    = gfx::ShaderLanguage::HLSL;
     desc.vertex_shader.entry_point = "main";
-    desc.vertex_shader.is_source   = true;
+    desc.vertex_shader.is_source   = false;
 
-    desc.pixel_shader.data        = k_text_pixel_shader_hlsl;
-    desc.pixel_shader.size        = sizeof(k_text_pixel_shader_hlsl) - 1;
+    desc.pixel_shader.data = g_ps_text_bytecode;
+    desc.pixel_shader.size        = sizeof(g_ps_text_bytecode);
     desc.pixel_shader.language    = gfx::ShaderLanguage::HLSL;
     desc.pixel_shader.entry_point = "main";
-    desc.pixel_shader.is_source   = true;
+    desc.pixel_shader.is_source   = false;
 
     // POSITION (float2) — offset 0：屏幕像素坐标
     desc.vertex_elements[0].semantic       = gfx::VertexSemantic::Position;
@@ -2161,17 +259,17 @@ bool RhiRenderer::create_blur_pipeline() {
     // 顶点布局：BlurVertex（16 字节）：POSITION(float2) + TEXCOORD0(float2)
     gfx::PipelineDesc desc{};
 
-    desc.vertex_shader.data        = k_blur_vertex_shader_hlsl;
-    desc.vertex_shader.size        = sizeof(k_blur_vertex_shader_hlsl) - 1;
+    desc.vertex_shader.data = g_vs_blur_bytecode;
+    desc.vertex_shader.size        = sizeof(g_vs_blur_bytecode);
     desc.vertex_shader.language    = gfx::ShaderLanguage::HLSL;
     desc.vertex_shader.entry_point = "main";
-    desc.vertex_shader.is_source   = true;
+    desc.vertex_shader.is_source   = false;
 
-    desc.pixel_shader.data        = k_blur_pixel_shader_hlsl;
-    desc.pixel_shader.size        = sizeof(k_blur_pixel_shader_hlsl) - 1;
+    desc.pixel_shader.data = g_ps_blur_bytecode;
+    desc.pixel_shader.size        = sizeof(g_ps_blur_bytecode);
     desc.pixel_shader.language    = gfx::ShaderLanguage::HLSL;
     desc.pixel_shader.entry_point = "main";
-    desc.pixel_shader.is_source   = true;
+    desc.pixel_shader.is_source   = false;
 
     // POSITION (float2) — offset 0：NDC 坐标
     desc.vertex_elements[0].semantic       = gfx::VertexSemantic::Position;
@@ -2245,17 +343,17 @@ bool RhiRenderer::create_clip_pipelines() {
 
     {
         gfx::PipelineDesc desc{};
-        desc.vertex_shader.data        = k_sdf_vertex_shader_hlsl;
-        desc.vertex_shader.size        = sizeof(k_sdf_vertex_shader_hlsl) - 1;
+        desc.vertex_shader.data = g_vs_sdf_bytecode;
+        desc.vertex_shader.size        = sizeof(g_vs_sdf_bytecode);
         desc.vertex_shader.language    = gfx::ShaderLanguage::HLSL;
         desc.vertex_shader.entry_point = "main";
-        desc.vertex_shader.is_source   = true;
+        desc.vertex_shader.is_source   = false;
 
-        desc.pixel_shader.data        = k_sdf_clip_pixel_shader_hlsl;
-        desc.pixel_shader.size        = sizeof(k_sdf_clip_pixel_shader_hlsl) - 1;
+        desc.pixel_shader.data = g_ps_sdf_clip_bytecode;
+        desc.pixel_shader.size        = sizeof(g_ps_sdf_clip_bytecode);
         desc.pixel_shader.language    = gfx::ShaderLanguage::HLSL;
         desc.pixel_shader.entry_point = "main";
-        desc.pixel_shader.is_source   = true;
+        desc.pixel_shader.is_source   = false;
 
         fill_sdf_layout(desc);
         desc.enable_blend    = false;
@@ -2270,17 +368,17 @@ bool RhiRenderer::create_clip_pipelines() {
 
     {
         gfx::PipelineDesc desc{};
-        desc.vertex_shader.data        = k_sdf_vertex_shader_hlsl;
-        desc.vertex_shader.size        = sizeof(k_sdf_vertex_shader_hlsl) - 1;
+        desc.vertex_shader.data = g_vs_sdf_bytecode;
+        desc.vertex_shader.size        = sizeof(g_vs_sdf_bytecode);
         desc.vertex_shader.language    = gfx::ShaderLanguage::HLSL;
         desc.vertex_shader.entry_point = "main";
-        desc.vertex_shader.is_source   = true;
+        desc.vertex_shader.is_source   = false;
 
-        desc.pixel_shader.data        = k_sdf_clip_pixel_shader_hlsl;
-        desc.pixel_shader.size        = sizeof(k_sdf_clip_pixel_shader_hlsl) - 1;
+        desc.pixel_shader.data = g_ps_sdf_clip_bytecode;
+        desc.pixel_shader.size        = sizeof(g_ps_sdf_clip_bytecode);
         desc.pixel_shader.language    = gfx::ShaderLanguage::HLSL;
         desc.pixel_shader.entry_point = "main";
-        desc.pixel_shader.is_source   = true;
+        desc.pixel_shader.is_source   = false;
 
         fill_sdf_layout(desc);
         desc.enable_blend    = false;
@@ -2295,17 +393,17 @@ bool RhiRenderer::create_clip_pipelines() {
 
     {
         gfx::PipelineDesc desc{};
-        desc.vertex_shader.data        = k_sdf_vertex_shader_hlsl;
-        desc.vertex_shader.size        = sizeof(k_sdf_vertex_shader_hlsl) - 1;
+        desc.vertex_shader.data = g_vs_sdf_bytecode;
+        desc.vertex_shader.size        = sizeof(g_vs_sdf_bytecode);
         desc.vertex_shader.language    = gfx::ShaderLanguage::HLSL;
         desc.vertex_shader.entry_point = "main";
-        desc.vertex_shader.is_source   = true;
+        desc.vertex_shader.is_source   = false;
 
-        desc.pixel_shader.data        = k_sdf_pixel_shader_hlsl;
-        desc.pixel_shader.size        = sizeof(k_sdf_pixel_shader_hlsl) - 1;
+        desc.pixel_shader.data = g_ps_sdf_bytecode;
+        desc.pixel_shader.size        = sizeof(g_ps_sdf_bytecode);
         desc.pixel_shader.language    = gfx::ShaderLanguage::HLSL;
         desc.pixel_shader.entry_point = "main";
-        desc.pixel_shader.is_source   = true;
+        desc.pixel_shader.is_source   = false;
 
         fill_sdf_layout(desc);
         desc.enable_blend    = true;   // 预乘 Alpha 混合（正常颜色输出）
@@ -2320,17 +418,17 @@ bool RhiRenderer::create_clip_pipelines() {
 
     {
         gfx::PipelineDesc desc{};
-        desc.vertex_shader.data        = k_text_vertex_shader_hlsl;
-        desc.vertex_shader.size        = sizeof(k_text_vertex_shader_hlsl) - 1;
+        desc.vertex_shader.data = g_vs_text_bytecode;
+        desc.vertex_shader.size        = sizeof(g_vs_text_bytecode);
         desc.vertex_shader.language    = gfx::ShaderLanguage::HLSL;
         desc.vertex_shader.entry_point = "main";
-        desc.vertex_shader.is_source   = true;
+        desc.vertex_shader.is_source   = false;
 
-        desc.pixel_shader.data        = k_text_pixel_shader_hlsl;
-        desc.pixel_shader.size        = sizeof(k_text_pixel_shader_hlsl) - 1;
+        desc.pixel_shader.data = g_ps_text_bytecode;
+        desc.pixel_shader.size        = sizeof(g_ps_text_bytecode);
         desc.pixel_shader.language    = gfx::ShaderLanguage::HLSL;
         desc.pixel_shader.entry_point = "main";
-        desc.pixel_shader.is_source   = true;
+        desc.pixel_shader.is_source   = false;
 
         // POSITION (float2) — offset 0
         desc.vertex_elements[0].semantic       = gfx::VertexSemantic::Position;
@@ -2365,17 +463,17 @@ bool RhiRenderer::create_clip_pipelines() {
 
     {
         gfx::PipelineDesc desc{};
-        desc.vertex_shader.data        = k_vertex_shader_hlsl;
-        desc.vertex_shader.size        = sizeof(k_vertex_shader_hlsl) - 1;
+        desc.vertex_shader.data = g_vs_basic_bytecode;
+        desc.vertex_shader.size        = sizeof(g_vs_basic_bytecode);
         desc.vertex_shader.language    = gfx::ShaderLanguage::HLSL;
         desc.vertex_shader.entry_point = "main";
-        desc.vertex_shader.is_source   = true;
+        desc.vertex_shader.is_source   = false;
 
-        desc.pixel_shader.data        = k_pixel_shader_hlsl;
-        desc.pixel_shader.size        = sizeof(k_pixel_shader_hlsl) - 1;
+        desc.pixel_shader.data = g_ps_basic_bytecode;
+        desc.pixel_shader.size        = sizeof(g_ps_basic_bytecode);
         desc.pixel_shader.language    = gfx::ShaderLanguage::HLSL;
         desc.pixel_shader.entry_point = "main";
-        desc.pixel_shader.is_source   = true;
+        desc.pixel_shader.is_source   = false;
 
         desc.vertex_elements[0].semantic       = gfx::VertexSemantic::Position;
         desc.vertex_elements[0].semantic_index = 0;
@@ -4069,8 +2167,9 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             const auto& text_runs = dl.text_runs();
             if (cmd.path_index >= static_cast<uint32_t>(text_runs.size())) continue;
             const TextRun& run = text_runs[cmd.path_index];
+            const uint32_t run_len = static_cast<uint32_t>(run.utf8.size());
 
-            if (run.font_face == nullptr || run.length == 0 || run.size_px <= 0.0f) continue;
+            if (run.font_face == nullptr || run_len == 0 || run.size_px <= 0.0f) continue;
 
             // 字号取整（缓存键使用整像素）
             const uint32_t size_px = static_cast<uint32_t>(run.size_px + 0.5f);
@@ -4081,8 +2180,8 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             // UTF-8 解码，逐码点查询/插入字形图集
             {
                 uint32_t  i   = 0;
-                const char* s = run.utf8;
-                while (i < run.length) {
+                const char* s = run.utf8.data();
+                while (i < run_len) {
                     uint32_t codepoint = 0;
                     const uint8_t c0 = static_cast<uint8_t>(s[i]);
                     uint32_t      adv = 1;
@@ -4091,18 +2190,18 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
                         // ASCII（0xxxxxxx）
                         codepoint = c0;
                         adv = 1;
-                    } else if ((c0 & 0xE0u) == 0xC0u && i + 1 < run.length) {
+                    } else if ((c0 & 0xE0u) == 0xC0u && i + 1 < run_len) {
                         // 2 字节（110xxxxx 10xxxxxx）
                         const uint8_t c1 = static_cast<uint8_t>(s[i + 1]);
                         codepoint = ((c0 & 0x1Fu) << 6u) | (c1 & 0x3Fu);
                         adv = 2;
-                    } else if ((c0 & 0xF0u) == 0xE0u && i + 2 < run.length) {
+                    } else if ((c0 & 0xF0u) == 0xE0u && i + 2 < run_len) {
                         // 3 字节（1110xxxx 10xxxxxx 10xxxxxx）
                         const uint8_t c1 = static_cast<uint8_t>(s[i + 1]);
                         const uint8_t c2 = static_cast<uint8_t>(s[i + 2]);
                         codepoint = ((c0 & 0x0Fu) << 12u) | ((c1 & 0x3Fu) << 6u) | (c2 & 0x3Fu);
                         adv = 3;
-                    } else if ((c0 & 0xF8u) == 0xF0u && i + 3 < run.length) {
+                    } else if ((c0 & 0xF8u) == 0xF0u && i + 3 < run_len) {
                         // 4 字节（11110xxx 10xxxxxx 10xxxxxx 10xxxxxx）
                         const uint8_t c1 = static_cast<uint8_t>(s[i + 1]);
                         const uint8_t c2 = static_cast<uint8_t>(s[i + 2]);
@@ -4117,7 +2216,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
                     }
 
                     i += adv;
-                    // 预热缓存（光栅化到 CPU 图集，尚未上传 GPU）
+                    // 预热缓存（光栅化到 CPU 图集；图集满时静默跳过——阶段 3 会以近似步进处理）
                     glyph_atlas_->get_or_insert(face, codepoint, size_px);
                 }
             }
@@ -4135,22 +2234,22 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             // 再次遍历文字，生成每个字形的顶点
             {
                 uint32_t  i   = 0;
-                const char* s = run.utf8;
-                while (i < run.length) {
+                const char* s = run.utf8.data();
+                while (i < run_len) {
                     uint32_t codepoint = 0;
                     uint32_t adv = 1;
                     const uint8_t c0 = static_cast<uint8_t>(s[i]);
 
                     if (c0 < 0x80u) {
                         codepoint = c0; adv = 1;
-                    } else if ((c0 & 0xE0u) == 0xC0u && i + 1 < run.length) {
+                    } else if ((c0 & 0xE0u) == 0xC0u && i + 1 < run_len) {
                         const uint8_t c1 = static_cast<uint8_t>(s[i + 1]);
                         codepoint = ((c0 & 0x1Fu) << 6u) | (c1 & 0x3Fu); adv = 2;
-                    } else if ((c0 & 0xF0u) == 0xE0u && i + 2 < run.length) {
+                    } else if ((c0 & 0xF0u) == 0xE0u && i + 2 < run_len) {
                         const uint8_t c1 = static_cast<uint8_t>(s[i + 1]);
                         const uint8_t c2 = static_cast<uint8_t>(s[i + 2]);
                         codepoint = ((c0 & 0x0Fu) << 12u) | ((c1 & 0x3Fu) << 6u) | (c2 & 0x3Fu); adv = 3;
-                    } else if ((c0 & 0xF8u) == 0xF0u && i + 3 < run.length) {
+                    } else if ((c0 & 0xF8u) == 0xF0u && i + 3 < run_len) {
                         const uint8_t c1 = static_cast<uint8_t>(s[i + 1]);
                         const uint8_t c2 = static_cast<uint8_t>(s[i + 2]);
                         const uint8_t c3 = static_cast<uint8_t>(s[i + 3]);
@@ -4163,7 +2262,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
 
                     const AtlasEntry* entry = glyph_atlas_->get_or_insert(face, codepoint, size_px);
                     if (entry == nullptr) {
-                        // 缓存查找失败（理论上不会发生，第一阶段已插入）
+                        // 图集已满或光栅化失败：用半角字宽近似跳过该字形
                         pen_x += static_cast<float>(size_px) * 0.5f;
                         continue;
                     }
@@ -4242,3 +2341,5 @@ core::OwnedPtr<IRenderer> create_renderer(gfx::IDevice* device) {
 }
 
 } // namespace mine::paint
+
+

@@ -21,17 +21,22 @@ target("mine.gfx.d3d11")
     add_headerfiles("api/include/(**.h)")
 
     -- 预编译 HLSL 着色器 → ShaderBytecode.h
+    -- 生成到 build/.generated/mine/gfx/d3d11/ 下以匹配 #include <mine/gfx/d3d11/ShaderBytecode.h>
     local shaderDir  = path.join(os.projectdir(), "src/mine/gfx/d3d11/shaders")
-    local genDir     = path.join(os.projectdir(), "build/.generated/mine.gfx.d3d11")
-    local outHeader  = path.join(genDir, "ShaderBytecode.h")
+    local outDir     = path.join(os.projectdir(), "build/.generated/mine/gfx/d3d11")
+    local outHeader  = path.join(outDir, "ShaderBytecode.h")
 
     before_build(function (target)
+        import("core.base.task")
+        -- 确保输出目录存在
+        os.mkdir(outDir)
         local script = path.join(os.projectdir(), "scripts/build_shaders.ps1")
         os.runv("powershell", {"-ExecutionPolicy", "Bypass", "-File", script,
                                 "-ShaderDir", shaderDir,
                                 "-OutputHeader", outHeader})
     end)
 
-    -- 将生成目录加入 include 路径
-    add_includedirs(genDir, {public = false})
+    -- 将 build/.generated/ 加入公开 include 路径
+    -- 使得 <mine/gfx/d3d11/ShaderBytecode.h> 能正确解析
+    add_includedirs(path.join(os.projectdir(), "build/.generated"), {public = true})
 target_end()
