@@ -136,7 +136,7 @@ void CounterWindow::build_(mine::text::FontFace* font)
     input_box_.set_placeholder("在此输入任意文字（中英文均可）");
     input_box_.set_font_size(16.0f);
     input_box_.set_margin(math::Thickness{ 20.0f, 10.0f, 20.0f, 10.0f });
-    input_box_.set_text_wrapping(ui::TextWrapping::NoWrap);
+    input_box_.set_text_wrapping(ui::TextWrapping::Wrap);
     if (font) { input_box_.set_font_face(font); }
     // TwoWay 绑定将在 bind_() 中自动处理双向同步，无需手动监听事件
     body_panel_.add_child(&input_box_);

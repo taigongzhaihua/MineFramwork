@@ -850,6 +850,49 @@ void TextBlock::on_render(paint::Canvas& canvas)
     const float content_w      = rect.width - padding_.horizontal();
     const float content_h      = rect.height - padding_.vertical();
 
+    auto visible_slice_for_line = [&](const char* data, uint32_t len, float base_x) {
+        struct VisibleSlice {
+            uint32_t start_offset{0};
+            uint32_t byte_length{0};
+            float    draw_x{0.0f};
+        } slice{};
+
+        if (data == nullptr || len == 0u) {
+            return slice;
+        }
+
+        const float margin_px = 48.0f;
+        float pen_x = base_x;
+        bool started = false;
+        uint32_t pos = 0u;
+        uint32_t end = len;
+        while (pos < len) {
+            const uint32_t next = text::utf8_next(data, pos, len);
+            const float glyph_w = measure_segment(data + pos, next - pos);
+            const float glyph_left = pen_x;
+            const float glyph_right = pen_x + glyph_w;
+
+            if (!started && glyph_right >= content_left - margin_px) {
+                started = true;
+                slice.start_offset = pos;
+                slice.draw_x = glyph_left;
+            }
+            if (started && glyph_left > content_right + margin_px) {
+                end = pos;
+                break;
+            }
+
+            pen_x = glyph_right;
+            pos = next;
+        }
+
+        if (!started) {
+            return slice;
+        }
+        slice.byte_length = end - slice.start_offset;
+        return slice;
+    };
+
     // 确定可见行数
     const size_t max_visible = (max_lines_ > 0)
         ? std::min(cached_lines_.size(), static_cast<size_t>(max_lines_))
@@ -870,6 +913,13 @@ void TextBlock::on_render(paint::Canvas& canvas)
     for (size_t i = 0u; i < max_visible; ++i) {
         const TextLine& line       = cached_lines_[i];
         const float line_top = content_top + static_cast<float>(i) * eff_lh;
+        const float line_bottom = line_top + eff_lh;
+
+        // 跳过完全在可见区域外的行（大幅减少长文本的 DrawText 调用量）
+        if (line_bottom < content_top || line_top > content_top + content_h) {
+            continue;
+        }
+
         const bool  need_ink_bounds = use_ink_alignment_
                                    || use_single_line_ink_layout
                                    || text_alignment_ == TextAlignment::Center
@@ -920,9 +970,17 @@ void TextBlock::on_render(paint::Canvas& canvas)
 
         // 绘制行文字（含字符间距，不含省略号）
         if (line.disp_length > 0u) {
+            const char* line_data = text_.data() + line.start;
+            const bool need_visible_slice = !line.has_ellipsis && line.disp_width > content_w + 96.0f;
+            const auto slice = need_visible_slice
+                ? visible_slice_for_line(line_data, line.disp_length, text_x)
+                : decltype(visible_slice_for_line(line_data, line.disp_length, text_x)){};
+
             canvas.draw_text(
-                core::StringView{ text_.data() + line.start, line.disp_length },
-                { text_x, baseline_y },
+                core::StringView{
+                    need_visible_slice ? (line_data + slice.start_offset) : line_data,
+                    need_visible_slice ? slice.byte_length : line.disp_length },
+                { need_visible_slice ? slice.draw_x : text_x, baseline_y },
                 font_face_,
                 font_size_px_,
                 foreground_,

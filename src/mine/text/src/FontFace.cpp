@@ -68,6 +68,7 @@ static FT_Library get_ft_library() {
 struct FontFace::Impl {
     FT_Face  face{nullptr};  ///< FreeType 字体面
     bool     is_memory_font; ///< 是否为内存加载（影响析构路径）
+    FT_UInt  cached_pixel_h{0}; ///< 上次通过 FT_Set_Pixel_Sizes 设置的字号（0=未设置）
 
     explicit Impl(FT_Face f, bool from_memory)
         : face(f), is_memory_font(from_memory) {}
@@ -153,15 +154,21 @@ bool FontFace::set_pixel_size(uint32_t width, uint32_t height) {
         return false;
     }
 
-    const FT_Error err = FT_Set_Pixel_Sizes(
-        impl_->face,
-        static_cast<FT_UInt>(width),
-        static_cast<FT_UInt>(height));
+    const FT_UInt w = static_cast<FT_UInt>(width);
+    const FT_UInt h = static_cast<FT_UInt>(height);
+
+    // 若字号未变更则跳过 FT_Set_Pixel_Sizes（与 measure_text 缓存一致）
+    if (h == impl_->cached_pixel_h && (w == 0 || w == impl_->cached_pixel_h)) {
+        return true;
+    }
+
+    const FT_Error err = FT_Set_Pixel_Sizes(impl_->face, w, h);
 
     if (err != 0) {
         FT_LOG("FT_Set_Pixel_Sizes 失败");
         return false;
     }
+    impl_->cached_pixel_h = h;  // 同步缓存
     return true;
 }
 
@@ -300,11 +307,14 @@ float FontFace::measure_text(const char* utf8,
 
     FT_Face face = impl_->face;
 
-    // 设置字号（浮点四舍五入到整像素；width=0 表示由 height 等比推算）
+    // 仅在字号变更时才调用 FT_Set_Pixel_Sizes（缓存上次设置的字号，避免冗余调用）
     const FT_UInt pixel_h = static_cast<FT_UInt>(font_size_px + 0.5f);
-    if (FT_Set_Pixel_Sizes(face, 0, pixel_h) != 0) {
-        FT_LOG("measure_text：FT_Set_Pixel_Sizes 失败");
-        return 0.0f;
+    if (pixel_h != impl_->cached_pixel_h) {
+        if (FT_Set_Pixel_Sizes(face, 0, pixel_h) != 0) {
+            FT_LOG("measure_text：FT_Set_Pixel_Sizes 失败");
+            return 0.0f;
+        }
+        impl_->cached_pixel_h = pixel_h;
     }
 
     float total_width = 0.0f;
@@ -345,9 +355,12 @@ TextInkBounds FontFace::measure_text_ink_bounds(const char* utf8,
     FT_Face face = impl_->face;
 
     const FT_UInt pixel_h = static_cast<FT_UInt>(font_size_px + 0.5f);
-    if (FT_Set_Pixel_Sizes(face, 0, pixel_h) != 0) {
-        FT_LOG("measure_text_ink_bounds：FT_Set_Pixel_Sizes 失败");
-        return bounds;
+    if (pixel_h != impl_->cached_pixel_h) {
+        if (FT_Set_Pixel_Sizes(face, 0, pixel_h) != 0) {
+            FT_LOG("measure_text_ink_bounds：FT_Set_Pixel_Sizes 失败");
+            return bounds;
+        }
+        impl_->cached_pixel_h = pixel_h;
     }
 
     float pen_x = 0.0f;

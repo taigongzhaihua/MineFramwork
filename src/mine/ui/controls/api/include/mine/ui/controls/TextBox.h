@@ -382,6 +382,25 @@ private:
      */
     [[nodiscard]] float measure_text_width(const char* utf8, uint32_t len) const noexcept;
 
+    /**
+     * @brief 标记文本宽度缓存失效。
+     *
+     * 文本内容、字体或字号变化后调用；缓存在下次测量时惰性重建。
+     */
+    void invalidate_text_width_cache() noexcept;
+
+    /**
+     * @brief 重建按字节偏移索引的前缀宽度缓存。
+     *
+     * prefix_width_cache_[n] 表示 text_buf_ 前 n 个字节对应的可视宽度。
+     */
+    void rebuild_text_width_cache() const noexcept;
+
+    /**
+     * @brief 获取前 n 个字节的前缀宽度。
+     */
+    [[nodiscard]] float cached_text_width_at(uint32_t byte_offset) const noexcept;
+
     /// 委托给 mine::text::split_lines，避免调用点大量改动
     [[nodiscard]] containers::Vector<mine::text::LineInfo> split_lines(
         float max_width, TextWrapping wrapping) const;
@@ -507,6 +526,20 @@ private:
 
     containers::InlineString text_buf_;         ///< 实际文字内容缓冲（UTF-8）
     containers::InlineString placeholder_buf_;  ///< 占位文字缓冲（UTF-8）
+
+    /// 文本前缀宽度缓存（按字节偏移索引，惰性重建）
+    mutable containers::Vector<float> text_width_prefix_cache_;
+    mutable bool                      text_width_cache_dirty_ = true;
+
+    /// 分行结果缓存（避免 on_measure 每帧都调用 split_lines 做全量文本测量）
+    mutable containers::Vector<mine::text::LineInfo> cached_lines_;
+    mutable float  cached_lines_max_width_ = -1.0f;  ///< 缓存对应的 max_width
+    mutable bool   cached_lines_wrap_      = false;   ///< 缓存对应的 enable_width_wrap
+    mutable bool   lines_cache_dirty_      = true;    ///< 分行缓存是否已失效
+
+    void invalidate_lines_cache() noexcept;
+    [[nodiscard]] const containers::Vector<mine::text::LineInfo>& get_or_build_lines(
+        float max_width, bool enable_width_wrap) const noexcept;
 
     bool  is_read_only_     = false;  ///< 只读模式
     bool  is_hovered_       = false;  ///< 鼠标悬停状态
