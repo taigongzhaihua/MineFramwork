@@ -19,6 +19,7 @@
 
 #include <mine/paint/DrawCmd.h>
 #include <mine/paint/Path.h>
+#include <mine/containers/InlineString.h>
 #include <mine/containers/Vector.h>
 #include <mine/core/Span.h>
 
@@ -28,7 +29,8 @@ namespace mine::paint {
  * @brief 文字渲染段落（Text Run）。
  *
  * 存储一段连续文字的 UTF-8 内容及其渲染参数。
- * 字符串以 inline 缓冲区存储（最大 512 字节），不进行动态分配。
+ * UTF-8 内容使用 InlineString 存储：短文本走 SSO，长文本自动切换堆分配，
+ * 不再受固定 512 字节缓冲上限约束。
  *
  * 坐标约定：
  *   origin 为基线起始点，Y 轴向下（与屏幕坐标系一致）。
@@ -37,11 +39,7 @@ namespace mine::paint {
  * DisplayList 不拥有字体面，调用方须保证字体面生命周期长于 DisplayList。
  */
 struct TextRun {
-    /// UTF-8 字符串的最大存储字节数（含终止符）
-    static constexpr uint32_t kMaxUtf8Bytes = 512;
-
-    char     utf8[kMaxUtf8Bytes]{};  ///< UTF-8 编码字符串（inline 缓冲，以 '\0' 结尾）
-    uint32_t length{0};              ///< 实际字节数（不含终止符）
+    containers::InlineString utf8{}; ///< UTF-8 编码字符串（短文本 SSO，长文本自动堆扩容）
     void*    font_face{nullptr};     ///< FontFace* 不透明指针（调用方持有，不可为 nullptr）
     float    size_px{0.0f};          ///< 字号（像素）
     float    origin_x{0.0f};         ///< 基线起始点 X（屏幕坐标，像素）

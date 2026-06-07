@@ -386,19 +386,10 @@ void Canvas::draw_text(
         return;
     }
 
-    // 构造 TextRun，将文字内容拷贝到 inline 缓冲
+    // 构造 TextRun，完整保留 UTF-8 文本内容。
+    // InlineString 对短文本使用 SSO，对长文本自动堆扩容，不再截断到固定 512 字节。
     TextRun run;
-    const uint32_t raw_len = static_cast<uint32_t>(text.size());
-    // 超出缓冲则截断（保留末尾 '\0'）
-    const uint32_t copy_len = raw_len < TextRun::kMaxUtf8Bytes
-        ? raw_len
-        : (TextRun::kMaxUtf8Bytes - 1u);
-
-    for (uint32_t i = 0; i < copy_len; ++i) {
-        run.utf8[i] = text[i];
-    }
-    run.utf8[copy_len] = '\0';
-    run.length            = copy_len;
+    run.utf8              = text;
     run.font_face         = font_face;
     run.size_px           = size_px;
     run.origin_x          = origin.x;
