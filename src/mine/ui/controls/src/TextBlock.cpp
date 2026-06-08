@@ -818,6 +818,10 @@ void TextBlock::on_render(paint::Canvas& canvas)
     const math::Rect rect = bounds_rect();
     if (rect.empty()) return;
 
+    // 调试输出：渲染时的矩形与字体指针（用于判断是否使用真实字体绘制）
+    printf("[TextBlock::on_render] rect=(%.1f,%.1f,%.1f,%.1f) font_face=%p text_len=%zu\n",
+           rect.x, rect.y, rect.width, rect.height, font_face_, text_.size());
+
     // ── 绘制背景 ──────────────────────────────────────────────────────────
     const bool bg_visible =
         (background_.kind() != paint::BrushKind::SolidColor)

@@ -14,6 +14,7 @@
 #include <mine/math/Color.h>
 #include <mine/ui/property/DependencyProperty.h>
 #include <mine/ui/property/PropertyMetadata.h>
+#include <cstdio>
 
 namespace mine::ui {
 
@@ -231,6 +232,13 @@ void Border::on_render(paint::Canvas& canvas)
 
     const bool border_visible =
         !(t.left == 0.0f && t.top == 0.0f && t.right == 0.0f && t.bottom == 0.0f);
+
+    // 调试输出：渲染时的边框/背景/矩形信息
+    printf("[Border::on_render] rect=(%.1f,%.1f,%.1f,%.1f) bg_kind=%d bg_a=%.2f border_visible=%d t=(%.1f,%.1f,%.1f,%.1f) corner=%s\n",
+           rect.x, rect.y, rect.width, rect.height,
+           static_cast<int>(bg.kind()), bg.color().a,
+           static_cast<int>(border_visible), t.left, t.top, t.right, t.bottom,
+           has_corner ? "true" : "false");
 
     if (has_corner) {
         // ── 圆角路径：使用复合圆角矩形绘制背景与描边 ──────────

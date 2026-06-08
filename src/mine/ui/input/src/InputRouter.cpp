@@ -143,11 +143,15 @@ void InputRouter::dispatch_mouse_event(const platform::WindowEvent& we) {
     const math::Point  pos  { we.mouse_x, we.mouse_y };
     const ModifierKeys mods = make_modifiers(we);
 
+    // 调试输出已移除
+
     // 命中测试——确定目标元素
     UIElement* target = nullptr;
     if (root_) {
         target = root_->hit_test(pos);
     }
+
+    // 命中测试结果调试已移除
 
     // 悬停元素发生切换时，合成 MouseLeave / MouseEnter
     if (target != prev_mouse_over_) {

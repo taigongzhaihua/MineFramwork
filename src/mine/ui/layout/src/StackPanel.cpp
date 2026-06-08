@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <cstdio>
 
 namespace mine::ui {
 
@@ -106,14 +107,21 @@ math::Size StackPanel::arrange_override(math::Size final_size)
     // 自身在父坐标系中的绝对起点（arrange_override 调用时 bounds_rect 已设置好）
     const math::Rect self_bounds = bounds_rect();
 
-    float offset = 0.0f;  // 主轴方向的当前偏移量（相对于自身内容区起点）
+    // 调试：打印 StackPanel 在 arrange 阶段的自身 bounds 与分配的 final_size
     const uint32_t count = children_count();
+    printf("[StackPanel::arrange_override] self_bounds=(%.1f,%.1f,%.1f,%.1f) final_size=(%.1f,%.1f) orient=%d children=%u\n",
+           self_bounds.x, self_bounds.y, self_bounds.width, self_bounds.height,
+           final_size.width, final_size.height,
+           static_cast<int>(orient), static_cast<unsigned int>(count));
+
+    float offset = 0.0f;  // 主轴方向的当前偏移量（相对于自身内容区起点）
 
     for (uint32_t i = 0; i < count; ++i) {
         UIElement* child = child_at(i);
         const math::Size ds = child->desired_size();
 
         math::Rect slot;
+        printf("  [StackPanel] child %u desired=(%.1f,%.1f)\n", i, ds.width, ds.height);
         if (is_vertical) {
             // 垂直排列：x 对齐自身左边缘，y 从自身顶部累加偏移
             slot.x      = self_bounds.x;
@@ -131,6 +139,7 @@ math::Size StackPanel::arrange_override(math::Size final_size)
         }
 
         // 调用子元素 arrange（FrameworkElement::arrange 处理 Margin 和对齐）
+        printf("  [StackPanel] child %u slot=(%.1f,%.1f,%.1f,%.1f)\n", i, slot.x, slot.y, slot.width, slot.height);
         child->arrange(slot);
     }
 

@@ -64,6 +64,8 @@ public:
 
     /// 文字前景画刷（默认 #1C1B1F）
     static const DependencyProperty& TextForegroundProperty;
+    /// 控件启用/禁用状态（bool，默认 true）
+    static const DependencyProperty& IsEnabledProperty;
 
     // ── 生命周期 ───────────────────────────────────────────────────────────
 
@@ -84,6 +86,9 @@ public:
     void set_font_face(void* font_face) noexcept;
     void set_font_size(float size_px) noexcept;
 
+    [[nodiscard]] bool is_enabled() const noexcept;
+    void set_enabled(bool enabled) noexcept;
+
     // ── 鼠标事件路由桩 ─────────────────────────────────────────────────────
 
     static void on_mouse_enter_router(void*, RoutedEventArgs&, void*);
@@ -94,6 +99,8 @@ public:
 protected:
     void on_measure(math::Size available) override;
     [[nodiscard]] ControlVisualState compute_visual_state() const noexcept override;
+    void on_visual_state_changed(ControlVisualState old_state,
+                                 ControlVisualState new_state) override;
 
 private:
     // ── 勾号元素（私有嵌套类，仅负责绘制 MD3 check 图标填充路径）─────────
@@ -106,12 +113,17 @@ private:
                                       const DependencyProperty& prop,
                                       const core::Variant&      old_v,
                                       const core::Variant&      new_v) noexcept;
+    static void on_is_enabled_changed(DependencyObject*         sender,
+                                      const DependencyProperty& prop,
+                                      const core::Variant&      old_v,
+                                      const core::Variant&      new_v) noexcept;
 
     // ── 成员 ───────────────────────────────────────────────────────────────
 
     containers::InlineString text_;
     bool                     is_hovered_ = false;
     bool                     is_pressed_ = false;
+    bool                     is_enabled_ = true;
     void*                    font_face_  = nullptr;
     float                    font_size_  = 14.0f;
 
@@ -120,6 +132,9 @@ private:
     Border*           state_border_ = nullptr;  ///< State Layer 蒙版 Border
     CheckMarkElement* check_mark_   = nullptr;  ///< 勾号元素
     TextBlock*        label_        = nullptr;  ///< 文字标签
+
+    // AnimationClock tick 回调（用于推进 VSM Storyboard）
+    static bool anim_tick_callback(void* handle, float dt) noexcept;
 
     // 子元素所有权（生命周期由 OwnedPtr 管理，layout_root_ 由 set_inner_element 接管）
     core::OwnedPtr<StackPanel>       owned_root_;

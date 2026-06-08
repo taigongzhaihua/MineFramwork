@@ -20,6 +20,7 @@
 #include <mine/ui/property/DependencyProperty.h>
 #include <mine/ui/property/PropertyMetadata.h>
 #include <mine/ui/property/ValuePriority.h>
+#include <mine/ui/animation/AnimationClock.h>
 #include <mine/core/Memory.h>
 #include <cmath>
 
@@ -62,6 +63,10 @@ const DependencyProperty& CheckBox::TextForegroundProperty =
     register_property<CheckBox>("TextForeground",
         core::Variant{ paint::Brush::solid_rgb(0x1C1B1F) },
         PropertyMetadata{.affects_render = true});
+
+const DependencyProperty& CheckBox::IsEnabledProperty =
+    register_property<CheckBox>("IsEnabled", core::Variant{true},
+        PropertyMetadata{.affects_render = true, .changed = &CheckBox::on_is_enabled_changed});
 
 // ============================================================================
 // 路由事件注册
@@ -116,6 +121,19 @@ static style::Style& default_checkbox_style()
             core::Variant{ Brush::solid(Color{1.0f, 1.0f, 1.0f, 0.12f}) } });  // 12% 白
         s.add_state_setters(std::move(pressed));
 
+        // ── P4 StyleTrigger：Disabled ───────────────────────────────────────
+        style::VisualStateSetters disabled;
+        disabled.state_name = "Disabled";
+        disabled.setters.push_back({ &CheckBox::IconBorderBrushProperty,
+            core::Variant{ Brush::solid(Color{0.11f, 0.11f, 0.12f, 0.38f}) } });
+        disabled.setters.push_back({ &CheckBox::TextForegroundProperty,
+            core::Variant{ Brush::solid(Color{0.11f, 0.11f, 0.12f, 0.38f}) } });
+        disabled.setters.push_back({ &CheckBox::CheckMarkBrushProperty,
+            core::Variant{ Brush::solid(Color{1.0f, 1.0f, 1.0f, 0.38f}) } });
+        disabled.setters.push_back({ &CheckBox::StateLayerBrushProperty,
+            core::Variant{ Brush::solid(Color{1.0f, 1.0f, 1.0f, 0.0f}) } });
+        s.add_state_setters(std::move(disabled));
+
         return s;
     }();
     return s;
@@ -150,6 +168,23 @@ void CheckBox::on_is_checked_changed(DependencyObject*         sender,
     }
 }
 
+void CheckBox::on_is_enabled_changed(DependencyObject*         sender,
+                                     const DependencyProperty& /*prop*/,
+                                     const core::Variant&      /*old_v*/,
+                                     const core::Variant&      new_v) noexcept
+{
+    auto* self = static_cast<CheckBox*>(sender);
+    const bool enabled = new_v.has<bool>() ? new_v.get<bool>() : true;
+    if (self->is_enabled_ == enabled) return;
+    self->is_enabled_ = enabled;
+    if (!self->is_enabled_) {
+        self->is_pressed_ = false;
+        self->is_hovered_ = false;
+    }
+    self->update_visual_state();
+    self->invalidate_render();
+}
+
 // ============================================================================
 // 勾号元素（私有嵌套类）
 // ============================================================================
@@ -176,6 +211,8 @@ protected:
     void on_render(paint::Canvas& canvas) override {
         const math::Rect r = bounds_rect();
         if (r.empty()) return;
+
+        // 输出勾号元素的 bounds（调试信息已移除）
 
         // 读取当前画刷颜色
         const core::Variant& bv = get_value(BrushProperty);
@@ -249,12 +286,16 @@ CheckBox::CheckBox()
     layout_root_->add_child(icon_border_);
     layout_root_->add_child(label_);
 
+    // 将内部布局标记为命中穿透，使 CheckBox 本身成为命中目标，
+    // 以便 Direct 策略的 MouseEnter/MouseLeave 在控件上触发（而非其子元素）。
+    layout_root_->set_hit_transparent(true);
     // ── VSM 配置 ───────────────────────────────────────────────────────────
 
     style::VisualStateManager vsm{ *this };
     vsm.define_state("Normal");
     vsm.define_state("Hovered");
     vsm.define_state("Pressed");
+    vsm.define_state("Disabled");
 
     auto* cb_ptr = this;
     vsm.add_transition("*", "Hovered",
@@ -331,6 +372,8 @@ CheckBox::~CheckBox()
     if (layout_root_) {
         layout_root_->remove_all_children();
     }
+    // 注销 AnimationClock，防止析构后回调悬空
+    animation::AnimationClock::instance().unregister_animation(this);
 }
 
 // ============================================================================
@@ -358,6 +401,7 @@ void CheckBox::set_text(core::StringView t) {
 
 void CheckBox::set_font_face(void* f) noexcept {
     font_face_ = f;
+    // font_face 同步到子 label（无调试输出）
     if (label_) {
         label_->set_font_face(f);
     }
@@ -372,12 +416,24 @@ void CheckBox::set_font_size(float s) noexcept {
     invalidate_measure();
 }
 
+bool CheckBox::is_enabled() const noexcept {
+    const auto& v = get_value(IsEnabledProperty);
+    return v.has<bool>() ? v.get<bool>() : true;
+}
+
+void CheckBox::set_enabled(bool enabled) noexcept {
+    const auto& v = get_value(IsEnabledProperty);
+    const bool cur = v.has<bool>() ? v.get<bool>() : true;
+    if (cur == enabled) return;
+    set_value(IsEnabledProperty, core::Variant{enabled}, ValuePriority::Local);
+}
+
 // ============================================================================
 // 布局（委托 StackPanel 标准布局）
 // ============================================================================
 
 void CheckBox::on_measure(math::Size available) {
-    const float icon = std::roundf(font_size_ * 1.3f);
+    const float icon = std::roundf(font_size_ * 1.0f);
 
     // 图标 Border 显式固定尺寸
     if (icon_border_) {
@@ -388,9 +444,21 @@ void CheckBox::on_measure(math::Size available) {
     // 委托 StackPanel 递归测量
     if (layout_root_) {
         layout_root_->measure(available);
-        set_desired_size(layout_root_->desired_size());
+        // 输出各部分的 desired_size
+        const auto root_ds = layout_root_->desired_size();
+        const auto icon_ds = icon_border_ ? icon_border_->desired_size() : math::Size{0.0f,0.0f};
+        const auto label_ds = label_ ? label_->desired_size() : math::Size{0.0f,0.0f};
+         // 运行时不再打印调试信息
+
+        // 注意：FrameworkElement::on_measure 会将 Margin 加回到最终 desired_size，
+        // 但这里我们重写了 on_measure，因此必须显式将控件的 Margin 加入到期望尺寸，
+        // 否则父布局会把 Margin 当作额外空间从分配槽中扣除，导致内容区域过小。
+         const math::Thickness m = margin();
+         set_desired_size({ root_ds.width + m.horizontal(), root_ds.height + m.vertical() });
+         // 不再输出 margin/desired_size 调试信息
     } else {
-        set_desired_size({icon + 4.0f, icon + 4.0f});
+        const math::Thickness m = margin();
+        set_desired_size({ icon + 4.0f + m.horizontal(), icon + 4.0f + m.vertical() });
     }
 }
 
@@ -399,9 +467,34 @@ void CheckBox::on_measure(math::Size available) {
 // ============================================================================
 
 ControlVisualState CheckBox::compute_visual_state() const noexcept {
+    if (!is_enabled()) return ControlVisualState::Disabled;
     if (is_pressed_) return ControlVisualState::Pressed;
     if (is_hovered_) return ControlVisualState::Hovered;
     return ControlVisualState::Normal;
+}
+
+void CheckBox::on_visual_state_changed(ControlVisualState old_state,
+                                       ControlVisualState new_state)
+{
+    // 基类处理（invalidate_render + vsm()->go_to_state 已在 update_visual_state 中调用）
+    Control::on_visual_state_changed(old_state, new_state);
+
+    // 注册 AnimationClock（幂等）：驱动 VSM Storyboard 的逐帧推进
+    animation::AnimationClock::instance().register_animation(this, &CheckBox::anim_tick_callback);
+}
+
+bool CheckBox::anim_tick_callback(void* handle, float dt) noexcept
+{
+    auto* self = static_cast<CheckBox*>(handle);
+    bool  any_active = false;
+
+    if (auto* v = self->vsm()) {
+        if (v->tick_animations(dt)) {
+            any_active = true;
+        }
+    }
+
+    return any_active;
 }
 
 // ============================================================================
@@ -410,28 +503,43 @@ ControlVisualState CheckBox::compute_visual_state() const noexcept {
 
 void CheckBox::on_mouse_enter_router(void*, RoutedEventArgs&, void* ud) {
     auto* self = static_cast<CheckBox*>(ud);
+    if (!self->is_enabled()) return;
+    // 接收到 MouseEnter
     self->is_hovered_ = true;
     self->update_visual_state();
+    // MouseEnter 处理完成
 }
 
 void CheckBox::on_mouse_leave_router(void*, RoutedEventArgs&, void* ud) {
     auto* self = static_cast<CheckBox*>(ud);
+    if (!self->is_enabled()) return;
+    // 接收到 MouseLeave
     self->is_hovered_ = false;
     self->update_visual_state();
+    // MouseLeave 处理完成
 }
 
 void CheckBox::on_mouse_down_router(void*, RoutedEventArgs& a, void* ud) {
     auto* self = static_cast<CheckBox*>(ud);
     auto& args = static_cast<input::MouseEventArgs&>(a);
+    if (!self->is_enabled()) return;
     if (args.button() == input::MouseButton::Left) {
+        // MouseDown 接收
         self->is_pressed_ = true;
         self->update_visual_state();
+        // MouseDown 处理完成
     }
 }
 
 void CheckBox::on_mouse_up_router(void*, RoutedEventArgs& a, void* ud) {
     auto* self = static_cast<CheckBox*>(ud);
     auto& args = static_cast<input::MouseEventArgs&>(a);
+    if (!self->is_enabled()) {
+        self->is_pressed_ = false;
+        self->update_visual_state();
+        return;
+    }
+
     if (self->is_pressed_ && args.button() == input::MouseButton::Left) {
         // 边界检测：仅在鼠标位于控件矩形内时触发切换
         const math::Rect r = self->bounds_rect();
@@ -445,6 +553,7 @@ void CheckBox::on_mouse_up_router(void*, RoutedEventArgs& a, void* ud) {
     }
     self->is_pressed_ = false;
     self->update_visual_state();
+    // MouseUp 处理完成
 }
 
 } // namespace mine::ui
