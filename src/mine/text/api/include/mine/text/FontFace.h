@@ -207,21 +207,15 @@ public:
     [[nodiscard]] int32_t line_height() const noexcept;
 
     /**
-     * @brief 测量一段 UTF-8 文字的水平宽度（不执行光栅化）。
+     * @brief 使用 HarfBuzz 塑形测量一段 UTF-8 文字的水平宽度。
      *
-     * 内部逐字符解码 UTF-8 → Unicode 码点，对每个码点调用
-     * FT_Load_Glyph（仅加载度量，不渲染位图），累加 advance.x 得到总宽度。
-     * 性能远优于逐字调用 rasterize()。
-     *
-     * 函数内部会临时调用 FT_Set_Pixel_Sizes 切换字号；调用完成后
-     * ascender() / descender() / line_height() 的返回值与 font_size_px 对应。
-     *
-     * @warning 与 rasterize() / set_pixel_size() 同样不可并发调用。
+     * 内部调用 shape_text() 执行完整塑形（含 kerning、连字等
+     * OpenType 特性），累加 ShapedGlyph 的 x_advance 得到总宽度。
      *
      * @param utf8          UTF-8 编码文字缓冲区（无需 null 结尾）
      * @param len           缓冲区字节数
-     * @param font_size_px  字号（逻辑像素，四舍五入为整像素后传给 FreeType）
-     * @return 文字总水平宽度（逻辑像素，浮点）；失败或空文字返回 0.0f
+     * @param font_size_px  字号（逻辑像素）
+     * @return 文字总水平宽度（像素）；失败或空文字返回 0.0f
      */
     [[nodiscard]] float measure_text(const char* utf8,
                                      size_t      len,

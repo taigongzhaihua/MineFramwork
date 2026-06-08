@@ -321,45 +321,9 @@ float FontFace::measure_text(const char* utf8,
         return 0.0f;
     }
 
-    // ── 优先使用 HarfBuzz 塑形 ──────────────────────────────────────────
+    // ── HarfBuzz 塑形 ──────────────────────────────────────────────────
     const ShapeResult shaped = shape_text(utf8, len, font_size_px);
-    if (!shaped.glyphs.empty()) {
-        return shaped.advance;
-    }
-
-    // ── 回退：FreeType 逐字测量 ──────────────────────────────────────────
-    FT_Face face = impl_->face;
-
-    // 仅在字号变更时才调用 FT_Set_Pixel_Sizes（缓存上次设置的字号）
-    const FT_UInt pixel_h = static_cast<FT_UInt>(font_size_px + 0.5f);
-    if (pixel_h != impl_->cached_pixel_h) {
-        if (FT_Set_Pixel_Sizes(face, 0, pixel_h) != 0) {
-            FT_LOG("measure_text：FT_Set_Pixel_Sizes 失败");
-            return 0.0f;
-        }
-        impl_->cached_pixel_h = pixel_h;
-    }
-
-    float total_width = 0.0f;
-    const char* p   = utf8;
-    const char* end = utf8 + len;
-
-    while (p < end) {
-        const uint32_t cp = utf8_decode_one(p, end);
-        if (cp == 0xFFFDu) {
-            continue;
-        }
-
-        const FT_UInt glyph_idx = FT_Get_Char_Index(face, static_cast<FT_ULong>(cp));
-
-        if (FT_Load_Glyph(face, glyph_idx, FT_LOAD_FORCE_AUTOHINT) != 0) {
-            continue;
-        }
-
-        total_width += static_cast<float>(face->glyph->advance.x >> 6);
-    }
-
-    return total_width;
+    return shaped.advance;
 }
 
 TextInkBounds FontFace::measure_text_ink_bounds(const char* utf8,
