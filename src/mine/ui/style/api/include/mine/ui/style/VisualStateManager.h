@@ -200,6 +200,15 @@ public:
      */
     bool tick_animations(float dt) noexcept;
 
+    /**
+     * @brief 立即停止并清理所有活跃 Storyboard。
+     *
+     * 每个 Storyboard 调用 stop() 清除其受管属性的 Animation(P60) 槽，
+     * 使属性值回退到下一级优先级（通常为 Local 或 StyleTrigger）。
+     * 用于多状态组场景中，一个状态组切换时主动终止另一组的进行中动画。
+     */
+    void stop_all_storyboards() noexcept;
+
     // ── 查询 ──────────────────────────────────────────────────────────────
 
     /**

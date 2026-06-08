@@ -256,6 +256,16 @@ bool VisualStateManager::tick_animations(float dt) noexcept
     return !active_storyboards_.empty();
 }
 
+void VisualStateManager::stop_all_storyboards() noexcept
+{
+    for (auto& sb : active_storyboards_) {
+        if (sb) {
+            sb->stop();  // 清除该 Storyboard 所有受管属性的 Animation(P60) 槽
+        }
+    }
+    active_storyboards_.clear();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 查询
 // ─────────────────────────────────────────────────────────────────────────────

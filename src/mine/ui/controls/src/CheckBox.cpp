@@ -103,16 +103,20 @@ static style::Style& default_checkbox_style()
         s.add_setter({ &CheckBox::TextForegroundProperty,
                        core::Variant{ Brush::solid_rgb(0x1C1B1F) } });          // #1C1B1F
 
-        // ── P4 StyleTrigger：Hovered（仅 State Layer 蒙版，边框色由勾选组控制）───
+        // ── P4 StyleTrigger：Hovered ─────────────────────────────────────────
         style::VisualStateSetters hovered;
         hovered.state_name = "Hovered";
+        hovered.setters.push_back({ &CheckBox::IconBorderBrushProperty,
+            core::Variant{ Brush::solid_rgb(0x6750A4) } });                     // Primary
         hovered.setters.push_back({ &CheckBox::StateLayerBrushProperty,
             core::Variant{ Brush::solid(Color{1.0f, 1.0f, 1.0f, 0.08f}) } });  // 8% 白
         s.add_state_setters(std::move(hovered));
 
-        // ── P4 StyleTrigger：Pressed（仅 State Layer 蒙版）──────────────────
+        // ── P4 StyleTrigger：Pressed ─────────────────────────────────────────
         style::VisualStateSetters pressed;
         pressed.state_name = "Pressed";
+        pressed.setters.push_back({ &CheckBox::IconBorderBrushProperty,
+            core::Variant{ Brush::solid_rgb(0x6750A4) } });                     // Primary
         pressed.setters.push_back({ &CheckBox::StateLayerBrushProperty,
             core::Variant{ Brush::solid(Color{1.0f, 1.0f, 1.0f, 0.12f}) } });  // 12% 白
         s.add_state_setters(std::move(pressed));
@@ -194,14 +198,17 @@ void CheckBox::on_is_checked_changed(DependencyObject*         sender,
 {
     auto* self = static_cast<CheckBox*>(sender);
     const bool checked = new_v.has<bool>() && new_v.get<bool>();
-    // 切换勾选组状态，使用独立 VSM 驱动视觉（避免直接写 Local 覆盖样式）
+    // 切换勾选组状态，使用独立 VSM 驱动视觉。
+    // 先停止交互组 VSM 的活跃 Storyboard，防止两组同时动画 IconBorderBrush 导致抖动。
     if (self->owned_checked_vsm_) {
+        if (auto* ivsm = self->vsm()) {
+            ivsm->stop_all_storyboards();
+        }
         if (checked) {
             self->owned_checked_vsm_.get()->go_to_state("Checked");
         } else {
             self->owned_checked_vsm_.get()->go_to_state("Unchecked");
         }
-        // 注册 AnimationClock 以驱动可能的 Storyboard
         animation::AnimationClock::instance().register_animation(self, &CheckBox::anim_tick_callback);
     }
 }
@@ -341,16 +348,25 @@ CheckBox::CheckBox()
             sb.animate_dp(*cb_ptr, StateLayerBrushProperty,
                           animation::Duration::milliseconds(120.0f),
                           animation::QuadEaseOut);
+            sb.animate_dp(*cb_ptr, IconBorderBrushProperty,
+                          animation::Duration::milliseconds(120.0f),
+                          animation::QuadEaseOut);
         });
     vsm.add_transition("*", "Normal",
         [cb_ptr](animation::Storyboard& sb) {
             sb.animate_dp(*cb_ptr, StateLayerBrushProperty,
                           animation::Duration::milliseconds(100.0f),
                           animation::QuadEaseOut);
+            sb.animate_dp(*cb_ptr, IconBorderBrushProperty,
+                          animation::Duration::milliseconds(100.0f),
+                          animation::QuadEaseOut);
         });
     vsm.add_transition("*", "Pressed",
         [cb_ptr](animation::Storyboard& sb) {
             sb.animate_dp(*cb_ptr, StateLayerBrushProperty,
+                          animation::Duration::milliseconds(60.0f),
+                          animation::QuadEaseIn);
+            sb.animate_dp(*cb_ptr, IconBorderBrushProperty,
                           animation::Duration::milliseconds(60.0f),
                           animation::QuadEaseIn);
         });
@@ -550,6 +566,12 @@ void CheckBox::on_visual_state_changed(ControlVisualState old_state,
 {
     // 基类处理（invalidate_render + vsm()->go_to_state 已在 update_visual_state 中调用）
     Control::on_visual_state_changed(old_state, new_state);
+
+    // 交互组已启动新 Storyboard，停止勾选组的活跃 Storyboard
+    // 防止两组同时动画 IconBorderBrush 导致抖动
+    if (owned_checked_vsm_) {
+        owned_checked_vsm_->stop_all_storyboards();
+    }
 
     // 注册 AnimationClock（幂等）：驱动 VSM Storyboard 的逐帧推进
     animation::AnimationClock::instance().register_animation(this, &CheckBox::anim_tick_callback);
