@@ -467,9 +467,10 @@ ShapeResult FontFace::shape_text(const char* utf8,
             return result;
         }
         impl_->cached_pixel_h = pixel_h;
-        // 通知 HarfBuzz 底层 FT_Face 字号已变，需重新读取 scale/ppem
+        // 字号变更 → 销毁旧 hb_font 并在下方重建，确保 HarfBuzz 拿到正确的 scale
         if (impl_->hb_font != nullptr) {
-            hb_ft_font_changed(impl_->hb_font);
+            hb_font_destroy(impl_->hb_font);
+            impl_->hb_font = nullptr;
         }
     }
 
