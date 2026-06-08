@@ -23,4 +23,5 @@ mine_module("mine.ui.app", {
         "mine.ui.animation",   -- AnimationClock::tick_all（Application::tick_and_render 驱动）
         "mine.text",           -- FontFace（Application::default_font 默认系统字体）
     },
+    packages    = {"harfbuzz"},  -- Application 包含 FontFace.h（含 hb.h）
 })

@@ -18,6 +18,8 @@
 #include <mine/containers/Vector.h>
 #include <cstdint>
 
+#include <hb.h>
+
 namespace mine::text {
 
 // ============================================================================
@@ -261,6 +263,23 @@ public:
     [[nodiscard]] ShapeResult shape_text(const char* utf8,
                                          size_t      len,
                                          float       font_size_px) const;
+
+    /**
+     * @brief 塑形并显式指定书写方向。
+     *
+     * 与 shape_text 的区别：跳过 hb_buffer_guess_segment_properties，
+     * 使用调用方指定的 direction / script / language。
+     *
+     * @param direction   HB_DIRECTION_LTR / RTL / TTB / BTT
+     * @param script      HB_SCRIPT_* 常量（HB_SCRIPT_COMMON 为自动检测）
+     * @param language    hb_language_t（hb_language_get_default() 为系统默认）
+     */
+    [[nodiscard]] ShapeResult shape_text_ex(const char*     utf8,
+                                            size_t          len,
+                                            float           font_size_px,
+                                            hb_direction_t  direction,
+                                            hb_script_t     script,
+                                            hb_language_t   language) const;
 
     /**
      * @brief 默认构造（仅供内部工厂函数使用，直接构造得到的对象无效）。

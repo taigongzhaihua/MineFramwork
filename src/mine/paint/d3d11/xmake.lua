@@ -18,4 +18,5 @@ mine_module("mine.paint.d3d11", {
         "mine.containers",  -- Vector
         "mine.math",        -- Vec2 / Transform2D / Color
     },
+    packages    = {"harfbuzz"},  -- FontFace.h 包含 hb.h
 })

@@ -21,4 +21,5 @@ mine_module("mine.ui.controls", {
         "mine.ui.window",     -- TextBox IME 支持需要 Window::ime() 访问 IMEService
         "mine.platform.abi",  -- IMEService 头文件依赖
     },
+    packages    = {"harfbuzz"},  -- TextBox/TextBlock 包含 FontFace.h（含 hb.h）
 })

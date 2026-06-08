@@ -441,6 +441,84 @@ float FontFace::measure_glyph_advance(uint32_t glyph_index,
 
 // ── shape_text 公开 API ────────────────────────────────────────────────────
 
+ShapeResult FontFace::shape_text_ex(const char*     utf8,
+                                     size_t          len,
+                                     float           font_size_px,
+                                     hb_direction_t  direction,
+                                     hb_script_t     script,
+                                     hb_language_t   language) const
+{
+    ShapeResult result;
+    result.glyphs = containers::Vector<ShapedGlyph>(core::default_allocator());
+    result.advance = 0.0f;
+
+    if (impl_ == nullptr || impl_->face == nullptr || utf8 == nullptr || len == 0) {
+        return result;
+    }
+
+    FT_Face ft_face = impl_->face;
+
+    // 1. 设置字号
+    const FT_UInt pixel_h = static_cast<FT_UInt>(font_size_px + 0.5f);
+    if (pixel_h != impl_->cached_pixel_h) {
+        if (FT_Set_Pixel_Sizes(ft_face, 0, pixel_h) != 0) return result;
+        impl_->cached_pixel_h = pixel_h;
+        if (impl_->hb_font != nullptr) {
+            hb_font_destroy(impl_->hb_font);
+            impl_->hb_font = nullptr;
+        }
+    }
+
+    // 2. 惰性创建 hb_font
+    if (impl_->hb_font == nullptr) {
+        impl_->hb_font = ensure_hb_font(ft_face);
+        if (impl_->hb_font == nullptr) return result;
+    }
+
+    // 3. 创建塑形缓冲（使用调用方指定的属性）
+    hb_buffer_t* buf = hb_buffer_create();
+    hb_buffer_add_utf8(buf, utf8, static_cast<int>(len), 0, static_cast<int>(len));
+    hb_buffer_set_direction(buf, direction);
+    hb_buffer_set_script(buf, script);
+    hb_buffer_set_language(buf, language);
+
+    // 4. 执行塑形
+    hb_feature_t features[] = {
+        {HB_TAG('k','e','r','n'), 1, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END},
+        {HB_TAG('l','i','g','a'), 1, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END},
+        {HB_TAG('c','a','l','t'), 1, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END},
+    };
+    hb_shape(impl_->hb_font, buf, features, 3);
+
+    // 5. 提取结果
+    unsigned int glyph_count = 0;
+    hb_glyph_info_t*     glyph_infos = hb_buffer_get_glyph_infos(buf, &glyph_count);
+    hb_glyph_position_t* glyph_pos   = hb_buffer_get_glyph_positions(buf, &glyph_count);
+
+    result.glyphs.reserve(glyph_count);
+    float total_advance = 0.0f;
+    const char* text_base = utf8;
+
+    for (unsigned int i = 0; i < glyph_count; ++i) {
+        ShapedGlyph sg;
+        sg.glyph_index = glyph_infos[i].codepoint;
+        sg.cluster     = glyph_infos[i].cluster;
+        if (sg.cluster < len) {
+            const char* p = text_base + sg.cluster;
+            sg.codepoint = utf8_decode_one(p, text_base + len);
+        }
+        sg.x_advance = static_cast<float>(glyph_pos[i].x_advance) / 64.0f;
+        sg.y_advance = static_cast<float>(glyph_pos[i].y_advance) / 64.0f;
+        sg.x_offset  = static_cast<float>(glyph_pos[i].x_offset)  / 64.0f;
+        sg.y_offset  = static_cast<float>(glyph_pos[i].y_offset)  / 64.0f;
+        total_advance += sg.x_advance;
+        result.glyphs.push_back(sg);
+    }
+    result.advance = total_advance;
+    hb_buffer_destroy(buf);
+    return result;
+}
+
 ShapeResult FontFace::shape_text(const char* utf8,
                                   size_t      len,
                                   float       font_size_px) const
@@ -479,14 +557,19 @@ ShapeResult FontFace::shape_text(const char* utf8,
     // 3. 创建塑形缓冲，添加文本
     hb_buffer_t* buf = hb_buffer_create();
     hb_buffer_add_utf8(buf, utf8, static_cast<int>(len), 0, static_cast<int>(len));
-    hb_buffer_set_direction(buf, HB_DIRECTION_LTR);
-    hb_buffer_set_script(buf, HB_SCRIPT_COMMON);     // 自动检测
-    hb_buffer_set_language(buf, hb_language_get_default());
 
-    // 5. 执行塑形
-    hb_shape(impl_->hb_font, buf, nullptr, 0);
+    // 自动检测文本的书写方向、文字系统和语言（替代硬编码 LTR/COMMON）
+    hb_buffer_guess_segment_properties(buf);
 
-    // 6. 提取结果
+    // 4. 执行塑形（启用 kern + liga + calt 标准 OpenType 特性）
+    hb_feature_t features[] = {
+        {HB_TAG('k','e','r','n'), 1, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END},
+        {HB_TAG('l','i','g','a'), 1, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END},
+        {HB_TAG('c','a','l','t'), 1, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END},
+    };
+    hb_shape(impl_->hb_font, buf, features, 3);
+
+    // 5. 提取结果
     unsigned int glyph_count = 0;
     hb_glyph_info_t*     glyph_infos = hb_buffer_get_glyph_infos(buf, &glyph_count);
     hb_glyph_position_t* glyph_pos   = hb_buffer_get_glyph_positions(buf, &glyph_count);
