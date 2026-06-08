@@ -381,13 +381,14 @@ TextInkBounds FontFace::measure_text_ink_bounds(const char* utf8,
     float min_x = 0.0f, min_y = 0.0f, max_x = 0.0f, max_y = 0.0f;
 
     for (const auto& g : shaped.glyphs) {
-        // 光栅化单个字形获取位图墨迹包围盒（内联 FreeType，绕过 rasterize 的 const 限制）
+        // 光栅化单个字形获取位图墨迹包围盒
+        // （直接用 HarfBuzz 塑形返回的 glyph_index，跳过 FT_Get_Char_Index）
         FT_Face face = impl_->face;
-        const FT_UInt gidx = FT_Get_Char_Index(face, static_cast<FT_ULong>(g.codepoint));
         int32_t bearing_x = 0, bearing_y = 0;
         uint32_t bmp_w = 0, bmp_h = 0;
 
-        if (FT_Load_Glyph(face, gidx, FT_LOAD_FORCE_AUTOHINT) == 0) {
+        if (FT_Load_Glyph(face, static_cast<FT_UInt>(g.glyph_index),
+                           FT_LOAD_FORCE_AUTOHINT) == 0) {
             if (face->glyph->format != FT_GLYPH_FORMAT_BITMAP) {
                 FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
             }
