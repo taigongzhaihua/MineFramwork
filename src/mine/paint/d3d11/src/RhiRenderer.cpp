@@ -2157,7 +2157,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             cmd_list_->draw(static_cast<uint32_t>(sdf_verts.size()), 1, 0, 0);
         }
 
-        // ── DrawText（文字渲染）─────────────────────────────────────────────
+        // ── DrawText（文字渲染，HarfBuzz 塑形）──────────────────────────
 
         else if (cmd.kind == DrawCmdKind::DrawText) {
             if (cmd.brush.kind() != BrushKind::SolidColor) continue;
@@ -2171,142 +2171,80 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
 
             if (run.font_face == nullptr || run_len == 0 || run.size_px <= 0.0f) continue;
 
-            // 字号取整（缓存键使用整像素）
             const uint32_t size_px = static_cast<uint32_t>(run.size_px + 0.5f);
             auto* face = static_cast<text::FontFace*>(run.font_face);
             const math::Color color = cmd.brush.color();
 
-            // ── 阶段 1：光栅化全部字形并写入 CPU 图集 ───────────────────────
-            // UTF-8 解码，逐码点查询/插入字形图集
+            // ── HarfBuzz 塑形（一次调用，获取字形序列 + kern/offset）────
+            const text::ShapeResult shaped = face->shape_text(
+                run.utf8.data(), run_len, run.size_px);
+
+            // ── 阶段 1：光栅化全部字形并写入 CPU 图集 ───────────────────
             {
-                uint32_t  i   = 0;
-                const char* s = run.utf8.data();
-                while (i < run_len) {
-                    uint32_t codepoint = 0;
-                    const uint8_t c0 = static_cast<uint8_t>(s[i]);
-                    uint32_t      adv = 1;
-
-                    if (c0 < 0x80u) {
-                        // ASCII（0xxxxxxx）
-                        codepoint = c0;
-                        adv = 1;
-                    } else if ((c0 & 0xE0u) == 0xC0u && i + 1 < run_len) {
-                        // 2 字节（110xxxxx 10xxxxxx）
-                        const uint8_t c1 = static_cast<uint8_t>(s[i + 1]);
-                        codepoint = ((c0 & 0x1Fu) << 6u) | (c1 & 0x3Fu);
-                        adv = 2;
-                    } else if ((c0 & 0xF0u) == 0xE0u && i + 2 < run_len) {
-                        // 3 字节（1110xxxx 10xxxxxx 10xxxxxx）
-                        const uint8_t c1 = static_cast<uint8_t>(s[i + 1]);
-                        const uint8_t c2 = static_cast<uint8_t>(s[i + 2]);
-                        codepoint = ((c0 & 0x0Fu) << 12u) | ((c1 & 0x3Fu) << 6u) | (c2 & 0x3Fu);
-                        adv = 3;
-                    } else if ((c0 & 0xF8u) == 0xF0u && i + 3 < run_len) {
-                        // 4 字节（11110xxx 10xxxxxx 10xxxxxx 10xxxxxx）
-                        const uint8_t c1 = static_cast<uint8_t>(s[i + 1]);
-                        const uint8_t c2 = static_cast<uint8_t>(s[i + 2]);
-                        const uint8_t c3 = static_cast<uint8_t>(s[i + 3]);
-                        codepoint = ((c0 & 0x07u) << 18u) | ((c1 & 0x3Fu) << 12u)
-                                  | ((c2 & 0x3Fu) << 6u)  |  (c3 & 0x3Fu);
-                        adv = 4;
-                    } else {
-                        // 非法 UTF-8 序列，跳过此字节
-                        adv = 1;
-                        codepoint = 0xFFFDu;  // 替换字符
-                    }
-
-                    i += adv;
-                    // 预热缓存（光栅化到 CPU 图集；图集满时静默跳过——阶段 3 会以近似步进处理）
-                    glyph_atlas_->get_or_insert(face, codepoint, size_px);
+                for (const auto& g : shaped.glyphs) {
+                    glyph_atlas_->get_or_insert(face, g.codepoint, size_px);
                 }
             }
 
-            // ── 阶段 2：上传 CPU 图集到 GPU（若有新字形）────────────────────
+            // ── 阶段 2：上传 CPU 图集到 GPU（若有新字形）────────────────
             glyph_atlas_->flush(device_);
             if (!glyph_atlas_->texture()) continue;
 
-            // ── 阶段 3：生成文字四边形顶点 ──────────────────────────────────
+            // ── 阶段 3：按 HarfBuzz 塑形结果生成文字四边形顶点 ──────────
             containers::Vector<TextVertex> text_verts;
 
-            float pen_x = run.origin_x;  // 当前笔触 X（基线）
-            const float pen_y = run.origin_y;   // 当前笔触 Y（基线，Y 向下）
+            float pen_x = run.origin_x;
+            const float pen_y = run.origin_y;
 
-            // 再次遍历文字，生成每个字形的顶点
-            {
-                uint32_t  i   = 0;
-                const char* s = run.utf8.data();
-                while (i < run_len) {
-                    uint32_t codepoint = 0;
-                    uint32_t adv = 1;
-                    const uint8_t c0 = static_cast<uint8_t>(s[i]);
-
-                    if (c0 < 0x80u) {
-                        codepoint = c0; adv = 1;
-                    } else if ((c0 & 0xE0u) == 0xC0u && i + 1 < run_len) {
-                        const uint8_t c1 = static_cast<uint8_t>(s[i + 1]);
-                        codepoint = ((c0 & 0x1Fu) << 6u) | (c1 & 0x3Fu); adv = 2;
-                    } else if ((c0 & 0xF0u) == 0xE0u && i + 2 < run_len) {
-                        const uint8_t c1 = static_cast<uint8_t>(s[i + 1]);
-                        const uint8_t c2 = static_cast<uint8_t>(s[i + 2]);
-                        codepoint = ((c0 & 0x0Fu) << 12u) | ((c1 & 0x3Fu) << 6u) | (c2 & 0x3Fu); adv = 3;
-                    } else if ((c0 & 0xF8u) == 0xF0u && i + 3 < run_len) {
-                        const uint8_t c1 = static_cast<uint8_t>(s[i + 1]);
-                        const uint8_t c2 = static_cast<uint8_t>(s[i + 2]);
-                        const uint8_t c3 = static_cast<uint8_t>(s[i + 3]);
-                        codepoint = ((c0 & 0x07u) << 18u) | ((c1 & 0x3Fu) << 12u)
-                                  | ((c2 & 0x3Fu) << 6u)  |  (c3 & 0x3Fu); adv = 4;
-                    } else {
-                        adv = 1; codepoint = 0xFFFDu;
-                    }
-                    i += adv;
-
-                    const AtlasEntry* entry = glyph_atlas_->get_or_insert(face, codepoint, size_px);
-                    if (entry == nullptr) {
-                        // 图集已满或光栅化失败：用半角字宽近似跳过该字形
-                        pen_x += static_cast<float>(size_px) * 0.5f;
-                        continue;
-                    }
-
-                    // 步进（包括宽度为 0 的空白字形；空白字形同样叠加字符间距）
-                    if (entry->atlas_w == 0) {
-                        pen_x += static_cast<float>(entry->advance_x) + run.character_spacing;
-                        continue;
-                    }
-
-                    // 字形顶点左上角屏幕坐标（Y 向下，bearing_y 为基线上方，故减去）
-                    // roundf 对齐到整像素：消除亚像素偏移导致的 GPU 采样模糊（小字号尤明显）
-                    const float gx = std::roundf(pen_x + static_cast<float>(entry->bearing_x));
-                    const float gy = std::roundf(pen_y - static_cast<float>(entry->bearing_y));
-                    const float gw = static_cast<float>(entry->atlas_w);
-                    const float gh = static_cast<float>(entry->atlas_h);
-
-                    // 图集 UV（不偏移半像素，依赖 1px 边距保护采样越界）
-                    const float inv = 1.0f / static_cast<float>(GlyphAtlas::kAtlasSize);
-                    const float u0  = static_cast<float>(entry->atlas_x) * inv;
-                    const float v0  = static_cast<float>(entry->atlas_y) * inv;
-                    const float u1  = (static_cast<float>(entry->atlas_x) + gw) * inv;
-                    const float v1  = (static_cast<float>(entry->atlas_y) + gh) * inv;
-
-                    const float cr = color.r, cg = color.g, cb = color.b, ca = color.a;
-
-                    // 生成 2 个三角形（6 顶点）覆盖字形矩形
-                    // 三角形 1：左上, 右上, 左下
-                    text_verts.push_back({gx,      gy,      u0, v0, cr, cg, cb, ca});
-                    text_verts.push_back({gx + gw, gy,      u1, v0, cr, cg, cb, ca});
-                    text_verts.push_back({gx,      gy + gh, u0, v1, cr, cg, cb, ca});
-                    // 三角形 2：右上, 右下, 左下
-                    text_verts.push_back({gx + gw, gy,      u1, v0, cr, cg, cb, ca});
-                    text_verts.push_back({gx + gw, gy + gh, u1, v1, cr, cg, cb, ca});
-                    text_verts.push_back({gx,      gy + gh, u0, v1, cr, cg, cb, ca});
-
-                    pen_x += static_cast<float>(entry->advance_x) + run.character_spacing;
+            for (const auto& g : shaped.glyphs) {
+                const AtlasEntry* entry = glyph_atlas_->get_or_insert(face, g.codepoint, size_px);
+                if (entry == nullptr) {
+                    // 图集已满或光栅化失败：用字号估算跳过该字形
+                    pen_x += g.x_advance + run.character_spacing;
+                    continue;
                 }
+
+                // 空白字形（如空格）：仅推进笔触
+                if (entry->atlas_w == 0) {
+                    pen_x += g.x_advance + run.character_spacing;
+                    continue;
+                }
+
+                // 字形顶点左上角：笔触 + HarfBuzz 偏移 + FreeType bitmap bearing
+                const float gx = std::roundf(pen_x
+                    + g.x_offset
+                    + static_cast<float>(entry->bearing_x));
+                const float gy = std::roundf(pen_y
+                    + g.y_offset
+                    - static_cast<float>(entry->bearing_y));
+                const float gw = static_cast<float>(entry->atlas_w);
+                const float gh = static_cast<float>(entry->atlas_h);
+
+                // 图集 UV
+                const float inv = 1.0f / static_cast<float>(GlyphAtlas::kAtlasSize);
+                const float u0  = static_cast<float>(entry->atlas_x) * inv;
+                const float v0  = static_cast<float>(entry->atlas_y) * inv;
+                const float u1  = (static_cast<float>(entry->atlas_x) + gw) * inv;
+                const float v1  = (static_cast<float>(entry->atlas_y) + gh) * inv;
+
+                const float cr = color.r, cg = color.g, cb = color.b, ca = color.a;
+
+                // 2 个三角形（6 顶点）
+                text_verts.push_back({gx,      gy,      u0, v0, cr, cg, cb, ca});
+                text_verts.push_back({gx + gw, gy,      u1, v0, cr, cg, cb, ca});
+                text_verts.push_back({gx,      gy + gh, u0, v1, cr, cg, cb, ca});
+                text_verts.push_back({gx + gw, gy,      u1, v0, cr, cg, cb, ca});
+                text_verts.push_back({gx + gw, gy + gh, u1, v1, cr, cg, cb, ca});
+                text_verts.push_back({gx,      gy + gh, u0, v1, cr, cg, cb, ca});
+
+                // HarfBuzz 塑形前进量 + 字符间距
+                pen_x += g.x_advance + run.character_spacing;
             }
 
             if (text_verts.empty()) continue;
             apply_text_transform(text_verts);
 
-            // ── 阶段 4：提交 DrawCall ──────────────────────────────────────────
+            // ── 阶段 4：提交 DrawCall ────────────────────────────────────
             gfx::BufferDesc vb{};
             vb.size       = static_cast<uint64_t>(text_verts.size()) * sizeof(TextVertex);
             vb.stride     = sizeof(TextVertex);
