@@ -467,6 +467,10 @@ ShapeResult FontFace::shape_text(const char* utf8,
             return result;
         }
         impl_->cached_pixel_h = pixel_h;
+        // 通知 HarfBuzz 底层 FT_Face 字号已变，需重新读取 scale/ppem
+        if (impl_->hb_font != nullptr) {
+            hb_ft_font_changed(impl_->hb_font);
+        }
     }
 
     // 2. 惰性创建 HarfBuzz 字体对象
