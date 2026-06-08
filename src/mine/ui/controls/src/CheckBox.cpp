@@ -139,7 +139,8 @@ void CheckBox::on_mouse_enter_router(void*, RoutedEventArgs&, void* ud) {
 void CheckBox::on_mouse_leave_router(void*, RoutedEventArgs&, void* ud) {
     auto* self = static_cast<CheckBox*>(ud);
     self->is_hovered_ = false;
-    self->is_pressed_ = false;
+    // 注意：不在此处清除 is_pressed_，否则鼠标微移出控件边界再回来后
+    // is_pressed_ 已被清零，on_mouse_up 不会触发切换，导致点击时灵时不灵。
     self->update_visual_state();
     self->invalidate_render();
 }
@@ -156,9 +157,15 @@ void CheckBox::on_mouse_up_router(void*, RoutedEventArgs& a, void* ud) {
     auto* self = static_cast<CheckBox*>(ud);
     auto& args = static_cast<input::MouseEventArgs&>(a);
     if (self->is_pressed_ && args.button() == input::MouseButton::Left) {
-        self->set_checked(!self->is_checked());
-        RoutedEventArgs ev{CheckedChangedEvent()};
-        EventManager::raise(*self, ev);
+        // 边界检测：仅在鼠标位于控件矩形内时触发切换
+        const math::Rect r = self->bounds_rect();
+        const auto&    pt = args.position();
+        if (pt.x >= r.x && pt.x <= r.x + r.width &&
+            pt.y >= r.y && pt.y <= r.y + r.height) {
+            self->set_checked(!self->is_checked());
+            RoutedEventArgs ev{CheckedChangedEvent()};
+            EventManager::raise(*self, ev);
+        }
     }
     self->is_pressed_ = false;
     self->update_visual_state();
