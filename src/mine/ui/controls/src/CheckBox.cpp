@@ -2,6 +2,7 @@
 #include <mine/paint/Canvas.h>
 #include <mine/paint/Brush.h>
 #include <mine/paint/Pen.h>
+#include <mine/paint/PathBuilder.h>
 #include <mine/math/RoundedRect.h>
 #include <mine/math/Color.h>
 #include <mine/ui/event/EventManager.h>
@@ -96,17 +97,23 @@ void CheckBox::on_render(paint::Canvas& canvas) {
     canvas.stroke_rounded_rect(math::RoundedRect{ir, 2.0f},
         paint::Brush::solid(sc), pen);
 
-    // 勾号：路径绘制
+    // 勾号：MD3 "check" 图标填充路径（24dp 视口归一化）
     if (checked) {
-        const float cx = ir.x + ir.width  * 0.5f;
-        const float cy = ir.y + ir.height * 0.5f;
-        const float s  = ir.width * 0.35f;
-        paint::Pen cp; cp.width = std::max(1.5f, ir.width * 0.15f);
-        cp.start_cap = paint::LineCap::Round;
-        cp.end_cap   = paint::LineCap::Round;
-        const paint::Brush w{paint::Brush::solid_rgb(0xFFFFFF)};
-        canvas.stroke_line({cx - s * 0.5f, cy},            {cx - s * 0.1f, cy + s * 0.7f}, w, cp);
-        canvas.stroke_line({cx - s * 0.1f, cy + s * 0.7f}, {cx + s * 0.6f, cy - s * 0.5f}, w, cp);
+        const float s  = icon * 0.72f;             // 路径包围盒 = 图标框 72%
+        const float ox = ir.x + (ir.width  - s) * 0.5f;
+        const float oy = ir.y + (ir.height - s) * 0.5f;
+
+        auto path = paint::PathBuilder{}
+            .move_to({ox + s * 0.375f, oy + s * 0.674f})  // M9, 16.17
+            .line_to({ox + s * 0.201f, oy + s * 0.500f})  // L4.83, 12
+            .line_to({ox + s * 0.142f, oy + s * 0.559f})  // l-1.42, 1.41
+            .line_to({ox + s * 0.375f, oy + s * 0.792f})  // L9, 19
+            .line_to({ox + s * 0.875f, oy + s * 0.292f})  // L21, 7
+            .line_to({ox + s * 0.816f, oy + s * 0.233f})  // l-1.41, -1.41
+            .close()
+            .build();
+
+        canvas.fill_path(path, paint::Brush::solid_rgb(0xFFFFFF));
     }
 
     // 文字
