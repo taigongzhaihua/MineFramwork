@@ -437,17 +437,13 @@ TextInkBounds FontFace::measure_text_ink_bounds(const char* utf8,
 
 /** 惰性创建 HarfBuzz 字体对象（绑定到 FT_Face） */
 static hb_font_t* ensure_hb_font(FT_Face ft_face) {
-    // hb-ft 桥接：从 FT_Face 创建 hb_font_t，内部已正确读取 FT_Face 的
-    // 当前字号并设置 scale/ppem，调用方无需再手动 hb_font_set_scale
+    // hb-ft 桥接：从 FT_Face 创建 hb_font_t
     hb_font_t* hb_font = hb_ft_font_create_referenced(ft_face);
     if (hb_font == nullptr) return nullptr;
 
-    // 热身：立即执行一次空塑形，强制 HarfBuzz 完成内部缓存初始化，
-    // 避免首次实际塑形产生微小偏差（OpenType 表延迟解析等）
-    hb_buffer_t* warm = hb_buffer_create();
-    hb_buffer_add_utf8(warm, " ", 1, 0, 1);
-    hb_shape(hb_font, warm, nullptr, 0);
-    hb_buffer_destroy(warm);
+    // 设置与 rasterize/measure_text 一致的 FreeType load flags，
+    // 确保 HarfBuzz 塑形得到的 advance 与 FreeType 光栅化结果对齐
+    hb_ft_font_set_load_flags(hb_font, FT_LOAD_FORCE_AUTOHINT);
 
     return hb_font;
 }
