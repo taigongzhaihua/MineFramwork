@@ -140,6 +140,54 @@ static style::Style& default_checkbox_style()
 }
 
 // ============================================================================
+// 勾选组专用样式（仅包含 Checked / Unchecked 状态的 setter）
+// ============================================================================
+static style::Style& default_checkbox_checked_style()
+{
+    static style::Style s = [] {
+        using namespace mine::paint;
+        using namespace mine::math;
+
+        style::Style s;
+        s.set_target_type(core::TypeId::of<CheckBox>());
+        s.set_name("DefaultCheckBox_CheckedGroup");
+
+        // Unchecked 基线（透明、灰边、无勾号）——作为基线可省略，显式写入以防样式缺省
+        s.add_setter({ &CheckBox::IconBackgroundProperty,
+                       core::Variant{ Brush::solid(Color::Transparent) } });
+        s.add_setter({ &CheckBox::IconBorderBrushProperty,
+                       core::Variant{ Brush::solid_rgb(0x79747E) } });
+        s.add_setter({ &CheckBox::CheckMarkBrushProperty,
+                       core::Variant{ Brush::solid(Color::Transparent) } });
+
+        // Checked 状态：图标主色 + 勾号白
+        style::VisualStateSetters checked;
+        checked.state_name = "Checked";
+        checked.setters.push_back({ &CheckBox::IconBackgroundProperty,
+            core::Variant{ Brush::solid_rgb(0x6750A4) } });
+        checked.setters.push_back({ &CheckBox::IconBorderBrushProperty,
+            core::Variant{ Brush::solid_rgb(0x6750A4) } });
+        checked.setters.push_back({ &CheckBox::CheckMarkBrushProperty,
+            core::Variant{ Brush::solid(Color::White) } });
+        s.add_state_setters(std::move(checked));
+
+        // Unchecked 明确状态（可选）
+        style::VisualStateSetters unchecked;
+        unchecked.state_name = "Unchecked";
+        unchecked.setters.push_back({ &CheckBox::IconBackgroundProperty,
+            core::Variant{ Brush::solid(Color::Transparent) } });
+        unchecked.setters.push_back({ &CheckBox::IconBorderBrushProperty,
+            core::Variant{ Brush::solid_rgb(0x79747E) } });
+        unchecked.setters.push_back({ &CheckBox::CheckMarkBrushProperty,
+            core::Variant{ Brush::solid(Color::Transparent) } });
+        s.add_state_setters(std::move(unchecked));
+
+        return s;
+    }();
+    return s;
+}
+
+// ============================================================================
 // IsChecked 变更回调 —— 勾选/取消时直接写入图标外观属性（P50 Local）
 // ============================================================================
 
@@ -150,21 +198,15 @@ void CheckBox::on_is_checked_changed(DependencyObject*         sender,
 {
     auto* self = static_cast<CheckBox*>(sender);
     const bool checked = new_v.has<bool>() && new_v.get<bool>();
-
-    if (checked) {
-        self->set_value(IconBackgroundProperty,
-            core::Variant{ paint::Brush::solid_rgb(0x6750A4) },     // Primary
-            ValuePriority::Local);
-        self->set_value(IconBorderBrushProperty,
-            core::Variant{ paint::Brush::solid_rgb(0x6750A4) },     // Primary
-            ValuePriority::Local);
-        self->set_value(CheckMarkBrushProperty,
-            core::Variant{ paint::Brush::solid(math::Color::White) },
-            ValuePriority::Local);
-    } else {
-        self->clear_value(IconBackgroundProperty, ValuePriority::Local);
-        self->clear_value(IconBorderBrushProperty, ValuePriority::Local);
-        self->clear_value(CheckMarkBrushProperty, ValuePriority::Local);
+    // 切换勾选组状态，使用独立 VSM 驱动视觉（避免直接写 Local 覆盖样式）
+    if (self->owned_checked_vsm_) {
+        if (checked) {
+            self->owned_checked_vsm_.get()->go_to_state("Checked");
+        } else {
+            self->owned_checked_vsm_.get()->go_to_state("Unchecked");
+        }
+        // 注册 AnimationClock 以驱动可能的 Storyboard
+        animation::AnimationClock::instance().register_animation(self, &CheckBox::anim_tick_callback);
     }
 }
 
@@ -333,6 +375,49 @@ CheckBox::CheckBox()
     // 应用 P5 基线值
     active_style.apply(*this);
 
+    // ── 勾选组 VSM（Checked / Unchecked）──────────────────────────────────
+    owned_checked_vsm_ = core::make_owned<style::VisualStateManager>(*this);
+    {
+        auto* chk_vsm = owned_checked_vsm_.get();
+        chk_vsm->define_state("Unchecked");
+        chk_vsm->define_state("Checked");
+        // 动画过渡：任意 -> Checked / Unchecked，缓动 IconBackground / IconBorder / CheckMark
+        chk_vsm->add_transition("*", "Checked",
+            [cb_ptr](animation::Storyboard& sb) {
+                sb.animate_dp(*cb_ptr, IconBackgroundProperty,
+                              animation::Duration::milliseconds(120.0f),
+                              animation::QuadEaseOut);
+                sb.animate_dp(*cb_ptr, IconBorderBrushProperty,
+                              animation::Duration::milliseconds(120.0f),
+                              animation::QuadEaseOut);
+                sb.animate_dp(*cb_ptr, CheckMarkBrushProperty,
+                              animation::Duration::milliseconds(120.0f),
+                              animation::QuadEaseOut);
+            });
+        chk_vsm->add_transition("*", "Unchecked",
+            [cb_ptr](animation::Storyboard& sb) {
+                sb.animate_dp(*cb_ptr, IconBackgroundProperty,
+                              animation::Duration::milliseconds(100.0f),
+                              animation::QuadEaseOut);
+                sb.animate_dp(*cb_ptr, IconBorderBrushProperty,
+                              animation::Duration::milliseconds(100.0f),
+                              animation::QuadEaseOut);
+                sb.animate_dp(*cb_ptr, CheckMarkBrushProperty,
+                              animation::Duration::milliseconds(100.0f),
+                              animation::QuadEaseOut);
+            });
+
+        style::Style& checked_style = default_checkbox_checked_style();
+        chk_vsm->set_style(&checked_style);
+
+        // 初始勾选状态（立即跳变）
+        if (is_checked()) {
+            chk_vsm->go_to_state("Checked", false);
+        } else {
+            chk_vsm->go_to_state("Unchecked", false);
+        }
+    }
+
     // ── DP↔DP 绑定 ─────────────────────────────────────────────────────────
 
     // 图标背景 → icon_border_ 背景
@@ -490,6 +575,13 @@ bool CheckBox::anim_tick_callback(void* handle, float dt) noexcept
 
     if (auto* v = self->vsm()) {
         if (v->tick_animations(dt)) {
+            any_active = true;
+        }
+    }
+
+    // 进推进勾选组的动画（若存在）
+    if (self->owned_checked_vsm_) {
+        if (self->owned_checked_vsm_.get()->tick_animations(dt)) {
             any_active = true;
         }
     }

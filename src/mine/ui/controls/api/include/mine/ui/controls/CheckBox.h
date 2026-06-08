@@ -10,7 +10,7 @@
 
 namespace mine::paint { class Canvas; }
 namespace mine::ui::input { class MouseEventArgs; }
-namespace mine::ui::style { class Style; }
+namespace mine::ui::style { class Style; class VisualStateManager; }
 
 namespace mine::ui {
 
@@ -142,6 +142,8 @@ private:
     core::OwnedPtr<Border>           owned_state_;
     core::OwnedPtr<CheckMarkElement> owned_check_;
     core::OwnedPtr<TextBlock>        owned_label_;
+    // 额外的 VisualStateManager：勾选组（Checked / Unchecked）
+    core::OwnedPtr<style::VisualStateManager> owned_checked_vsm_;
 };
 
 } // namespace mine::ui
