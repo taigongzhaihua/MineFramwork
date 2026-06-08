@@ -39,6 +39,19 @@
   - 注：本条的"手画蒙版 + 手动 alpha 缓动"实现已被下方 Changed 条目（State Layer
     独立为 Border 基元 + 状态机动画）彻底取代，根因诊断仍保留以备查。
 
+### Added
+- **mine.ui.controls：新增 CheckBox 控件（MD3 风格）**：
+
+  CheckBox 为继承 Control 的标准勾选框控件，支持勾选/取消勾选切换、悬停/按下视觉状态、
+  自定义文字与字体、CheckedChanged 路由事件。
+  - 视觉组成：圆角方框图标（2px 圆角）+ 勾号矢量线 + 伴随文字
+  - MD3 主色 #6750A4（勾选态背景），边框色 #79747E，勾号白色描边
+  - 鼠标交互：悬停态图标变淡、按下态视觉反馈、左键抬起时切换勾选状态
+  - 公开 API：`is_checked()`/`set_checked()`、`text()`/`set_text()`、
+    `set_font_face()`/`set_font_size()`、`CheckedChangedEvent()`
+  - 依赖属性 `IsCheckedProperty`（affects_render）
+  - 已集成到 `sample.01-mvvm-binding` 演示窗口，勾选可切换深色/浅色主题
+
 ### Changed
 - **mine.ui.controls：TextBox 外观组合式重构下沉到 Border 基元**：
 

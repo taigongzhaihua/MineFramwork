@@ -36,6 +36,7 @@
 #include <mine/ui/controls/TextBlock.h>
 #include <mine/ui/controls/Button.h>
 #include <mine/ui/controls/TextBox.h>
+#include <mine/ui/controls/CheckBox.h>
 #include <mine/ui/event/RoutedEventArgs.h>
 #include <mine/text/FontFace.h>
 #include <mine/math/Thickness.h>
@@ -103,6 +104,9 @@ private:
     mine::ui::TextBox    input_box_;        ///< 输入框（双向绑定 input_text）
     mine::ui::TextBlock  echo_label_;       ///< 回显标签（绑定 echo_text）
 
+    // ── CheckBox 演示区 ────────────────────────────────────────────────────
+    mine::ui::CheckBox   check_box_;        ///< CheckBox 控件演示
+
     mine::ui::StackPanel btn_row_;          ///< 按钮行（水平排列）
     mine::ui::Button     btn_inc_;          ///< [+1] 按钮 → Command 绑定 increment_cmd
     mine::ui::Button     btn_dec_;          ///< [-1] 按钮 → Command 绑定 decrement_cmd
@@ -138,6 +142,10 @@ private:
     /** [退出] 按钮点击：触发 on_close_requested_ 信号。 */
     static void s_on_click_quit(void* sender, mine::ui::RoutedEventArgs& args,
                                 void* user_data);
+
+    /** CheckBox 勾选变更：切换深色/浅色模式。 */
+    static void s_on_check_changed(void* sender, mine::ui::RoutedEventArgs& args,
+                                   void* user_data);
 };
 
 } // namespace app

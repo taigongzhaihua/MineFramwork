@@ -151,6 +151,17 @@ void CounterWindow::build_(mine::text::FontFace* font)
     if (font) { echo_label_.set_font_face(font); }
     body_panel_.add_child(&echo_label_);
 
+    // ── CheckBox 演示 ────────────────────────────────────────────────────────
+
+    check_box_.set_text("切换深色/浅色模式");
+    check_box_.set_font_size(15.0f);
+    check_box_.set_checked(false);
+    check_box_.set_margin(math::Thickness{ 20.0f, 12.0f, 20.0f, 8.0f });
+    if (font) { check_box_.set_font_face(font); }
+    check_box_.add_handler(ui::CheckBox::CheckedChangedEvent(),
+        &CounterWindow::s_on_check_changed, this);
+    body_panel_.add_child(&check_box_);
+
     // ── 按钮行 ────────────────────────────────────────────────────────────────
 
     btn_row_.set_orientation(ui::Orientation::Horizontal);
@@ -269,6 +280,26 @@ void CounterWindow::s_on_click_quit(void* /*sender*/,
     // 触发关闭请求信号（App 层监听后调用 quit()）
     if (self->on_close_requested_) {
         self->on_close_requested_();
+    }
+}
+
+void CounterWindow::s_on_check_changed(void* sender,
+                                       ui::RoutedEventArgs& /*args*/,
+                                       void* user_data)
+{
+    auto* cb   = static_cast<ui::CheckBox*>(sender);
+    auto* self = static_cast<CounterWindow*>(user_data);
+    bool checked = cb->is_checked();
+
+    // 简单演示：勾选切换深色模式，取消恢复浅色模式
+    if (checked) {
+        self->root_bg_.set_background(paint::Brush::solid_rgb(0x1E1E1E));
+        self->header_label_.set_foreground(paint::Brush::solid_rgb(0xE0E0E0));
+        self->header_label_.set_background(paint::Brush::solid_rgb(0x2D2D2D));
+    } else {
+        self->root_bg_.set_background(paint::Brush::solid_rgb(0xF5F5F5));
+        self->header_label_.set_foreground(paint::Brush::solid_rgb(0x1A1A1A));
+        self->header_label_.set_background(paint::Brush::solid_rgb(0xE8DEF8));
     }
 }
 
