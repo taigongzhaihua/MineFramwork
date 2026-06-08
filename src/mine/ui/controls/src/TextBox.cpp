@@ -1649,7 +1649,12 @@ void TextBox::rebuild_text_width_cache() const noexcept
         if (data[pos] != '\n' && data[pos] != '\r') {
             if (font_face_ != nullptr) {
                 auto* face = static_cast<text::FontFace*>(font_face_);
-                glyph_w = face->measure_text(data + pos, next - pos, font_size_px_);
+                // 用 HarfBuzz 塑形获取 glyph_index，再用 FreeType 直接测 advance
+                // （跳过 HarfBuzz 逐字形塑形开销，且保证与光栅化 advance 一致）
+                const text::ShapeResult sr = face->shape_text(data + pos, next - pos, font_size_px_);
+                if (!sr.glyphs.empty()) {
+                    glyph_w = face->measure_glyph_advance(sr.glyphs[0].glyph_index, font_size_px_);
+                }
             } else {
                 glyph_w = font_size_px_ * 0.55f;
             }

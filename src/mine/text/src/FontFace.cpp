@@ -448,6 +448,32 @@ static hb_font_t* ensure_hb_font(FT_Face ft_face) {
     return hb_font;
 }
 
+float FontFace::measure_glyph_advance(uint32_t glyph_index,
+                                       float    font_size_px) const
+{
+    if (impl_ == nullptr || impl_->face == nullptr || glyph_index == 0) {
+        return 0.0f;
+    }
+
+    FT_Face face = impl_->face;
+
+    // 设置字号
+    const FT_UInt pixel_h = static_cast<FT_UInt>(font_size_px + 0.5f);
+    if (pixel_h != impl_->cached_pixel_h) {
+        if (FT_Set_Pixel_Sizes(face, 0, pixel_h) != 0) {
+            return 0.0f;
+        }
+        impl_->cached_pixel_h = pixel_h;
+    }
+
+    if (FT_Load_Glyph(face, static_cast<FT_UInt>(glyph_index),
+                       FT_LOAD_FORCE_AUTOHINT) != 0) {
+        return 0.0f;
+    }
+
+    return static_cast<float>(face->glyph->advance.x >> 6);
+}
+
 // ── shape_text 公开 API ────────────────────────────────────────────────────
 
 ShapeResult FontFace::shape_text(const char* utf8,

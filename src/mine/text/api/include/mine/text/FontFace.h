@@ -172,6 +172,20 @@ public:
     bool rasterize_glyph(uint32_t glyph_index, GlyphBitmap& out);
 
     /**
+     * @brief 直接使用 FreeType 测量单个字形的水平 advance（不经过 HarfBuzz）。
+     *
+     * 与 measure_text() 的区别：本函数跳过塑形流程，直接调用
+     * FT_Load_Glyph 读取 advance。适用于逐字形缓存构建等场景，
+     * 保证与 rasterize_glyph 使用的 advance 完全一致。
+     *
+     * @param glyph_index  字体内部字形索引
+     * @param font_size_px 字号（逻辑像素）
+     * @return 水平前进量（像素），失败返回 0
+     */
+    [[nodiscard]] float measure_glyph_advance(uint32_t glyph_index,
+                                               float    font_size_px) const;
+
+    /**
      * @brief 返回当前字号下的上行距（ascender，基线上方高度，单位：像素）。
      *
      * 正值。
