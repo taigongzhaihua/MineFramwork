@@ -96,17 +96,26 @@ void CheckBox::on_render(paint::Canvas& canvas) {
     canvas.stroke_rounded_rect(math::RoundedRect{ir, 2.0f},
         paint::Brush::solid(sc), pen);
 
-    // 勾号
-    if (checked) {
-        const float cx = ir.x + ir.width * 0.5f;
-        const float cy = ir.y + ir.height * 0.5f;
-        const float s  = ir.width * 0.35f;
-        paint::Pen cp; cp.width = std::max(1.5f, ir.width * 0.15f);
-        cp.start_cap = paint::LineCap::Round;
-        cp.end_cap   = paint::LineCap::Round;
-        const paint::Brush w{paint::Brush::solid_rgb(0xFFFFFF)};
-        canvas.stroke_line({cx - s * 0.5f, cy},            {cx - s * 0.1f, cy + s * 0.7f}, w, cp);
-        canvas.stroke_line({cx - s * 0.1f, cy + s * 0.7f}, {cx + s * 0.6f, cy - s * 0.5f}, w, cp);
+    // 勾号：使用字体渲染 Unicode 勾号字符 ✓（U+2713，MD3 风格）
+    if (checked && font_face_ != nullptr) {
+        // UTF-8 编码：U+2713 → E2 9C 93（3 字节）
+        static const char kCheckMark[] = "\xE2\x9C\x93";
+        constexpr size_t kCheckMarkLen = 3;
+
+        auto* face       = static_cast<text::FontFace*>(font_face_);
+        const float chkSz = icon * 0.68f;           // 勾号字号 = 图标框的 68%
+
+        // 测量勾号宽度以水平居中
+        const float chkW = face->measure_text(kCheckMark, kCheckMarkLen, chkSz);
+
+        // 计算居中位置：X = 图标中心 − 勾号半宽；Y = 图标基线（ascender 偏移）
+        const float cx = ir.x + (ir.width  - chkW)  * 0.5f;
+        const float cy = ir.y + (ir.height - chkSz) * 0.5f
+                         + static_cast<float>(face->ascender() * (chkSz / font_size_));
+
+        canvas.draw_text(core::StringView{kCheckMark, kCheckMarkLen},
+            math::Vec2{cx, cy}, face, chkSz,
+            paint::Brush::solid_rgb(0xFFFFFF));
     }
 
     // 文字

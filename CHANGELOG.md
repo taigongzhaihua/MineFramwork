@@ -44,13 +44,14 @@
 
   CheckBox 为继承 Control 的标准勾选框控件，支持勾选/取消勾选切换、悬停/按下视觉状态、
   自定义文字与字体、CheckedChanged 路由事件。
-  - 视觉组成：圆角方框图标（2px 圆角）+ 勾号矢量线 + 伴随文字
-  - MD3 主色 #6750A4（勾选态背景），边框色 #79747E，勾号白色描边
+  - 视觉组成：圆角方框图标（2px 圆角）+ 字体渲染勾号 ✓（U+2713）+ 伴随文字
+  - MD3 主色 #6750A4（勾选态背景），边框色 #79747E，勾号白色
   - 鼠标交互：悬停态图标变淡、按下态视觉反馈、左键抬起时切换勾选状态
   - 公开 API：`is_checked()`/`set_checked()`、`text()`/`set_text()`、
     `set_font_face()`/`set_font_size()`、`CheckedChangedEvent()`
   - 依赖属性 `IsCheckedProperty`（affects_render）
   - 已集成到 `sample.01-mvvm-binding` 演示窗口，勾选可切换深色/浅色主题
+  - 勾号从手画矢量线改为字体渲染（`canvas.draw_text` 渲染 Unicode ✓），字形跟随字体风格更美观统一
 
 ### Changed
 - **mine.ui.controls：TextBox 外观组合式重构下沉到 Border 基元**：
