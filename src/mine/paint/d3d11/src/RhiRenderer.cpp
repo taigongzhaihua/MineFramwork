@@ -2182,7 +2182,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             // ── 阶段 1：光栅化全部字形并写入 CPU 图集 ───────────────────
             {
                 for (const auto& g : shaped.glyphs) {
-                    glyph_atlas_->get_or_insert(face, g.codepoint, size_px);
+                    glyph_atlas_->get_or_insert_by_index(face, g.glyph_index, size_px);
                 }
             }
 
@@ -2197,7 +2197,7 @@ void RhiRenderer::render(const DisplayList& dl, gfx::ITexture* target) {
             const float pen_y = run.origin_y;
 
             for (const auto& g : shaped.glyphs) {
-                const AtlasEntry* entry = glyph_atlas_->get_or_insert(face, g.codepoint, size_px);
+                const AtlasEntry* entry = glyph_atlas_->get_or_insert_by_index(face, g.glyph_index, size_px);
                 if (entry == nullptr) {
                     // 图集已满或光栅化失败：用字号估算跳过该字形
                     pen_x += g.x_advance + run.character_spacing;

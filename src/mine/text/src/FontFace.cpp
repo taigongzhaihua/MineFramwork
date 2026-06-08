@@ -189,11 +189,16 @@ bool FontFace::rasterize(uint32_t codepoint, GlyphBitmap& out) {
     }
 
     FT_Face face = impl_->face;
-
-    // 查找字形索引，0 表示未找到（使用 .notdef 字形，也可视为成功）
     const FT_UInt glyph_index = FT_Get_Char_Index(face, static_cast<FT_ULong>(codepoint));
+    return rasterize_glyph(glyph_index, out);
+}
 
-    // 加载字形（仅加载字形槽，不渲染）
+bool FontFace::rasterize_glyph(uint32_t glyph_index, GlyphBitmap& out) {
+    if (impl_ == nullptr || impl_->face == nullptr) {
+        return false;
+    }
+
+    FT_Face face = impl_->face;
     // FT_LOAD_FORCE_AUTOHINT：强制使用 FreeType 内置自动 hinting，
     // 对小字号比字体内嵌 TrueType Bytecode Interpreter 效果更稳定
     FT_Error err = FT_Load_Glyph(face, glyph_index, FT_LOAD_FORCE_AUTOHINT);

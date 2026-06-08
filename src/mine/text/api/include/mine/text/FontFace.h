@@ -159,6 +159,19 @@ public:
     bool rasterize(uint32_t codepoint, GlyphBitmap& out);
 
     /**
+     * @brief 光栅化指定字体内部字形索引的 glyph。
+     *
+     * 与 rasterize(uint32_t, GlyphBitmap&) 的区别：
+     *   - 本函数直接使用 glyph_index（如 HarfBuzz 塑形返回的索引），
+     *     跳过 FT_Get_Char_Index 查找（每字形节省一次 cmap 查询）。
+     *
+     * @param glyph_index  字体内部字形索引（来自 hb_glyph_info_t::codepoint）
+     * @param out          输出字形位图结构
+     * @return 成功返回 true
+     */
+    bool rasterize_glyph(uint32_t glyph_index, GlyphBitmap& out);
+
+    /**
      * @brief 返回当前字号下的上行距（ascender，基线上方高度，单位：像素）。
      *
      * 正值。

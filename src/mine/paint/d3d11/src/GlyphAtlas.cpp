@@ -53,23 +53,47 @@ const AtlasEntry* GlyphAtlas::get_or_insert(
 
     if (face == nullptr) return nullptr;
 
-    // 1. 缓存命中直接返回
-    const AtlasEntry* cached = find(face, codepoint, size_px);
-    if (cached != nullptr) return cached;
-
-    // 2. 缓存已满
-    if (entry_count_ >= kMaxGlyphs) return nullptr;
-
-    // 3. 设置字号并光栅化
     if (!face->set_pixel_size(0, size_px)) return nullptr;
 
     text::GlyphBitmap bitmap{};
     if (!face->rasterize(codepoint, bitmap)) return nullptr;
 
-    // 4. 构造新条目
+    return commit_entry(face, codepoint, size_px, bitmap);
+}
+
+const AtlasEntry* GlyphAtlas::get_or_insert_by_index(
+    text::FontFace* face, uint32_t glyph_index, uint32_t size_px) {
+
+    if (face == nullptr) return nullptr;
+
+    if (!face->set_pixel_size(0, size_px)) return nullptr;
+
+    text::GlyphBitmap bitmap{};
+    if (!face->rasterize_glyph(glyph_index, bitmap)) return nullptr;
+
+    // 使用 glyph_index 作为缓存键（codepoint 字段复用）
+    return commit_entry(face, glyph_index, size_px, bitmap);
+}
+
+// ── 内部辅助：将已光栅化的 bitmap 提交到图集 ──────────────────────────────
+
+const AtlasEntry* GlyphAtlas::commit_entry(
+    text::FontFace* face, uint32_t cache_key, uint32_t size_px,
+    const text::GlyphBitmap& bitmap) {
+
+    if (face == nullptr) return nullptr;
+
+    // 1. 缓存命中直接返回
+    const AtlasEntry* cached = find(face, cache_key, size_px);
+    if (cached != nullptr) return cached;
+
+    // 2. 缓存已满
+    if (entry_count_ >= kMaxGlyphs) return nullptr;
+
+    // 3. 构造新条目
     AtlasEntry& entry = entries_[entry_count_];
     entry.key.face      = face;
-    entry.key.codepoint = codepoint;
+    entry.key.codepoint = cache_key;
     entry.key.size_px   = size_px;
     entry.bearing_x     = static_cast<int16_t>(bitmap.metrics.bearing_x);
     entry.bearing_y     = static_cast<int16_t>(bitmap.metrics.bearing_y);
@@ -77,7 +101,7 @@ const AtlasEntry* GlyphAtlas::get_or_insert(
     entry.atlas_w       = static_cast<uint16_t>(bitmap.metrics.width);
     entry.atlas_h       = static_cast<uint16_t>(bitmap.metrics.height);
 
-    // 5. 空白字形（空格等）：仅记录步进，不占图集空间
+    // 4. 空白字形（空格等）：仅记录步进，不占图集空间
     if (bitmap.metrics.width == 0 || bitmap.metrics.height == 0) {
         entry.atlas_x = 0;
         entry.atlas_y = 0;
@@ -87,17 +111,17 @@ const AtlasEntry* GlyphAtlas::get_or_insert(
         return &entries_[entry_count_ - 1];
     }
 
-    // 6. 在图集中分配区域（含 1px 边距防采样越界）
+    // 5. 在图集中分配区域（含 1px 边距防采样越界）
     uint32_t ax = 0, ay = 0;
     const uint32_t alloc_w = entry.atlas_w + kGlyphPad;
     const uint32_t alloc_h = entry.atlas_h + kGlyphPad;
     if (!packer_.pack(alloc_w, alloc_h, ax, ay)) {
-        return nullptr;  // 图集空间不足
+        return nullptr;
     }
     entry.atlas_x = static_cast<uint16_t>(ax);
     entry.atlas_y = static_cast<uint16_t>(ay);
 
-    // 7. 将字形位图逐行写入 CPU 图集
+    // 6. 将字形位图逐行写入 CPU 图集
     if (bitmap.data != nullptr) {
         for (uint32_t row = 0; row < entry.atlas_h; ++row) {
             const uint8_t* src_row = bitmap.data + row * bitmap.pitch;

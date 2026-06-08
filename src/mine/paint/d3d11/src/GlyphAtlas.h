@@ -76,7 +76,11 @@ public:
      * @brief 查找或插入一个字形到图集。
      * @return 字形条目指针；若图集已满或光栅化失败则返回 nullptr。
      */
+    /// 按码点查询/插入（内部 FT_Get_Char_Index → rasterize）
     const AtlasEntry* get_or_insert(text::FontFace* face, uint32_t codepoint, uint32_t size_px);
+
+    /// 按字形索引查询/插入（跳过 FT_Get_Char_Index，配合 HarfBuzz 塑形结果）
+    const AtlasEntry* get_or_insert_by_index(text::FontFace* face, uint32_t glyph_index, uint32_t size_px);
 
     /**
      * @brief 将图集数据上传到 GPU 纹理（若 dirty）。
@@ -98,7 +102,11 @@ private:
     uint32_t    entry_count_{0};                       ///< 已缓存字形数量
 
     /// 在已缓存条目中查找（线性扫描）
-    const AtlasEntry* find(void* face, uint32_t codepoint, uint32_t size_px) const noexcept;
+    const AtlasEntry* find(void* face, uint32_t key, uint32_t size_px) const noexcept;
+
+    /// 将已光栅化的 bitmap 写入图集（get_or_insert / get_or_insert_by_index 共用）
+    const AtlasEntry* commit_entry(text::FontFace* face, uint32_t cache_key,
+                                   uint32_t size_px, const text::GlyphBitmap& bitmap);
 };
 
 } // namespace mine::paint
