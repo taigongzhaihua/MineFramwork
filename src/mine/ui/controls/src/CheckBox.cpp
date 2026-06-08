@@ -103,20 +103,16 @@ static style::Style& default_checkbox_style()
         s.add_setter({ &CheckBox::TextForegroundProperty,
                        core::Variant{ Brush::solid_rgb(0x1C1B1F) } });          // #1C1B1F
 
-        // ── P4 StyleTrigger：Hovered ─────────────────────────────────────────
+        // ── P4 StyleTrigger：Hovered（仅 State Layer 蒙版，边框色由勾选组控制）───
         style::VisualStateSetters hovered;
         hovered.state_name = "Hovered";
-        hovered.setters.push_back({ &CheckBox::IconBorderBrushProperty,
-            core::Variant{ Brush::solid_rgb(0x6750A4) } });                     // Primary
         hovered.setters.push_back({ &CheckBox::StateLayerBrushProperty,
             core::Variant{ Brush::solid(Color{1.0f, 1.0f, 1.0f, 0.08f}) } });  // 8% 白
         s.add_state_setters(std::move(hovered));
 
-        // ── P4 StyleTrigger：Pressed ─────────────────────────────────────────
+        // ── P4 StyleTrigger：Pressed（仅 State Layer 蒙版）──────────────────
         style::VisualStateSetters pressed;
         pressed.state_name = "Pressed";
-        pressed.setters.push_back({ &CheckBox::IconBorderBrushProperty,
-            core::Variant{ Brush::solid_rgb(0x6750A4) } });                     // Primary
         pressed.setters.push_back({ &CheckBox::StateLayerBrushProperty,
             core::Variant{ Brush::solid(Color{1.0f, 1.0f, 1.0f, 0.12f}) } });  // 12% 白
         s.add_state_setters(std::move(pressed));
@@ -345,25 +341,16 @@ CheckBox::CheckBox()
             sb.animate_dp(*cb_ptr, StateLayerBrushProperty,
                           animation::Duration::milliseconds(120.0f),
                           animation::QuadEaseOut);
-            sb.animate_dp(*cb_ptr, IconBorderBrushProperty,
-                          animation::Duration::milliseconds(120.0f),
-                          animation::QuadEaseOut);
         });
     vsm.add_transition("*", "Normal",
         [cb_ptr](animation::Storyboard& sb) {
             sb.animate_dp(*cb_ptr, StateLayerBrushProperty,
                           animation::Duration::milliseconds(100.0f),
                           animation::QuadEaseOut);
-            sb.animate_dp(*cb_ptr, IconBorderBrushProperty,
-                          animation::Duration::milliseconds(100.0f),
-                          animation::QuadEaseOut);
         });
     vsm.add_transition("*", "Pressed",
         [cb_ptr](animation::Storyboard& sb) {
             sb.animate_dp(*cb_ptr, StateLayerBrushProperty,
-                          animation::Duration::milliseconds(60.0f),
-                          animation::QuadEaseIn);
-            sb.animate_dp(*cb_ptr, IconBorderBrushProperty,
                           animation::Duration::milliseconds(60.0f),
                           animation::QuadEaseIn);
         });

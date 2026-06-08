@@ -32,12 +32,21 @@ class TextBlock;
  *
  * 布局由 StackPanel 标准布局面板驱动，无需手动 on_arrange。
  *
- * 状态机驱动（VSM）：
- *   - Normal: 图标透明底+灰边框+无勾号
- *   - Hovered: 图标主色边框+8%白色蒙版（120ms 缓动）
- *   - Pressed: 图标主色边框+12%白色蒙版（60ms 缓动）
- *   - 勾选态通过 IsCheckedProperty 变更回调直接写入图标背景/边框/勾号色
- *     （Local P50 覆盖 StyleTrigger P30），取消勾选时 clear 让样式恢复。
+ * 状态机驱动（双 VSM 分离交互组与勾选组）：
+ *
+ *   交互组（Control::vsm）：管理 Normal / Hovered / Pressed / Disabled
+ *     - 仅控制 StateLayerBrushProperty（半透明白蒙版），不影响边框色
+ *     - Normal: 0% 白蒙版
+ *     - Hovered: 8% 白蒙版（120ms 缓动）
+ *     - Pressed: 12% 白蒙版（60ms 缓动）
+ *     - Disabled: 即时跳变，灰色文字/边框/勾号
+ *
+ *   勾选组（owned_checked_vsm_）：管理 Unchecked / Checked
+ *     - 控制 IconBackgroundProperty、IconBorderBrushProperty、CheckMarkBrushProperty
+ *     - Unchecked: 透明底 + 灰边框 + 无勾号
+ *     - Checked: Primary 底 + Primary 边框 + 白色勾号（120ms 缓动）
+ *
+ *   两组 VSM 操作互不重叠的属性集，避免动画抖动。
  */
 class MINE_UI_CONTROLS_API CheckBox : public Control {
 public:
