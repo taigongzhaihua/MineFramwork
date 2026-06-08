@@ -16,7 +16,6 @@ namespace mine::ui {
 
 // 前向声明
 class Border;
-class StackPanel;
 class TextBlock;
 
 /**
@@ -24,21 +23,19 @@ class TextBlock;
  *
  * 视觉树（组合式装配，自内向外）：
  *   CheckBox
- *   └── StackPanel (Horizontal)
- *       ├── Border (icon_border_: 图标方框背景+边框+2px圆角)
- *       │   └── Border (state_border_: hover/press 半透明白蒙版,thickness=0)
- *       │       └── CheckMarkElement (勾号填充路径, 勾选时可见)
- *       └── TextBlock (label_: 伴随文字)
+ *   ├── Border (icon_border_: 图标方框背景+边框+2px圆角) [inner_element]
+ *   │   └── Border (state_border_: hover/press 半透明白蒙版)
+ *   │       └── CheckMarkElement (勾号填充路径, 勾选时可见)
+ *   └── TextBlock (label_: 伴随文字) [Visual child]
+ *
+ * on_arrange 手动将 icon_border_ 与 label_ 水平排列，不依赖 StackPanel。
  *
  * 状态机驱动（VSM）：
  *   - Normal: 图标透明底+灰边框+无勾号
- *   - Hovered: 图标主色边框+8%白色蒙版
- *   - Pressed: 图标主色边框+12%白色蒙版
+ *   - Hovered: 图标主色边框+8%白色蒙版（120ms 缓动）
+ *   - Pressed: 图标主色边框+12%白色蒙版（60ms 缓动）
  *   - 勾选态通过 IsCheckedProperty 变更回调直接写入图标背景/边框/勾号色
  *     （Local P50 覆盖 StyleTrigger P30），取消勾选时 clear 让样式恢复。
- *
- * CheckBox 自身不再 on_render 手画任何内容，
- * 全部绘制下沉到 Border / TextBlock / CheckMarkElement 基元。
  */
 class MINE_UI_CONTROLS_API CheckBox : public Control {
 public:
@@ -94,6 +91,7 @@ public:
 
 protected:
     void on_measure(math::Size available) override;
+    void on_arrange(math::Rect final_rect) override;
     [[nodiscard]] ControlVisualState compute_visual_state() const noexcept override;
 
 private:
@@ -116,14 +114,12 @@ private:
     void*                    font_face_  = nullptr;
     float                    font_size_  = 14.0f;
 
-    StackPanel*       layout_root_  = nullptr;  ///< 水平布局根（owned 指针见下方）
-    Border*           icon_border_  = nullptr;  ///< 图标方框 Border
+    Border*           icon_border_  = nullptr;  ///< 图标方框 Border [inner_element]
     Border*           state_border_ = nullptr;  ///< State Layer 蒙版 Border
     CheckMarkElement* check_mark_   = nullptr;  ///< 勾号元素
-    TextBlock*        label_        = nullptr;  ///< 文字标签
+    TextBlock*        label_        = nullptr;  ///< 文字标签 [Visual child]
 
-    // 子元素所有权（生命周期由 OwnedPtr 管理，析构时自动释放）
-    core::OwnedPtr<StackPanel>       owned_root_;
+    // 子元素所有权（生命周期由 OwnedPtr 管理）
     core::OwnedPtr<Border>           owned_icon_;
     core::OwnedPtr<Border>           owned_state_;
     core::OwnedPtr<CheckMarkElement> owned_check_;

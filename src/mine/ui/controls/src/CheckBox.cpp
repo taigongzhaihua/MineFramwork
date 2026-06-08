@@ -1,7 +1,6 @@
 #include <mine/ui/controls/CheckBox.h>
 #include <mine/ui/controls/Border.h>
 #include <mine/ui/controls/TextBlock.h>
-#include <mine/ui/layout/StackPanel.h>
 #include <mine/ui/layout/Orientation.h>
 #include <mine/ui/style/Style.h>
 #include <mine/ui/style/VisualStateManager.h>
@@ -217,37 +216,31 @@ CheckBox::CheckBox()
     // ── 组合式视觉树装配（自内向外）─────────────────────────────────────────
     //
     // 目标层级：
-    //   StackPanel(H)
-    //   ├── Border(icon) → Border(state) → CheckMarkElement
-    //   └── TextBlock(label)
+    //   CheckBox
+    //   ├── Border(icon) → Border(state) → CheckMarkElement  [inner_element]
+    //   └── TextBlock(label)                                  [Visual child]
 
     // 1) CheckMarkElement（勾号，最内层）
     owned_check_ = core::make_owned<CheckMarkElement>();
     check_mark_  = owned_check_.get();
 
-    // 2) StateLayerBorder（hover/press 半透明白蒙版），其 child 为 CheckMarkElement
+    // 2) StateLayerBorder（hover/press 蒙版），其 child 为 CheckMarkElement
     owned_state_ = core::make_owned<Border>();
     state_border_ = owned_state_.get();
     state_border_->set_border_thickness(math::Thickness::uniform(0.0f));
     state_border_->set_child(check_mark_);
 
-    // 3) IconBorder（背景+边框+2px 圆角），其 child 为 state_border
+    // 3) IconBorder（背景+边框+2px圆角），其 child 为 state_border
     owned_icon_ = core::make_owned<Border>();
     icon_border_ = owned_icon_.get();
     icon_border_->set_border_thickness(math::Thickness::uniform(2.0f));
     icon_border_->set_corner_radius(math::CornerRadii::uniform(2.0f));
     icon_border_->set_child(state_border_);
 
-    // 4) TextBlock（文字标签）
+    // 4) TextBlock（文字标签），添加为 Visual 子节点
     owned_label_ = core::make_owned<TextBlock>();
     label_ = owned_label_.get();
-
-    // 5) StackPanel（水平布局根），添加图标 Border 和 TextBlock
-    owned_root_ = core::make_owned<StackPanel>();
-    layout_root_ = owned_root_.get();
-    layout_root_->set_orientation(Orientation::Horizontal);
-    layout_root_->add_child(icon_border_);
-    layout_root_->add_child(label_);
+    add_child(label_);
 
     // ── VSM 配置 ───────────────────────────────────────────────────────────
 
@@ -310,9 +303,9 @@ CheckBox::CheckBox()
     label_->bind_property(TextBlock::ForegroundProperty,
                           *this, TextForegroundProperty);
 
-    // ── 安装根元素 ─────────────────────────────────────────────────────────
+    // ── 安装根元素（IconBorder 为 inner_element）───────────────────────────
 
-    set_inner_element(std::move(owned_root_));
+    set_inner_element(std::move(owned_icon_));
 
     // ── 注册鼠标事件处理器 ─────────────────────────────────────────────────
 
@@ -327,10 +320,9 @@ CheckBox::CheckBox()
 
 CheckBox::~CheckBox()
 {
-    // 先移除 StackPanel 对子元素的引用，再让 OwnedPtr 成员析构，
-    // 避免 Control 基类析构 inner_element（StackPanel）时访问已销毁的子元素。
-    if (layout_root_) {
-        layout_root_->remove_all_children();
+    // 先移除 label_ 子节点引用，再让 OwnedPtr 成员析构
+    if (label_) {
+        remove_child(label_);
     }
 }
 
@@ -374,25 +366,44 @@ void CheckBox::set_font_size(float s) noexcept {
 }
 
 // ============================================================================
-// 布局
+// 布局（手动排列：icon_border_ 左 + gap + label_ 右）
 // ============================================================================
 
 void CheckBox::on_measure(math::Size available) {
-    // 图标尺寸
     const float icon = std::roundf(font_size_ * 1.3f);
+    const float gap  = font_size_ * 0.5f;
 
-    // 设置图标 Border 的固定尺寸：图标 + 4px padding
-    if (icon_border_) {
-        icon_border_->set_width(icon + 4.0f);
-        icon_border_->set_height(icon + 4.0f);
+    // 图标 Border 固定尺寸
+    const float iconTotal = icon + 4.0f;  // icon + 2px padding each side
+
+    // 测量文字标签
+    float textW = 0.0f;
+    if (label_) {
+        label_->measure(available);
+        textW = label_->desired_size().width;
     }
 
-    // 委托给 StackPanel 递归测量
-    if (layout_root_) {
-        layout_root_->measure(available);
-        set_desired_size(layout_root_->desired_size());
-    } else {
-        set_desired_size({icon + 4.0f, icon + 4.0f});
+    set_desired_size({iconTotal + gap + textW, iconTotal});
+}
+
+void CheckBox::on_arrange(math::Rect final_rect) {
+    const float icon = std::roundf(font_size_ * 1.3f);
+    const float gap  = font_size_ * 0.5f;
+    const float iconTotal = icon + 4.0f;
+
+    // 排列图标 Border：左侧、垂直居中
+    if (icon_border_) {
+        const float iconY = final_rect.y + (final_rect.height - iconTotal) * 0.5f;
+        icon_border_->arrange(math::Rect{final_rect.x, iconY, iconTotal, iconTotal});
+    }
+
+    // 排列文字标签：图标右侧、垂直居中
+    if (label_) {
+        const float textH = label_->desired_size().height;
+        const float labelX = final_rect.x + iconTotal + gap;
+        const float labelY = final_rect.y + (final_rect.height - textH) * 0.5f;
+        const float labelW = std::max(0.0f, final_rect.width - iconTotal - gap);
+        label_->arrange(math::Rect{labelX, labelY, labelW, textH});
     }
 }
 
