@@ -161,27 +161,33 @@ void Border::set_corner_radius(math::CornerRadii radii)
 void Border::on_measure(math::Size available_size)
 {
     const math::Thickness t = border_thickness();
-    const math::Rect outer{0.0f, 0.0f, available_size.width, available_size.height};
-    const math::Rect inner = outer.deflated(t);
 
+    // 读取 FrameworkElement 的 Width/Height DP（显式尺寸覆盖可用空间）
+    const float w = width();
+    const float h = height();
+
+    float child_avail_w = available_size.width  - t.horizontal();
+    float child_avail_h = available_size.height - t.vertical();
+    if (!std::isnan(w)) child_avail_w = std::max(0.0f, w - t.horizontal());
+    if (!std::isnan(h)) child_avail_h = std::max(0.0f, h - t.vertical());
+
+    math::Size child_desired;
     if (child_ != nullptr) {
         const math::Size child_available{
-            inner.width > 0.0f ? inner.width : 0.0f,
-            inner.height > 0.0f ? inner.height : 0.0f,
+            std::max(0.0f, child_avail_w),
+            std::max(0.0f, child_avail_h),
         };
         child_->measure(child_available);
-        const math::Size child_desired = child_->desired_size();
-        set_desired_size({
-            child_desired.width + t.horizontal(),
-            child_desired.height + t.vertical(),
-        });
-        return;
+        child_desired = child_->desired_size();
     }
 
-    set_desired_size({
-        t.horizontal(),
-        t.vertical(),
-    });
+    // 计算自身期望尺寸：子元素尺寸 + 边框厚度；若设了显式宽高则直接使用
+    float desired_w = child_desired.width  + t.horizontal();
+    float desired_h = child_desired.height + t.vertical();
+    if (!std::isnan(w)) desired_w = w;
+    if (!std::isnan(h)) desired_h = h;
+
+    set_desired_size({desired_w, desired_h});
 }
 
 void Border::on_arrange(math::Rect final_rect)

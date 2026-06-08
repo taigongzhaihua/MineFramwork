@@ -16,6 +16,7 @@ namespace mine::ui {
 
 // 前向声明
 class Border;
+class StackPanel;
 class TextBlock;
 
 /**
@@ -23,12 +24,13 @@ class TextBlock;
  *
  * 视觉树（组合式装配，自内向外）：
  *   CheckBox
- *   ├── Border (icon_border_: 图标方框背景+边框+2px圆角) [inner_element]
- *   │   └── Border (state_border_: hover/press 半透明白蒙版)
- *   │       └── CheckMarkElement (勾号填充路径, 勾选时可见)
- *   └── TextBlock (label_: 伴随文字) [Visual child]
+ *   └── StackPanel (Horizontal)
+ *       ├── Border (icon_border_: 图标方框背景+边框+2px圆角)
+ *       │   └── Border (state_border_: hover/press 半透明白蒙版)
+ *       │       └── CheckMarkElement (勾号填充路径, 勾选时可见)
+ *       └── TextBlock (label_: 伴随文字)
  *
- * on_arrange 手动将 icon_border_ 与 label_ 水平排列，不依赖 StackPanel。
+ * 布局由 StackPanel 标准布局面板驱动，无需手动 on_arrange。
  *
  * 状态机驱动（VSM）：
  *   - Normal: 图标透明底+灰边框+无勾号
@@ -91,7 +93,6 @@ public:
 
 protected:
     void on_measure(math::Size available) override;
-    void on_arrange(math::Rect final_rect) override;
     [[nodiscard]] ControlVisualState compute_visual_state() const noexcept override;
 
 private:
@@ -114,12 +115,14 @@ private:
     void*                    font_face_  = nullptr;
     float                    font_size_  = 14.0f;
 
-    Border*           icon_border_  = nullptr;  ///< 图标方框 Border [inner_element]
+    StackPanel*       layout_root_  = nullptr;  ///< 水平布局根
+    Border*           icon_border_  = nullptr;  ///< 图标方框 Border
     Border*           state_border_ = nullptr;  ///< State Layer 蒙版 Border
     CheckMarkElement* check_mark_   = nullptr;  ///< 勾号元素
-    TextBlock*        label_        = nullptr;  ///< 文字标签 [Visual child]
+    TextBlock*        label_        = nullptr;  ///< 文字标签
 
-    // 子元素所有权（生命周期由 OwnedPtr 管理）
+    // 子元素所有权（生命周期由 OwnedPtr 管理，layout_root_ 由 set_inner_element 接管）
+    core::OwnedPtr<StackPanel>       owned_root_;
     core::OwnedPtr<Border>           owned_icon_;
     core::OwnedPtr<Border>           owned_state_;
     core::OwnedPtr<CheckMarkElement> owned_check_;
