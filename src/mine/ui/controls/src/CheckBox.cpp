@@ -96,26 +96,43 @@ void CheckBox::on_render(paint::Canvas& canvas) {
     canvas.stroke_rounded_rect(math::RoundedRect{ir, 2.0f},
         paint::Brush::solid(sc), pen);
 
-    // 勾号：使用字体渲染 Unicode 勾号字符 ✓（U+2713，MD3 风格）
+    // 勾号：使用字体渲染 Unicode 勾号字符 ✓（U+2713）
     if (checked && font_face_ != nullptr) {
-        // UTF-8 编码：U+2713 → E2 9C 93（3 字节）
-        static const char kCheckMark[] = "\xE2\x9C\x93";
-        constexpr size_t kCheckMarkLen = 3;
+        // UTF-8: U+2713 → E2 9C 93（3 字节），备选 U+2714 ✔
+        static const char   kMarkBytes[] = "\xE2\x9C\x93";
+        constexpr size_t    kMarkLen     = 3;
+        constexpr float     kMarkRatio   = 0.68f;  // 勾号占图标框比例
 
-        auto* face       = static_cast<text::FontFace*>(font_face_);
-        const float chkSz = icon * 0.68f;           // 勾号字号 = 图标框的 68%
+        auto* face        = static_cast<text::FontFace*>(font_face_);
+        const float chkSz = icon * kMarkRatio;
 
-        // 测量勾号宽度以水平居中
-        const float chkW = face->measure_text(kCheckMark, kCheckMarkLen, chkSz);
+        // 先显式设置像素大小，确保后续 measure / draw 使用一致的字号
+        face->set_pixel_size(0u, static_cast<uint32_t>(chkSz + 0.5f));
 
-        // 计算居中位置：X = 图标中心 − 勾号半宽；Y = 图标基线（ascender 偏移）
-        const float cx = ir.x + (ir.width  - chkW)  * 0.5f;
-        const float cy = ir.y + (ir.height - chkSz) * 0.5f
-                         + static_cast<float>(face->ascender() * (chkSz / font_size_));
+        // 测量勾号宽度：若为 0 表示字体不含此字形，回退手绘
+        const float chkW = face->measure_text(kMarkBytes, kMarkLen, chkSz);
 
-        canvas.draw_text(core::StringView{kCheckMark, kCheckMarkLen},
-            math::Vec2{cx, cy}, face, chkSz,
-            paint::Brush::solid_rgb(0xFFFFFF));
+        if (chkW > 0.0f) {
+            // 字体渲染路径：字形居中
+            const float asc = static_cast<float>(face->ascender());
+            const float cx  = ir.x + (ir.width  - chkW)  * 0.5f;
+            const float cy  = ir.y + (ir.height + asc)   * 0.5f;
+
+            canvas.draw_text(core::StringView{kMarkBytes, kMarkLen},
+                math::Vec2{cx, cy}, face, chkSz,
+                paint::Brush::solid_rgb(0xFFFFFF));
+        } else {
+            // 回退：手绘矢量勾号（字体不含此字形时）
+            const float cx = ir.x + ir.width  * 0.5f;
+            const float cy = ir.y + ir.height * 0.5f;
+            const float s  = ir.width * 0.35f;
+            paint::Pen cp; cp.width = std::max(1.5f, ir.width * 0.15f);
+            cp.start_cap = paint::LineCap::Round;
+            cp.end_cap   = paint::LineCap::Round;
+            const paint::Brush w{paint::Brush::solid_rgb(0xFFFFFF)};
+            canvas.stroke_line({cx - s * 0.5f, cy},            {cx - s * 0.1f, cy + s * 0.7f}, w, cp);
+            canvas.stroke_line({cx - s * 0.1f, cy + s * 0.7f}, {cx + s * 0.6f, cy - s * 0.5f}, w, cp);
+        }
     }
 
     // 文字
