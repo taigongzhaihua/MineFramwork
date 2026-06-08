@@ -40,17 +40,19 @@
     独立为 Border 基元 + 状态机动画）彻底取代，根因诊断仍保留以备查。
 
 ### Added
-- **mine.ui.controls：新增 CheckBox 控件（MD3 风格）**：
+- **mine.ui.controls：新增 CheckBox 控件（MD3 风格，组合式架构）**：
 
-  CheckBox 为继承 Control 的标准勾选框控件，支持勾选/取消勾选切换、悬停/按下视觉状态、
-  自定义文字与字体、CheckedChanged 路由事件。
-  - 视觉组成：圆角方框图标（2px 圆角）+ MD3 标准 check 图标填充路径 + 伴随文字
-  - MD3 主色 #6750A4（勾选态背景），边框色 #79747E，勾号白色描边
-  - 鼠标交互：悬停态图标变淡、按下态视觉反馈、左键抬起时切换勾选状态
+  CheckBox 为组合式勾选框控件（参照 Button 模式），视觉树自内向外：
+  `StackPanel(H)` → `Border(图标,2px圆角)` → `Border(StateLayer蒙版)` →
+  `CheckMarkElement(MD3勾号路径)` + `TextBlock(文字)`。
+  - VSM 状态机驱动：Normal/Hovered/Pressed 三态，StateLayer 蒙版 0%/8%/12% 缓动，
+    边框色 #79747E→#6750A4 过渡
+  - 勾选切换通过 IsCheckedProperty 变更回调写 Local(P50) 级外观，取消勾选 clear 恢复样式默认
+  - 新增 5 个 DP：IconBackground / IconBorderBrush / StateLayerBrush /
+    CheckMarkBrush / TextForeground
   - 公开 API：`is_checked()`/`set_checked()`、`text()`/`set_text()`、
     `set_font_face()`/`set_font_size()`、`CheckedChangedEvent()`
-  - 依赖属性 `IsCheckedProperty`（affects_render）
-  - 已集成到 `sample.01-mvvm-binding` 演示窗口，勾选可切换深色/浅色主题
+  - 已集成到 `sample.01-mvvm-binding`，勾选切换深色/浅色主题
 
 ### Changed
 - **mine.ui.controls：TextBox 外观组合式重构下沉到 Border 基元**：
