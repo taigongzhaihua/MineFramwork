@@ -18,9 +18,20 @@
 #include <mine/containers/Vector.h>
 #include <cstdint>
 
-#include <hb.h>
-
 namespace mine::text {
+
+// HarfBuzz 类型前向声明（避免头文件依赖扩散到所有 FontFace.h 使用者）
+// 实际定义在 <hb.h> 中，仅 FontFace.cpp 需要完整类型
+enum class HbDirection : unsigned int {
+    LTR  = 4,   // HB_DIRECTION_LTR
+    RTL  = 5,   // HB_DIRECTION_RTL
+    TTB  = 6,   // HB_DIRECTION_TTB
+    BTT  = 7,   // HB_DIRECTION_BTT
+};
+
+enum class HbScript : unsigned int {
+    COMMON = 0,  // HB_SCRIPT_COMMON — 自动检测
+};
 
 // ============================================================================
 // HarfBuzz 文字塑形结果类型
@@ -274,12 +285,12 @@ public:
      * @param script      HB_SCRIPT_* 常量（HB_SCRIPT_COMMON 为自动检测）
      * @param language    hb_language_t（hb_language_get_default() 为系统默认）
      */
-    [[nodiscard]] ShapeResult shape_text_ex(const char*     utf8,
-                                            size_t          len,
-                                            float           font_size_px,
-                                            hb_direction_t  direction,
-                                            hb_script_t     script,
-                                            hb_language_t   language) const;
+    [[nodiscard]] ShapeResult shape_text_ex(const char*  utf8,
+                                            size_t       len,
+                                            float        font_size_px,
+                                            HbDirection  direction,
+                                            HbScript     script,
+                                            unsigned int language_tag = 0) const;
 
     /**
      * @brief 默认构造（仅供内部工厂函数使用，直接构造得到的对象无效）。

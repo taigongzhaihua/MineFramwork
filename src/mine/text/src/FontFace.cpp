@@ -441,12 +441,12 @@ float FontFace::measure_glyph_advance(uint32_t glyph_index,
 
 // ── shape_text 公开 API ────────────────────────────────────────────────────
 
-ShapeResult FontFace::shape_text_ex(const char*     utf8,
-                                     size_t          len,
-                                     float           font_size_px,
-                                     hb_direction_t  direction,
-                                     hb_script_t     script,
-                                     hb_language_t   language) const
+ShapeResult FontFace::shape_text_ex(const char*  utf8,
+                                     size_t       len,
+                                     float        font_size_px,
+                                     HbDirection  direction,
+                                     HbScript     script,
+                                     unsigned int language_tag) const
 {
     ShapeResult result;
     result.glyphs = containers::Vector<ShapedGlyph>(core::default_allocator());
@@ -475,12 +475,17 @@ ShapeResult FontFace::shape_text_ex(const char*     utf8,
         if (impl_->hb_font == nullptr) return result;
     }
 
-    // 3. 创建塑形缓冲（使用调用方指定的属性）
+    // 3. 创建塑形缓冲（映射枚举到 HarfBuzz 原生类型）
     hb_buffer_t* buf = hb_buffer_create();
     hb_buffer_add_utf8(buf, utf8, static_cast<int>(len), 0, static_cast<int>(len));
-    hb_buffer_set_direction(buf, direction);
-    hb_buffer_set_script(buf, script);
-    hb_buffer_set_language(buf, language);
+    hb_buffer_set_direction(buf, static_cast<hb_direction_t>(direction));
+    hb_buffer_set_script(buf, static_cast<hb_script_t>(script));
+    if (language_tag != 0) {
+        hb_buffer_set_language(buf, hb_language_from_string(
+            reinterpret_cast<const char*>(&language_tag), 4));
+    } else {
+        hb_buffer_set_language(buf, hb_language_get_default());
+    }
 
     // 4. 执行塑形
     hb_feature_t features[] = {
