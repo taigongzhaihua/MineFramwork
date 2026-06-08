@@ -555,6 +555,11 @@ void Window::show()
     }
 
     p_->native_window_->show();
+
+    // 首帧显式布局+渲染：避免依赖 WM_SIZE 异步时机导致初次显示尺寸异常
+    const math::Size logical_size = p_->native_window_->size();
+    p_->run_layout(logical_size);
+    p_->do_render(logical_size);
 }
 
 void Window::hide()
