@@ -435,84 +435,11 @@ TextInkBounds FontFace::measure_text_ink_bounds(const char* utf8,
 // HarfBuzz 文字塑形
 // ============================================================================
 
-// ── HarfBuzz 字体函数回调（桥接 FreeType）─────────────────────────────────
-
-namespace {
-
-/** 获取名义字形索引：码点 → 字体内部 glyph index */
-hb_bool_t ft_get_nominal_glyph(hb_font_t* /*font*/, void* font_data,
-                                hb_codepoint_t unicode, hb_codepoint_t* glyph,
-                                void* /*user_data*/)
-{
-    auto* face = static_cast<FT_Face>(font_data);
-    const FT_UInt gindex = FT_Get_Char_Index(face, static_cast<FT_ULong>(unicode));
-    if (gindex == 0) return false;
-    *glyph = static_cast<hb_codepoint_t>(gindex);
-    return true;
-}
-
-/** 获取字形水平前进量 */
-hb_position_t ft_get_glyph_h_advance(hb_font_t* /*font*/, void* font_data,
-                                      hb_codepoint_t glyph,
-                                      void* /*user_data*/)
-{
-    auto* face = static_cast<FT_Face>(font_data);
-    if (FT_Load_Glyph(face, static_cast<FT_UInt>(glyph), FT_LOAD_FORCE_AUTOHINT) != 0) {
-        return 0;
-    }
-    // FreeType advance.x 单位为 1/64 像素 → HarfBuzz 单位为 1/64 像素（天然一致）
-    return static_cast<hb_position_t>(face->glyph->advance.x);
-}
-
-/** 获取字体度量（上行/下行/行距） */
-hb_bool_t ft_get_font_h_extents(hb_font_t* /*font*/, void* font_data,
-                                 hb_font_extents_t* metrics,
-                                 void* /*user_data*/)
-{
-    auto* face = static_cast<FT_Face>(font_data);
-    const FT_Size_Metrics& m = face->size->metrics;
-    metrics->ascender  = static_cast<hb_position_t>(m.ascender);
-    metrics->descender = static_cast<hb_position_t>(m.descender);
-    metrics->line_gap  = static_cast<hb_position_t>(m.height - m.ascender + m.descender);
-    return true;
-}
-
-/** 获取字形水平原点偏移（用于标记定位 marks positioning） */
-hb_bool_t ft_get_glyph_h_origin(hb_font_t* /*font*/, void* font_data,
-                                 hb_codepoint_t glyph,
-                                 hb_position_t* x, hb_position_t* y,
-                                 void* /*user_data*/)
-{
-    auto* face = static_cast<FT_Face>(font_data);
-    if (FT_Load_Glyph(face, static_cast<FT_UInt>(glyph), FT_LOAD_FORCE_AUTOHINT) != 0) {
-        *x = 0; *y = 0;
-        return false;
-    }
-    *x = static_cast<hb_position_t>(face->glyph->metrics.horiBearingX);
-    *y = static_cast<hb_position_t>(face->glyph->metrics.horiBearingY);
-    return true;
-}
-
-}  // namespace
-
 /** 惰性创建 HarfBuzz 字体对象（绑定到 FT_Face） */
 static hb_font_t* ensure_hb_font(FT_Face ft_face) {
-    // 直接使用 hb-ft 桥接：从 FT_Face 创建 hb_face_t，再创建 hb_font_t
-    hb_face_t* hb_face = hb_ft_face_create_referenced(ft_face);
-    if (hb_face == nullptr) return nullptr;
-
-    hb_font_t* hb_font = hb_font_create(hb_face);
-    hb_face_destroy(hb_face);  // hb_font 持有引用
-
-    // 设置自有字体函数（桥接 FreeType），提供更精确的度量
-    hb_font_funcs_t* funcs = hb_font_funcs_create();
-    hb_font_funcs_set_nominal_glyph_func(funcs, ft_get_nominal_glyph, ft_face, nullptr);
-    hb_font_funcs_set_glyph_h_advance_func(funcs, ft_get_glyph_h_advance, ft_face, nullptr);
-    hb_font_funcs_set_font_h_extents_func(funcs, ft_get_font_h_extents, ft_face, nullptr);
-    hb_font_funcs_set_glyph_h_origin_func(funcs, ft_get_glyph_h_origin, ft_face, nullptr);
-    hb_font_set_funcs(hb_font, funcs, ft_face, nullptr);
-    hb_font_funcs_destroy(funcs);
-
+    // hb-ft 桥接：从 FT_Face 创建 hb_font_t，内部已正确设置字体函数
+    // （advance 等度量返回设计单位，由 HarfBuzz 按 hb_font_set_scale 缩放）
+    hb_font_t* hb_font = hb_ft_font_create_referenced(ft_face);
     return hb_font;
 }
 
