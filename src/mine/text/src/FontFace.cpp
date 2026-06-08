@@ -437,8 +437,8 @@ TextInkBounds FontFace::measure_text_ink_bounds(const char* utf8,
 
 /** 惰性创建 HarfBuzz 字体对象（绑定到 FT_Face） */
 static hb_font_t* ensure_hb_font(FT_Face ft_face) {
-    // hb-ft 桥接：从 FT_Face 创建 hb_font_t，内部已正确设置字体函数
-    // （advance 等度量返回设计单位，由 HarfBuzz 按 hb_font_set_scale 缩放）
+    // hb-ft 桥接：从 FT_Face 创建 hb_font_t，内部已正确读取 FT_Face 的
+    // 当前字号并设置 scale/ppem，调用方无需再手动 hb_font_set_scale
     hb_font_t* hb_font = hb_ft_font_create_referenced(ft_face);
     return hb_font;
 }
@@ -475,17 +475,7 @@ ShapeResult FontFace::shape_text(const char* utf8,
         if (impl_->hb_font == nullptr) return result;
     }
 
-    // 3. 设置字体缩放（FreeType set_pixel_size 后从 face->size->metrics 读取）
-    const FT_Size_Metrics& m = ft_face->size->metrics;
-    // x_scale / y_scale: 将字体设计单位 (upem) 映射到 1/64 像素
-    const int x_scale = static_cast<int>(
-        (static_cast<int64_t>(m.x_ppem) << 16) / ft_face->units_per_EM);
-    const int y_scale = static_cast<int>(
-        (static_cast<int64_t>(m.y_ppem) << 16) / ft_face->units_per_EM);
-    hb_font_set_scale(impl_->hb_font, x_scale, y_scale);
-    hb_font_set_ppem(impl_->hb_font, m.x_ppem, m.y_ppem);
-
-    // 4. 创建塑形缓冲，添加文本
+    // 3. 创建塑形缓冲，添加文本
     hb_buffer_t* buf = hb_buffer_create();
     hb_buffer_add_utf8(buf, utf8, static_cast<int>(len), 0, static_cast<int>(len));
     hb_buffer_set_direction(buf, HB_DIRECTION_LTR);
