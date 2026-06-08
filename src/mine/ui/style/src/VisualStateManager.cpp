@@ -171,8 +171,12 @@ bool VisualStateManager::go_to_state(core::StringView state_name,
         sb->stop();
 
         if (style_ && owner_) {
-            // 先清除所有状态曾写入的 StyleTrigger 槽，防止旧状态颜色残留
-            style_->clear_all_state_values(*owner_);
+            // 仅清除上一个状态的 StyleTrigger 残留，避免清掉其他样式/状态组写入的同属性值
+            if (!current_state_.empty()) {
+                style_->clear_state_values(
+                    *owner_,
+                    core::StringView{current_state_.data(), current_state_.size()});
+            }
             // 再写入新状态的 StyleTrigger 值（若新状态无 setter 则属性回退到 StyleSetter 基线）
             style_->apply_state(*owner_, state_name);
         }
@@ -195,8 +199,12 @@ bool VisualStateManager::go_to_state(core::StringView state_name,
         }
 
         if (style_ && owner_) {
-            // 先清除旧状态 StyleTrigger 残留，再应用新状态
-            style_->clear_all_state_values(*owner_);
+            // 仅清除上一个状态的 StyleTrigger 残留
+            if (!current_state_.empty()) {
+                style_->clear_state_values(
+                    *owner_,
+                    core::StringView{current_state_.data(), current_state_.size()});
+            }
             style_->apply_state(*owner_, state_name);
             // 即时状态以 Animation(P60) 写入，覆盖 Local(P50)
             // （如 Disabled 的灰色必须覆盖用户 set_background() 设置的颜色）

@@ -101,6 +101,18 @@ public:
     void clear_all_state_values(ui::DependencyObject& target) const;
 
     /**
+     * @brief 仅清除指定视觉状态的 setter 所写入的 StyleTrigger(30) 槽。
+     *
+     * 与 clear_all_state_values 不同，此方法只遍历指定状态的 setter，
+     * 不清除其他状态或其他样式写入的 StyleTrigger 值。
+     * 用于多状态组（多 VSM）场景，避免一个 VSM 的状态切换误清另一组的值。
+     *
+     * @param target     目标 DependencyObject
+     * @param state_name 要清除的视觉状态名
+     */
+    void clear_state_values(ui::DependencyObject& target, core::StringView state_name) const;
+
+    /**
      * @brief 将指定视觉状态的 setter 以 Animation(P60) 优先级写入目标元素。
      *
      * 用于无动画的即时状态切换（如 Disabled）：Animation(P60) 高于 Local(P50)，

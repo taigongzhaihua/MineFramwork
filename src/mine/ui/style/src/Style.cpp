@@ -96,6 +96,29 @@ void Style::clear_all_state_values(ui::DependencyObject& target) const {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// clear_state_values
+// ─────────────────────────────────────────────────────────────────────────────
+
+void Style::clear_state_values(ui::DependencyObject& target, core::StringView state_name) const {
+    // 仅清除指定状态的 setter 所写入的 StyleTrigger(30) 槽，
+    // 不清除其他状态或其他样式的值。用于多 VSM 场景避免交叉清除。
+    for (const auto& state : state_setters_) {
+        if (state.state_name == state_name) {
+            for (const auto& setter : state.setters) {
+                if (!setter.property) {
+                    continue;
+                }
+                if (target.has_value(*setter.property, ValuePriority::StyleTrigger)) {
+                    target.clear_value(*setter.property, ValuePriority::StyleTrigger);
+                }
+            }
+            return;
+        }
+    }
+    // 状态不存在：空操作
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // apply_state_animation
 // ─────────────────────────────────────────────────────────────────────────────
 
