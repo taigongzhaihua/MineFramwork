@@ -367,59 +367,42 @@ TextInkBounds FontFace::measure_text_ink_bounds(const char* utf8,
         return bounds;
     }
 
-    FT_Face face = impl_->face;
-
-    const FT_UInt pixel_h = static_cast<FT_UInt>(font_size_px + 0.5f);
-    if (pixel_h != impl_->cached_pixel_h) {
-        if (FT_Set_Pixel_Sizes(face, 0, pixel_h) != 0) {
-            FT_LOG("measure_text_ink_bounds：FT_Set_Pixel_Sizes 失败");
-            return bounds;
-        }
-        impl_->cached_pixel_h = pixel_h;
-    }
+    // ── HarfBuzz 塑形（获取含 kerning 的字形序列 + 笔触前进量）─────────
+    const ShapeResult shaped = shape_text(utf8, len, font_size_px);
+    if (shaped.glyphs.empty()) return bounds;
 
     float pen_x = 0.0f;
     bool  has_ink = false;
-    float min_x = 0.0f;
-    float min_y = 0.0f;
-    float max_x = 0.0f;
-    float max_y = 0.0f;
+    float min_x = 0.0f, min_y = 0.0f, max_x = 0.0f, max_y = 0.0f;
 
-    const char* p   = utf8;
-    const char* end = utf8 + len;
+    for (const auto& g : shaped.glyphs) {
+        // 光栅化单个字形获取位图墨迹包围盒（内联 FreeType，绕过 rasterize 的 const 限制）
+        FT_Face face = impl_->face;
+        const FT_UInt gidx = FT_Get_Char_Index(face, static_cast<FT_ULong>(g.codepoint));
+        int32_t bearing_x = 0, bearing_y = 0;
+        uint32_t bmp_w = 0, bmp_h = 0;
 
-    while (p < end) {
-        const uint32_t cp = utf8_decode_one(p, end);
-        if (cp == 0xFFFDu) {
-            continue;
-        }
-
-        const FT_UInt glyph_idx = FT_Get_Char_Index(face, static_cast<FT_ULong>(cp));
-        if (FT_Load_Glyph(face, glyph_idx, FT_LOAD_FORCE_AUTOHINT) != 0) {
-            continue;
-        }
-
-        if (face->glyph->format != FT_GLYPH_FORMAT_BITMAP) {
-            if (FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL) != 0) {
-                continue;
+        if (FT_Load_Glyph(face, gidx, FT_LOAD_FORCE_AUTOHINT) == 0) {
+            if (face->glyph->format != FT_GLYPH_FORMAT_BITMAP) {
+                FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
             }
+            const FT_GlyphSlot slot = face->glyph;
+            const FT_Bitmap&   bmp  = slot->bitmap;
+            bearing_x = slot->bitmap_left;
+            bearing_y = slot->bitmap_top;
+            bmp_w     = bmp.width;
+            bmp_h     = bmp.rows;
         }
 
-        const FT_GlyphSlot slot = face->glyph;
-        const FT_Bitmap& bitmap = slot->bitmap;
-        const float advance_x = static_cast<float>(slot->advance.x >> 6);
-
-        if (bitmap.width > 0 && bitmap.rows > 0) {
-            const float glyph_left   = pen_x + static_cast<float>(slot->bitmap_left);
-            const float glyph_top    = -static_cast<float>(slot->bitmap_top);
-            const float glyph_right  = glyph_left + static_cast<float>(bitmap.width);
-            const float glyph_bottom = glyph_top + static_cast<float>(bitmap.rows);
+        if (bmp_w > 0 && bmp_h > 0) {
+            const float glyph_left   = pen_x + g.x_offset + static_cast<float>(bearing_x);
+            const float glyph_top    = g.y_offset - static_cast<float>(bearing_y);
+            const float glyph_right  = glyph_left + static_cast<float>(bmp_w);
+            const float glyph_bottom = glyph_top  + static_cast<float>(bmp_h);
 
             if (!has_ink) {
-                min_x = glyph_left;
-                min_y = glyph_top;
-                max_x = glyph_right;
-                max_y = glyph_bottom;
+                min_x = glyph_left; min_y = glyph_top;
+                max_x = glyph_right; max_y = glyph_bottom;
                 has_ink = true;
             } else {
                 min_x = std::min(min_x, glyph_left);
@@ -429,7 +412,8 @@ TextInkBounds FontFace::measure_text_ink_bounds(const char* utf8,
             }
         }
 
-        pen_x += advance_x + character_spacing;
+        // HarfBuzz 塑形前进量（含 kerning）+ 字符间距
+        pen_x += g.x_advance + character_spacing;
     }
 
     bounds.advance_width = pen_x;
