@@ -1,5 +1,6 @@
 /.xmake/
 /build/
+/third_party/
 /compile_commands.json
 /compile_flags.txt
 /*.g.h
@@ -46,3 +47,4 @@ build_output.*
 *_stdout.*
 out*.txt
 err*.txt
+build-cmake/

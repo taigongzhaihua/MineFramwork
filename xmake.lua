@@ -2,6 +2,19 @@ set_project("MineFramework")
 set_version("0.1.0")
 set_xmakever("2.9.9")
 
+-- 首次克隆后需运行：.\scripts\clone-deps-from-mirror.ps1
+on_config(function ()
+    if os.isdir("third_party") and #os.dirs("third_party/*") > 0 then
+        return
+    end
+    if os.isfile("scripts/clone-deps-from-mirror.ps1") then
+        raise("[bootstrap] 缺少 third_party 依赖。请先运行：" ..
+              "`powershell -ExecutionPolicy Bypass -File scripts/clone-deps-from-mirror.ps1`")
+    else
+        raise("[bootstrap] 缺少 third_party 依赖且未找到克隆脚本。")
+    end
+end)
+
 add_rules("mode.debug", "mode.release")
 
 -- 从 xmake 本地缓存查找 harfbuzz（绕过 GitHub 下载）

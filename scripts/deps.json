@@ -1,0 +1,15 @@
+{
+  "dependencies": [
+    {
+      "name": "harfbuzz",
+      "repo": "",
+      "branch": "main",
+      "mirrors": [
+        "https://gitcode.com/gh_mirrors/ha/harfbuzz.git",
+        "https://gitee.com/xmake-mirror/harfbuzz.git",
+        "https://github.com/harfbuzz/harfbuzz.git"
+      ],
+      "dest": "third_party/harfbuzz"
+    }
+  ]
+}
