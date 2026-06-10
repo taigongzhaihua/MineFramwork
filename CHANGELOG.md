@@ -5,6 +5,19 @@
 ## [Unreleased]
 
 ### Added
+- **docs：新增模块元数据 API 文档 (~470 行)**：
+
+  详细描述 `mine.ui.style` 模块的基础设施文件：
+  - **Api.h**：`MINE_UI_STYLE_API` 宏定义，控制 DLL 导出/导入机制
+  - **StyleAll.h**：伞形头文件（umbrella header），统一包含所有公开接口
+  - 使用场景 8+：应用程序引用、导出新 API、模块初始化、单元测试、预编译头、第三方集成、
+    编译配置、文档生成
+  - 最佳实践 5 条：统一引用点、导出宏配置、API 宏使用、内部类不导出、跨平台预留
+  - 常见陷阱 4 类：导出宏缺失、静态库配置、包含顺序、模板类导出
+  - 完整示例 (~200 行)：模块导出配置、应用程序使用、CMake 构建、预编译头配置
+  
+  文档路径：`docs/api/ui.style/06-ModuleMetadata.md`
+
 - **docs：新增 ResourceDictionary API 文档 (~1100 行)**：
   
   完整描述 `mine.ui.style.ResourceDictionary` 的树形资源查找、字典合并、动态通知机制：
