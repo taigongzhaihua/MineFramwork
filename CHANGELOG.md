@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### Added
+- **docs：新增 ResourceDictionary API 文档 (~1100 行)**：
+  
+  完整描述 `mine.ui.style.ResourceDictionary` 的树形资源查找、字典合并、动态通知机制：
+  - 概述：核心特性、查找顺序（本层 → 合并层 → 父层）、通知机制（精确订阅 + 广播）
+  - 成员方法详解：`set()`/`set_dynamic()`、`merge()`/`clear_merged()`、`find()`/`find_local()`、
+    `subscribe()`/`unsubscribe()`、`set_parent()`/`parent()`、`on_resource_changed()`/
+    `off_resource_changed()`/`notify_resource_changed()`
+  - 使用场景 7+：静态资源加载、动态更新、树形查找、主题合并、DynamicResource 订阅、
+    父字典连接、全量刷新
+  - 最佳实践与常见陷阱：RAII 管理订阅生命周期、合并字典生命周期、回调捕获悬垂引用等
+  - 完整示例 (~400 行)：应用主题系统演示 Light/Dark/HighContrast 三主题切换、
+    DynamicResource 订阅、树形资源查找
+  
+  文档路径：`docs/api/ui.style/04-ResourceDictionary.md`
+
 ### Fixed
 - **mine.paint / mine.ui.controls：修复 TextBox 文字溢出未被裁剪的问题**：
 
