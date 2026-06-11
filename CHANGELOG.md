@@ -5,6 +5,23 @@
 ## [Unreleased]
 
 ### Added
+- **mine.async：实现 L0 异步任务调度模块**：
+
+  完整实现 `mine.async` 模块，提供异步基础设施：
+  - **Future<T> / Promise<T>**：线程安全的异步结果传递原语，支持阻塞等待（`get`/`wait`）、
+    非阻塞轮询（`is_ready`）和完成回调（`on_ready`）；broken promise 检测
+  - **Task<T>**：可组合的异步任务抽象，支持 `from_value`/`from_error`/`from_future` 工厂方法、
+    `then` 链式回调和结果获取
+  - **Dispatcher**：MPSC 跨线程任务调度器，支持 `post`（任意线程提交）、`dispatch`（目标线程批量处理）、
+    `dispatch_one`（单任务处理）、嵌套 dispatch
+  - **ThreadPool**：固定大小的工作线程池，支持 `enqueue`（返回 Future<T>）、
+    `enqueue_detached`（无返回值任务）、`wait_all`（阻塞等待所有任务完成）
+  - **Timer**：轻量定时器管理器，支持 `set_timeout`（一次性延迟）和 `set_interval`（周期性），
+    内联存储（最多 32 个定时器，无堆分配），使用单调时钟
+
+  测试覆盖：33 个单元测试 88 个断言全部通过，覆盖构造/析构、移动语义、线程安全、
+  边界条件和错误路径。
+
 - **docs：新增模块元数据 API 文档 (~470 行)**：
 
   详细描述 `mine.ui.style` 模块的基础设施文件：
