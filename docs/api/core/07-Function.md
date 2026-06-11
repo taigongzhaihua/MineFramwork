@@ -7,10 +7,10 @@
 ### 核心特性
 
 - **仅移动语义**：不支持拷贝,避免昂贵的闭包复制
-- **SBO 优化**：32 字节内联存储,无堆分配
+- **SBO 优先 + 堆回退**：≤ 32 字节走 SBO 内联快速路径；超出自动堆分配，无编译期限制
 - **零异常**：所有接口均为 `noexcept`,符合项目约束
-- **编译期检查**：超出 SBO 阈值时触发 `static_assert`,而非运行时分配
 - **虚表优化**：使用静态函数指针表代替虚函数,节省一个指针开销
+- **标记指针**：利用 `ops_` 最低 bit 区分 SBO (0) 与堆分配 (1) 模式，`sizeof(Function)` 保持 40 字节
 - **类型擦除**：统一接口,支持 lambda、函数指针、函数对象
 
 ### 设计动机
@@ -24,7 +24,7 @@ MineFramework 禁用 C++ 异常和 RTTI,使得 `std::function` 不适用:
 `Function<R(Args...)>` 解决了以上问题:
 
 - 空函数调用触发 `MINE_ASSERT` 而非抛异常
-- SBO 限制为 32 字节,超出时编译期失败（明确告知开发者）
+- ≤ 32 字节 SBO 内联（零开销）；> 32 字节自动 `new`/`delete`（无上限）
 - 仅移动语义,避免意外拷贝
 - 不依赖 RTTI（无 `typeid`、`dynamic_cast`）
 
@@ -92,7 +92,7 @@ private:
 | `kSBOSize` | 32 | SBO 缓冲区字节数（4 个指针大小） |
 | `kSBOAlign` | `alignof(max_align_t)` | SBO 缓冲区对齐要求（通常 16） |
 
-**SBO 阈值**：闭包大小 ≤ 32 字节时内联存储,超出触发 `static_assert`。
+**SBO 阈值**：闭包大小 ≤ 32 字节时内联存储；超出自动堆分配（无编译期错误）。
 
 ---
 
@@ -135,9 +135,10 @@ Function(F&& f) noexcept;
 - `F`：可调用类型（自动推导）
 
 **约束（编译期检查）**：
-1. `sizeof(Decay<F>) ≤ 32`（超出触发 `static_assert`）
-2. `alignof(Decay<F>) ≤ alignof(max_align_t)`
-3. `std::is_nothrow_move_constructible_v<Decay<F>>`（确保移动不抛异常）
+1. `alignof(Decay<F>) ≤ alignof(max_align_t)`
+2. `std::is_nothrow_move_constructible_v<Decay<F>>`（确保移动不抛异常）
+3. `sizeof(Decay<F>) ≤ 32` → SBO 内联路径
+4. `sizeof(Decay<F>) > 32` → 自动堆分配路径（无限制）
 
 **参数**：
 - `f`：可调用对象（右值引用,将被移动到 SBO 缓冲区）
@@ -175,10 +176,10 @@ struct Multiplier {
 mine::core::Function<int(int)> fn3 = Multiplier{10};
 MINE_ASSERT(fn3(5) == 50);
 
-// ❌ 编译错误：超出 SBO 阈值
-// char big_capture[64];
-// mine::core::Function<void()> bad = [big_capture]() noexcept {};
-// static_assert 失败："捕获列表过大,超过 32 字节 SBO 上限"
+// ✅ 大捕获：自动走堆分配
+char big_capture[64];
+mine::core::Function<void()> ok_with_large = [big_capture]() noexcept {};
+// 编译通过，自动堆分配，无大小限制
 ```
 
 ---
