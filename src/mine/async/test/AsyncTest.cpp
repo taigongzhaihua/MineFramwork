@@ -788,3 +788,27 @@ TEST_CASE("Timer_SetTimeoutOn_Dispatcher") {
     dispatcher.dispatch();
     CHECK(fired == 1);
 }
+
+TEST_CASE("Timer_SetIntervalOn_Dispatcher") {
+    Dispatcher dispatcher;
+    Timer timer;
+    int fired = 0;
+
+    (void)timer.set_interval_on(dispatcher, [&]() noexcept { ++fired; }, 50);
+    CHECK(timer.active_count() == 1);
+
+    // 第一次触发
+    std::this_thread::sleep_for(std::chrono::milliseconds(70));
+    timer.tick();
+    dispatcher.dispatch();
+    CHECK(fired == 1);
+
+    // 第二次触发
+    std::this_thread::sleep_for(std::chrono::milliseconds(70));
+    timer.tick();
+    dispatcher.dispatch();
+    CHECK(fired == 2);
+
+    // 清除定时器
+    timer.clear_all();
+}

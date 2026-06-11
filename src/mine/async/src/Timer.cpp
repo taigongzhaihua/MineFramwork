@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <memory>
 
 #include <mine/core/Assert.h>
 
@@ -183,14 +184,26 @@ TimerHandle Timer::set_timeout_on(
 }
 
 TimerHandle Timer::set_interval_on(
-    Dispatcher& /*dispatcher*/,
-    mine::core::Function<void()> /*callback*/,
-    uint32_t /*interval_ms*/) noexcept
+    Dispatcher& dispatcher,
+    mine::core::Function<void()> callback,
+    uint32_t interval_ms) noexcept
 {
-    // set_interval_on 暂不实现：
-    // Function<void()> 为 move-only 类型，Dispatcher::post 会消耗回调，
-    // 无法在周期性定时器中重复投递。调用方应手动组合 set_interval + Dispatcher。
-    return kInvalidTimerHandle;
+    if (!callback) return kInvalidTimerHandle;
+
+    // 使用 shared_ptr 共享回调所有权：
+    // - 定时器每次触发时通过 shared_ptr 访问原始回调（不消耗）
+    // - 每次创建新闭包投递到 Dispatcher（仅捕获 shared_ptr，适配 SBO）
+    auto shared_cb = std::make_shared<mine::core::Function<void()>>(std::move(callback));
+
+    return set_interval(
+        mine::core::Function<void()>([&dispatcher, shared_cb]() noexcept {
+            dispatcher.post(mine::core::Function<void()>([shared_cb]() noexcept {
+                if (*shared_cb) {
+                    (*shared_cb)();
+                }
+            }));
+        }),
+        interval_ms);
 }
 
 

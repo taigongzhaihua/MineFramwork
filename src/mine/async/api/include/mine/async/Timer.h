@@ -133,7 +133,9 @@ public:
     /**
      * @brief 设置周期性定时器，回调自动投递到指定 Dispatcher。
      *
-     * 同 set_timeout_on，但周期性触发直到被取消。
+     * 使用 shared_ptr 共享回调，每次触发时创建新闭包投递，
+     * 不消耗原始回调，可持续周期性触发。
+     * 调用方须保证 Dispatcher 生命周期长于本定时器。
      */
     [[nodiscard]] TimerHandle set_interval_on(
         Dispatcher& dispatcher,
