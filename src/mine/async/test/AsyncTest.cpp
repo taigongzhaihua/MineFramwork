@@ -661,3 +661,130 @@ TEST_CASE("ThreadSafety_MultipleFuturesWait") {
     t2.join();
     t3.join();
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// C++20 协程支持
+// ──────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+/// 最简单的协程：co_return 一个值
+Task<int> coro_simple() {
+    co_return 42;
+}
+
+/// 链式协程：co_await 另一个协程
+Task<int> coro_chain() {
+    auto r = co_await coro_simple();
+    if (r.ok()) {
+        co_return r.value() * 2;
+    }
+    co_return -1;
+}
+
+/// 多级协程链
+Task<int> coro_deep(int depth) {
+    if (depth <= 1) {
+        co_return depth;
+    }
+    auto r = co_await coro_deep(depth - 1);
+    if (r.ok()) {
+        co_return r.value() + 1;
+    }
+    co_return -1;
+}
+
+} // namespace
+
+TEST_CASE("Coroutine_Simple_Coreturn") {
+    auto task = coro_simple();
+    CHECK(task.valid());
+    auto result = task.get();
+    CHECK(result.ok());
+    CHECK(result.value() == 42);
+}
+
+TEST_CASE("Coroutine_Chain_Coawait") {
+    auto task = coro_chain();
+    auto result = task.get();
+    CHECK(result.ok());
+    CHECK(result.value() == 84);
+}
+
+TEST_CASE("Coroutine_DeepChain") {
+    auto task = coro_deep(5);
+    auto result = task.get();
+    CHECK(result.ok());
+    // depth=5 → depth=4 → depth=3 → depth=2 → depth=1: 每层 +1
+    // 1 + 1 + 1 + 1 + 1 = 5
+    // Wait, let me trace:
+    // coro_deep(5): co_await coro_deep(4), then +1
+    // coro_deep(4): co_await coro_deep(3), then +1
+    // coro_deep(3): co_await coro_deep(2), then +1
+    // coro_deep(2): co_await coro_deep(1), then +1
+    // coro_deep(1): co_return 1
+    // So: 1 + 1 + 1 + 1 = 4? No:
+    // depth=1 → 1
+    // depth=2 → 1+1 = 2
+    // depth=3 → 2+1 = 3
+    // depth=4 → 3+1 = 4
+    // depth=5 → 4+1 = 5
+    CHECK(result.value() == 5);
+}
+
+TEST_CASE("Coroutine_FromValue_Works") {
+    auto task = Task<int>::from_value(100);
+    CHECK(task.get().value() == 100);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ThreadPool::enqueue 大捕获测试（验证 SBO 绕过）
+// ──────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+struct LargeCaptures {
+    int data[8]{};  // 32 字节，刚好超出 SBO（加上 Promise 指针）
+};
+
+} // namespace
+
+TEST_CASE("ThreadPool_Enqueue_LargeCapture") {
+    ThreadPool pool(2);
+
+    // 创建一个捕获大量数据的 lambda（超出 32 字节 SBO）
+    LargeCaptures lc;
+    lc.data[0] = 10;
+    lc.data[1] = 20;
+
+    auto future = pool.enqueue([lc]() noexcept -> int {
+        return lc.data[0] + lc.data[1];
+    });
+
+    auto result = future.get();
+    CHECK(result.ok());
+    CHECK(result.value() == 30);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Timer + Dispatcher 集成
+// ──────────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("Timer_SetTimeoutOn_Dispatcher") {
+    Dispatcher dispatcher;
+    Timer timer;
+    int fired = 0;
+
+    // 通过 Dispatcher 延迟执行
+    (void)timer.set_timeout_on(dispatcher, [&]() noexcept { ++fired; }, 30);
+    CHECK(timer.active_count() == 1);
+
+    // 等待定时器到期
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    timer.tick();  // 此时回调被 post 到 Dispatcher
+    CHECK(fired == 0);  // 尚未 dispatch
+
+    // 在目标线程中处理
+    dispatcher.dispatch();
+    CHECK(fired == 1);
+}

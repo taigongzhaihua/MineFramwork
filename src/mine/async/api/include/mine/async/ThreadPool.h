@@ -132,6 +132,27 @@ private:
 // ThreadPool::enqueue 模板实现
 // ──────────────────────────────────────────────────────────────────────────────
 
+namespace detail {
+
+/// 类型擦除的任务包装器：将 Promise + 用户函数打包为堆分配的可调用对象，
+/// 避免触发 mine::core::Function 的 32 字节 SBO 限制。
+template<typename R, typename F>
+struct EnqueueTask {
+    Promise<R> promise;
+    F          func;
+
+    EnqueueTask(Promise<R> p, F f) noexcept
+        : promise(std::move(p)), func(std::move(f))
+    {
+    }
+
+    void execute() noexcept {
+        promise.set_value(func());
+    }
+};
+
+} // namespace detail
+
 template<typename F>
 inline auto ThreadPool::enqueue(F&& fn) noexcept -> Future<decltype(fn())> {
     using R = decltype(fn());
@@ -139,12 +160,14 @@ inline auto ThreadPool::enqueue(F&& fn) noexcept -> Future<decltype(fn())> {
     Promise<R> promise;
     auto future = promise.get_future();
 
-    // 将任务包装为 void() 闭包：执行 fn，将结果写入 promise
-    // 注意：由于 Function 不可拷贝，此处需要将 fn 移动到堆上
-    // 实际实现在 .cpp 中通过类型擦除完成
-    enqueue_detached(mine::core::Function<void()>([p = std::move(promise), f = std::forward<F>(fn)]() mutable noexcept {
-        // 直接设置结果值（不抛异常）
-        p.set_value(f());
+    // 堆分配任务包装器（绕过 Function SBO 限制）
+    auto* task = new detail::EnqueueTask<R, std::decay_t<F>>(
+        std::move(promise), std::forward<F>(fn));
+
+    // 仅捕获一个指针（8 字节），始终适配 SBO
+    enqueue_detached(mine::core::Function<void()>([task]() noexcept {
+        task->execute();
+        delete task;
     }));
 
     return future;

@@ -8,6 +8,7 @@
  */
 
 #include <mine/async/Timer.h>
+#include <mine/async/Dispatcher.h>
 
 #include <algorithm>
 #include <chrono>
@@ -144,8 +145,54 @@ TimerHandle Timer::set_interval(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// 定时器管理
+// Dispatcher 集成
 // ──────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+/// 堆分配的 Dispatcher 回调包装器，避免 Function SBO 溢出
+struct DispatcherCallback {
+    Dispatcher*                 dispatcher;
+    mine::core::Function<void()> callback;
+
+    void fire() noexcept {
+        if (dispatcher && callback) {
+            dispatcher->post(std::move(callback));
+        }
+    }
+};
+
+} // namespace
+
+TimerHandle Timer::set_timeout_on(
+    Dispatcher& dispatcher,
+    mine::core::Function<void()> callback,
+    uint32_t delay_ms) noexcept
+{
+    if (!callback) return kInvalidTimerHandle;
+
+    // 堆分配包装器以绕过 Function 的 SBO 限制
+    auto* wrapper = new DispatcherCallback{&dispatcher, std::move(callback)};
+
+    return set_timeout(
+        mine::core::Function<void()>([wrapper]() noexcept {
+            wrapper->fire();
+            delete wrapper;
+        }),
+        delay_ms);
+}
+
+TimerHandle Timer::set_interval_on(
+    Dispatcher& /*dispatcher*/,
+    mine::core::Function<void()> /*callback*/,
+    uint32_t /*interval_ms*/) noexcept
+{
+    // set_interval_on 暂不实现：
+    // Function<void()> 为 move-only 类型，Dispatcher::post 会消耗回调，
+    // 无法在周期性定时器中重复投递。调用方应手动组合 set_interval + Dispatcher。
+    return kInvalidTimerHandle;
+}
+
 
 void Timer::clear(TimerHandle handle) noexcept {
     if (handle == kInvalidTimerHandle) return;

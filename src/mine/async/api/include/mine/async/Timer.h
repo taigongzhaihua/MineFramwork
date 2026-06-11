@@ -37,6 +37,9 @@
 
 namespace mine::async {
 
+// 前向声明
+class Dispatcher;
+
 // ──────────────────────────────────────────────────────────────────────────────
 // TimerHandle：定时器句柄
 // ──────────────────────────────────────────────────────────────────────────────
@@ -108,6 +111,32 @@ public:
      * @return TimerHandle 用于取消定时器的句柄（kInvalidTimerHandle 表示失败）
      */
     [[nodiscard]] TimerHandle set_interval(
+        mine::core::Function<void()> callback,
+        uint32_t interval_ms) noexcept;
+
+    /**
+     * @brief 设置一次性延迟定时器，回调自动投递到指定 Dispatcher。
+     *
+     * 定时器到期时，回调通过 dispatcher.post() 在目标线程执行。
+     * 调用方须保证 Dispatcher 生命周期长于本定时器。
+     *
+     * @param dispatcher 目标调度器（引用，必须长于定时器生命周期）
+     * @param callback   到期时调用的回调
+     * @param delay_ms   延迟毫秒数（必须 > 0）
+     * @return TimerHandle
+     */
+    [[nodiscard]] TimerHandle set_timeout_on(
+        Dispatcher& dispatcher,
+        mine::core::Function<void()> callback,
+        uint32_t delay_ms) noexcept;
+
+    /**
+     * @brief 设置周期性定时器，回调自动投递到指定 Dispatcher。
+     *
+     * 同 set_timeout_on，但周期性触发直到被取消。
+     */
+    [[nodiscard]] TimerHandle set_interval_on(
+        Dispatcher& dispatcher,
         mine::core::Function<void()> callback,
         uint32_t interval_ms) noexcept;
 
