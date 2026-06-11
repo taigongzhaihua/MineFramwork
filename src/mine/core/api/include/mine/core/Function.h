@@ -1,12 +1,12 @@
 /**
  * @file Function.h
- * @brief 移动语义函数包装器，带小缓冲区优化（SBO），不使用异常。
+ * @brief 移动语义函数包装器，SBO 优先 + 堆分配回退，不使用异常。
  *
  * 与 std::function 的差异：
  *   - 仅支持移动语义（不可拷贝），避免不必要的闭包复制
  *   - 所有接口均为 noexcept，符合项目禁用异常的要求
- *   - SBO 大小固定为 32 字节；超出时触发编译期 static_assert
- *   - 无堆分配，捕获列表必须 ≤ 32 字节且 noexcept 移动构造
+ *   - SBO 大小 32 字节；≤ 32 字节走内联快速路径
+ *   - 超出 32 字节自动回退到堆分配（无编译期限制）
  *
  * 典型用途：
  *   - mine.ui.binding 的 getter/setter 闭包
@@ -18,12 +18,18 @@
  *   int x = 42;
  *   mine::core::Function<int()> fn = [x]() noexcept { return x; };
  *   int result = fn(); // result == 42
+ *
+ *   // 大捕获自动走堆分配
+ *   LargeState s;
+ *   mine::core::Function<void()> fn2 = [s]() noexcept { s.process(); };
  * @endcode
  */
 
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <new>
 #include <type_traits>
 #include <utility>
@@ -39,15 +45,16 @@ class Function;
 /// @endcond
 
 /**
- * @brief 移动专用 SBO 函数包装器。
+ * @brief 移动专用函数包装器，SBO 优先 + 堆分配回退。
  *
  * @tparam R    可调用对象的返回类型
  * @tparam Args 可调用对象的参数类型列表
  *
- * 约束（编译期检查）：
- *   1. 被包装类型 F 的 sizeof(F) ≤ 32（超出则 static_assert 失败）
- *   2. alignof(F) ≤ alignof(max_align_t)
- *   3. F 必须为 noexcept 移动可构造（确保包装操作不抛异常）
+ * 约束：
+ *   1. alignof(F) ≤ alignof(max_align_t)
+ *   2. F 必须为 noexcept 移动可构造
+ *   3. sizeof(F) ≤ 32 → SBO 快速路径
+ *   4. sizeof(F)  > 32 → 自动堆分配（无上限）
  */
 template<class R, class... Args>
 class Function<R(Args...)> {
@@ -57,38 +64,49 @@ public:
     static constexpr size_t kSBOAlign = alignof(max_align_t);
 
 private:
-    /**
-     * @brief 类型操作虚表（函数指针表，替代 virtual dispatch，节省一个指针）。
-     *
-     * 每个被包装类型 Decay 对应一个静态实例，其地址即作为类型标识。
-     */
+    // ── 类型操作虚表 ─────────────────────────────────────────────────────
+
     struct Ops {
-        /// 调用 self 指针处的可调用对象，转发所有参数
-        R    (*invoke    )(void* self, Args...) noexcept;
-        /// 析构 self 指针处的对象（不释放内存，SBO 时对象内联存储）
-        void (*destroy   )(void* self) noexcept;
-        /// 从 src 移动构造到 dst，并析构 src（用于 Function 的移动操作）
-        void (*move_from )(void* dst, void* src) noexcept;
+        /// 调用：self 指向 Decay 对象（SBO）或 Decay* 首字节（堆）
+        R    (*invoke       )(void* self, Args...) noexcept;
+        /// 析构：SBO 调用 ~Decay()；堆 delete Decay*
+        void (*destroy      )(void* self) noexcept;
+        /// 移动：从 src 移动构造到 dst 并析构 src
+        void (*move_from    )(void* dst, void* src) noexcept;
     };
 
-    /// SBO 缓冲区：内联存储被包装对象
+    // ── 标记指针：ops_ 最低 bit 区分 SBO (0) / 堆 (1) ──────────────────
+
+    static constexpr uintptr_t kHeapTag = 1u;
+
+    [[nodiscard]] bool is_heap() const noexcept {
+        return (reinterpret_cast<uintptr_t>(ops_) & kHeapTag) != 0;
+    }
+
+    [[nodiscard]] const Ops* real_ops() const noexcept {
+        return reinterpret_cast<const Ops*>(
+            reinterpret_cast<uintptr_t>(ops_) & ~kHeapTag);
+    }
+
+    static const Ops* tag_heap(const Ops* p) noexcept {
+        return reinterpret_cast<const Ops*>(
+            reinterpret_cast<uintptr_t>(p) | kHeapTag);
+    }
+
+    // ── 数据成员 ─────────────────────────────────────────────────────────
+
+    /// SBO：内联存储对象；堆：首 8B 存储堆指针
     alignas(kSBOAlign) mutable char buf_[kSBOSize]{};
-    /// 当前存储类型的操作表指针；nullptr 表示空（未持有对象）
+    /// 操作表指针（最低位=1 表示堆模式）；nullptr 表示空
     const Ops* ops_ = nullptr;
 
 public:
-    // ── 构造 / 析构 ─────────────────────────────────────────────────────────
+    // ── 构造 / 析构 ─────────────────────────────────────────────────────
 
-    /// 默认构造：空状态，operator bool() 返回 false
     Function() noexcept = default;
 
     /**
-     * @brief 从任意可调用对象构造。
-     *
-     * 通过 SFINAE 排除 Function 自身，避免与移动构造冲突。
-     *
-     * @tparam F 可调用类型（lambda、函数指针等）
-     * @param f  可调用对象（右值引用，将被移动/拷贝到 SBO 缓冲区）
+     * @brief 从任意可调用对象构造（自动选择 SBO 或堆）。
      */
     template<
         class F,
@@ -96,48 +114,76 @@ public:
     Function(F&& f) noexcept {  // NOLINT(google-explicit-constructor)
         using Decay = std::decay_t<F>;
 
-        // 编译期约束检查
-        static_assert(sizeof(Decay) <= kSBOSize,
-            "Function: 捕获列表过大，超过 32 字节 SBO 上限，请减少捕获变量数量");
         static_assert(alignof(Decay) <= kSBOAlign,
-            "Function: 捕获列表的对齐要求超过 alignof(max_align_t)");
+            "Function: 捕获列表对齐超限");
         static_assert(std::is_nothrow_move_constructible_v<Decay>,
-            "Function: 被包装类型须为 noexcept 移动可构造，以确保 Function 整体 noexcept");
+            "Function: 被包装类型须为 noexcept 移动可构造");
 
-        // 为该 Decay 类型生成静态虚表（一个 Decay 类型仅有一份实例）
-        static const Ops ops{
-            // invoke：将缓冲区解释为 Decay 并转发调用
-            [](void* self, Args... args) noexcept -> R {
-                return (*static_cast<Decay*>(self))(std::forward<Args>(args)...);
-            },
-            // destroy：调用 Decay 析构函数（不释放内存，内联存储）
-            [](void* self) noexcept {
-                static_cast<Decay*>(self)->~Decay();
-            },
-            // move_from：从 src 移动构造到 dst，然后析构 src
-            [](void* dst, void* src) noexcept {
-                ::new(dst) Decay(std::move(*static_cast<Decay*>(src)));
-                static_cast<Decay*>(src)->~Decay();
-            }
-        };
-
-        // 将可调用对象移动/拷贝到 SBO 缓冲区
-        ::new(buf_) Decay(std::forward<F>(f));
-        ops_ = &ops;
+        if constexpr (sizeof(Decay) <= kSBOSize) {
+            // ── SBO 快速路径 ─────────────────────────────────────────────
+            static const Ops ops{
+                [](void* self, Args... args) noexcept -> R {
+                    return (*static_cast<Decay*>(self))(
+                        std::forward<Args>(args)...);
+                },
+                [](void* self) noexcept {
+                    static_cast<Decay*>(self)->~Decay();
+                },
+                [](void* dst, void* src) noexcept {
+                    ::new(dst) Decay(std::move(*static_cast<Decay*>(src)));
+                    static_cast<Decay*>(src)->~Decay();
+                }
+            };
+            ::new(buf_) Decay(std::forward<F>(f));
+            ops_ = &ops;
+        } else {
+            // ── 堆分配回退路径（ops 均接收 buf_，内部自行解引用）───────
+            static const Ops ops{
+                [](void* self, Args... args) noexcept -> R {
+                    void* ptr;
+                    std::memcpy(&ptr, self, sizeof(ptr));
+                    return (*static_cast<Decay*>(ptr))(
+                        std::forward<Args>(args)...);
+                },
+                [](void* self) noexcept {
+                    void* ptr;
+                    std::memcpy(&ptr, self, sizeof(ptr));
+                    delete static_cast<Decay*>(ptr);
+                },
+                [](void* dst, void* src) noexcept {
+                    void* ptr;
+                    std::memcpy(&ptr, src, sizeof(ptr));
+                    std::memcpy(dst, &ptr, sizeof(ptr));
+                    ptr = nullptr;
+                    std::memcpy(src, &ptr, sizeof(ptr));
+                }
+            };
+            auto* ptr = new Decay(std::forward<F>(f));
+            std::memcpy(buf_, &ptr, sizeof(ptr));
+            ops_ = tag_heap(&ops);
+        }
     }
 
     ~Function() noexcept { reset(); }
 
-    /// 移动构造：转移被包装对象的所有权，源变为空状态
+    /// 移动构造
     Function(Function&& o) noexcept {
         if (o.ops_) {
-            o.ops_->move_from(buf_, o.buf_);
-            ops_   = o.ops_;
-            o.ops_ = nullptr;
+            if (o.is_heap()) {
+                std::memcpy(buf_, o.buf_, sizeof(void*));
+                ops_ = o.ops_;
+                void* nullp = nullptr;
+                std::memcpy(o.buf_, &nullp, sizeof(nullp));
+                o.ops_ = nullptr;
+            } else {
+                o.real_ops()->move_from(buf_, o.buf_);
+                ops_   = o.ops_;
+                o.ops_ = nullptr;
+            }
         }
     }
 
-    /// 移动赋值：先销毁当前对象，再转移所有权
+    /// 移动赋值
     Function& operator=(Function&& o) noexcept {
         if (this != &o) {
             reset();
@@ -149,37 +195,21 @@ public:
     Function(const Function&)            = delete;
     Function& operator=(const Function&) = delete;
 
-    // ── 操作 ────────────────────────────────────────────────────────────────
+    // ── 操作 ────────────────────────────────────────────────────────────
 
-    /**
-     * @brief 清空包装对象，析构被包装类型，恢复为空状态。
-     */
     void reset() noexcept {
         if (ops_) {
-            ops_->destroy(buf_);
+            real_ops()->destroy(buf_);
             ops_ = nullptr;
         }
     }
 
-    /**
-     * @brief 检查是否持有有效的可调用对象。
-     *
-     * @return true  已持有可调用对象，可安全调用 operator()
-     * @return false 空状态，调用 operator() 会触发断言
-     */
     [[nodiscard]] explicit operator bool() const noexcept { return ops_ != nullptr; }
 
-    /**
-     * @brief 调用被包装的可调用对象。
-     *
-     * 空状态下调用触发 MINE_ASSERT。
-     *
-     * @param args 转发给被包装对象的参数
-     * @return 被包装对象的返回值
-     */
     R operator()(Args... args) const noexcept {
         MINE_ASSERT(ops_ != nullptr);
-        return ops_->invoke(buf_, std::forward<Args>(args)...);
+        return real_ops()->invoke(
+            const_cast<char*>(buf_), std::forward<Args>(args)...);
     }
 };
 

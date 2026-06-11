@@ -23,6 +23,21 @@
 
   测试覆盖：48 个单元测试（含协程、大捕获、Dispatcher 集成），101 个断言全部通过。
 
+### Changed
+- **mine.core::Function：SBO 升级为堆分配回退**：
+
+  `Function<R(Args...)>` 此前 32 字节 SBO 上限为硬编译期限制（`static_assert`），
+  超出即编译失败。本次升级为 `if constexpr` 分支：
+  - ≤ 32 字节：保持 SBO 内联快速路径（零开销）
+  - > 32 字节：自动回退到堆分配（`new`/`delete`），无上限
+  - 使用 `ops_` 指针最低 bit 标记堆/SBO 模式，`sizeof(Function)` 保持 40 字节不变
+  - 存量代码完全兼容，无需任何修改
+
+  受益：
+  - `mine.async` 中移除 `EnqueueTask`、`DispatcherCallback` 等 SBO 绕过包装器
+  - 恢复 `Task<T>::map()` monadic map 功能
+  - 消除 `ThreadPool::enqueue`、`Timer::set_timeout_on` 的捕获大小限制
+
 - **docs：新增模块元数据 API 文档 (~470 行)**：
 
   详细描述 `mine.ui.style` 模块的基础设施文件：

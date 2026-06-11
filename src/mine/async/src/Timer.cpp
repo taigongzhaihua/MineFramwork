@@ -149,22 +149,6 @@ TimerHandle Timer::set_interval(
 // Dispatcher 集成
 // ──────────────────────────────────────────────────────────────────────────────
 
-namespace {
-
-/// 堆分配的 Dispatcher 回调包装器，避免 Function SBO 溢出
-struct DispatcherCallback {
-    Dispatcher*                 dispatcher;
-    mine::core::Function<void()> callback;
-
-    void fire() noexcept {
-        if (dispatcher && callback) {
-            dispatcher->post(std::move(callback));
-        }
-    }
-};
-
-} // namespace
-
 TimerHandle Timer::set_timeout_on(
     Dispatcher& dispatcher,
     mine::core::Function<void()> callback,
@@ -172,13 +156,9 @@ TimerHandle Timer::set_timeout_on(
 {
     if (!callback) return kInvalidTimerHandle;
 
-    // 堆分配包装器以绕过 Function 的 SBO 限制
-    auto* wrapper = new DispatcherCallback{&dispatcher, std::move(callback)};
-
     return set_timeout(
-        mine::core::Function<void()>([wrapper]() noexcept {
-            wrapper->fire();
-            delete wrapper;
+        mine::core::Function<void()>([&dispatcher, cb = std::move(callback)]() mutable noexcept {
+            dispatcher.post(std::move(cb));
         }),
         delay_ms);
 }
@@ -190,17 +170,13 @@ TimerHandle Timer::set_interval_on(
 {
     if (!callback) return kInvalidTimerHandle;
 
-    // 使用 shared_ptr 共享回调所有权：
-    // - 定时器每次触发时通过 shared_ptr 访问原始回调（不消耗）
-    // - 每次创建新闭包投递到 Dispatcher（仅捕获 shared_ptr，适配 SBO）
+    // 使用 shared_ptr 共享回调：每次触发创建新闭包投递，不消耗原始回调
     auto shared_cb = std::make_shared<mine::core::Function<void()>>(std::move(callback));
 
     return set_interval(
         mine::core::Function<void()>([&dispatcher, shared_cb]() noexcept {
             dispatcher.post(mine::core::Function<void()>([shared_cb]() noexcept {
-                if (*shared_cb) {
-                    (*shared_cb)();
-                }
+                if (*shared_cb) (*shared_cb)();
             }));
         }),
         interval_ms);

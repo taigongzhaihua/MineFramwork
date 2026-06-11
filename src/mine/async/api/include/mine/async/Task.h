@@ -6,6 +6,7 @@
  *   - Task<T>::from_value(v)：立即就绪的任务
  *   - Task<T>::from_future(f)：包装 Future<T>
  *   - .then(continuation)：链式回调（结果就绪时调用）
+ *   - .map(transform)：变换结果类型（monadic map）
  *   - .get()：阻塞等待结果
  *   - co_return / co_await：C++20 协程支持
  *
@@ -252,6 +253,26 @@ public:
     Task<T>& then(mine::core::Function<void(mine::core::Result<T>)> callback) noexcept {
         future_.on_ready(std::move(callback));
         return *this;
+    }
+
+    /**
+     * @brief 变换任务结果类型（monadic map）。
+     *
+     * @tparam U 目标类型
+     * @param transform 变换函数 U(mine::core::Result<T>)
+     * @return Task<U> 新的异步任务
+     */
+    template<typename U>
+    [[nodiscard]] Task<U> map(mine::core::Function<U(mine::core::Result<T>)> transform) noexcept {
+        Promise<U> promise;
+        auto new_future = promise.get_future();
+
+        future_.on_ready(mine::core::Function<void(mine::core::Result<T>)>(
+            [p = std::move(promise), t = std::move(transform)](mine::core::Result<T> r) mutable noexcept {
+                p.set_value(t(std::move(r)));
+            }));
+
+        return Task<U>::from_future(std::move(new_future));
     }
 
 private:

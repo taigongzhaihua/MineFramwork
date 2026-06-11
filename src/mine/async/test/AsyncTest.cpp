@@ -242,6 +242,16 @@ TEST_CASE("Task_Then_Callback") {
     CHECK(received == 77);
 }
 
+TEST_CASE("Task_Map_Transform") {
+    auto task = Task<int>::from_value(10);
+
+    auto mapped = task.map<int>([](mine::core::Result<int> r) noexcept -> int {
+        return r.ok() ? r.value() * 2 : -1;
+    });
+
+    CHECK(mapped.get().value() == 20);
+}
+
 TEST_CASE("Task_DefaultConstructed_NotValid") {
     Task<int> t;
     CHECK_FALSE(t.valid());
