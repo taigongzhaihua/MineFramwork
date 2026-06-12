@@ -35,6 +35,7 @@
 | 20 | [20-style-template.md](20-style-template.md) | 样式、模板与主题系统设计 |
 | 21 | [21-core-api.md](21-core-api.md) | mine.core 模块 API 文档 |
 | 22 | [22-appearance-architecture.md](22-appearance-architecture.md) | 控件外观架构（基元绘制 + 组合装配 + DP↔DP 绑定） |
+| 23 | [23-io-module.md](23-io-module.md) | mine.io 模块：文件与 I/O API |
 
 ## 一句话定位
 
