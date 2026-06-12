@@ -48,6 +48,16 @@
 
 ### Changed
 
+- **控件架构重构阶段 3+4：ContentControl 自包含渲染 + CheckBox 迁移**：
+
+  ContentControl 合并原 ContentPresenter 的渲染能力（内联 TextBlock）：
+  - 新增 ForegroundProperty / FontSizeProperty / PaddingProperty
+  - set_foreground/set_font_size/set_font_face/set_text_alignment
+  - measure_override/arrange_override 自动委托给内联内容
+  - CheckBox 改为继承 ContentControl（统一内容 API）
+  - 测试：controls 50/50 通过，sample.02 构建通过
+
+
 - **控件架构重构阶段 2：新增 Primitive 基元控件层**：
 
   创建 Primitive 类（继承 Control），明确基元控件的职责边界（纯视觉叶子，不参与交互/无 VSM）。
@@ -156,6 +166,16 @@
   - 已集成到 `sample.01-mvvm-binding`，勾选切换深色/浅色主题
 
 ### Changed
+
+- **控件架构重构阶段 3+4：ContentControl 自包含渲染 + CheckBox 迁移**：
+
+  ContentControl 合并原 ContentPresenter 的渲染能力（内联 TextBlock）：
+  - 新增 ForegroundProperty / FontSizeProperty / PaddingProperty
+  - set_foreground/set_font_size/set_font_face/set_text_alignment
+  - measure_override/arrange_override 自动委托给内联内容
+  - CheckBox 改为继承 ContentControl（统一内容 API）
+  - 测试：controls 50/50 通过，sample.02 构建通过
+
 
 - **控件架构重构阶段 2：新增 Primitive 基元控件层**：
 
@@ -627,6 +647,16 @@
 
 ### Changed
 
+- **控件架构重构阶段 3+4：ContentControl 自包含渲染 + CheckBox 迁移**：
+
+  ContentControl 合并原 ContentPresenter 的渲染能力（内联 TextBlock）：
+  - 新增 ForegroundProperty / FontSizeProperty / PaddingProperty
+  - set_foreground/set_font_size/set_font_face/set_text_alignment
+  - measure_override/arrange_override 自动委托给内联内容
+  - CheckBox 改为继承 ContentControl（统一内容 API）
+  - 测试：controls 50/50 通过，sample.02 构建通过
+
+
 - **控件架构重构阶段 2：新增 Primitive 基元控件层**：
 
   创建 Primitive 类（继承 Control），明确基元控件的职责边界（纯视觉叶子，不参与交互/无 VSM）。
@@ -676,6 +706,16 @@
   同时移除 `samples/02-controls-demo` 中不必要的 `set_border_color()` 调用。
 
 ### Changed
+
+- **控件架构重构阶段 3+4：ContentControl 自包含渲染 + CheckBox 迁移**：
+
+  ContentControl 合并原 ContentPresenter 的渲染能力（内联 TextBlock）：
+  - 新增 ForegroundProperty / FontSizeProperty / PaddingProperty
+  - set_foreground/set_font_size/set_font_face/set_text_alignment
+  - measure_override/arrange_override 自动委托给内联内容
+  - CheckBox 改为继承 ContentControl（统一内容 API）
+  - 测试：controls 50/50 通过，sample.02 构建通过
+
 
 - **控件架构重构阶段 2：新增 Primitive 基元控件层**：
 
@@ -834,6 +874,16 @@
     `find_template_child("content")` 绑定同名 Part，计数功能透明延续，展示 WPF 换模板不换功能的设计。
 
 ### Changed
+
+- **控件架构重构阶段 3+4：ContentControl 自包含渲染 + CheckBox 迁移**：
+
+  ContentControl 合并原 ContentPresenter 的渲染能力（内联 TextBlock）：
+  - 新增 ForegroundProperty / FontSizeProperty / PaddingProperty
+  - set_foreground/set_font_size/set_font_face/set_text_alignment
+  - measure_override/arrange_override 自动委托给内联内容
+  - CheckBox 改为继承 ContentControl（统一内容 API）
+  - 测试：controls 50/50 通过，sample.02 构建通过
+
 
 - **控件架构重构阶段 2：新增 Primitive 基元控件层**：
 
@@ -1276,6 +1326,16 @@
   - 新增至 `AnimationAll.h` 伞形头文件
 
 ### Changed
+
+- **控件架构重构阶段 3+4：ContentControl 自包含渲染 + CheckBox 迁移**：
+
+  ContentControl 合并原 ContentPresenter 的渲染能力（内联 TextBlock）：
+  - 新增 ForegroundProperty / FontSizeProperty / PaddingProperty
+  - set_foreground/set_font_size/set_font_face/set_text_alignment
+  - measure_override/arrange_override 自动委托给内联内容
+  - CheckBox 改为继承 ContentControl（统一内容 API）
+  - 测试：controls 50/50 通过，sample.02 构建通过
+
 
 - **控件架构重构阶段 2：新增 Primitive 基元控件层**：
 
