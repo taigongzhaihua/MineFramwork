@@ -5,6 +5,18 @@
 ## [Unreleased]
 
 ### Added
+- **mine.reflect：实现 L0 静态反射模块**：
+
+  完整实现 `mine.reflect` 模块，提供编译期类型注册与运行期元数据查询能力：
+  - **TypeInfo**：类型元数据描述符（类型名、TypeId、基类指针、属性/方法列表、is_a 继承判断）
+  - **PropertyInfo**：属性描述符（名称、值类型 TypeId、getter/setter 函数指针）
+  - **MethodInfo**：方法描述符（名称、返回类型、参数类型列表、invoke 函数指针）
+  - **TypeRegistry**：全局类型注册表单例（按名称/按 TypeId 查找、枚举所有已注册类型）
+  - **MINE_REFLECT_DECL() / MINE_REFLECT_IMPL()**：声明式反射注册宏（头文件声明 + cpp 文件注册）
+  - **MINE_PROP_ENTRY()**：属性条目宏（显式指定类型、getter、setter，编译期类型安全）
+
+  测试覆盖：18 个单元测试、43 个断言全部通过。
+
 - **mine.io：实现 L0 文件/IO 模块**：
 
   完整实现 `mine.io` 模块，提供跨平台文件系统操作能力（Win32 优先）：
