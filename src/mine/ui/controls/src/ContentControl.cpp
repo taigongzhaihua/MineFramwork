@@ -47,6 +47,9 @@ void ContentControl::s_on_content_changed(DependencyObject* s, const DependencyP
                                           const core::Variant& o, const core::Variant& n) noexcept
 {
     auto* self = static_cast<ContentControl*>(s);
+
+    // 复合控件（如 Button）通过 inner_element+ContentPresenter 自行处理内容渲染，
+    // 这里只有简单控件（如独立使用的 ContentControl）才创建内联 TextBlock。
     if (n.has<containers::InlineString>() && !self->inner_element()) {
         if (!self->inline_text_block_) {
             self->inline_text_block_ = MINE_NEW(TextBlock);
@@ -60,7 +63,7 @@ void ContentControl::s_on_content_changed(DependencyObject* s, const DependencyP
         const auto& str = n.get<containers::InlineString>();
         self->inline_text_block_->set_text(core::StringView{str.data(), str.size()});
         self->content_element_ = nullptr;
-    } else {
+    } else if (!self->inner_element()) {
         if (self->inline_text_block_) self->inline_text_block_->set_text({});
         self->content_element_ = nullptr;
     }
@@ -140,11 +143,14 @@ void ContentControl::set_font_face(void* ff) noexcept { font_face_ = ff; if (inl
 void ContentControl::set_text_alignment(TextAlignment a) noexcept { text_alignment_cache_ = a; if (inline_text_block_) inline_text_block_->set_text_alignment(a); }
 
 // ============================================================================
-// 布局（measure_override / arrange_override）
+// 布局：优先 inner_element（复合控件如 Button 的视觉树），其次内联渲染
 // ============================================================================
 
 math::Size ContentControl::measure_override(math::Size available)
 {
+    if (inner_element()) {
+        return Control::measure_override(available);
+    }
     if (inline_text_block_) {
         inline_text_block_->measure(available);
         return inline_text_block_->desired_size();
@@ -153,22 +159,21 @@ math::Size ContentControl::measure_override(math::Size available)
         content_element_->measure(available);
         return content_element_->desired_size();
     }
-    return Control::measure_override(available);
+    return {0, 0};
 }
 
 math::Size ContentControl::arrange_override(math::Size final_size)
 {
+    if (inner_element()) {
+        return Control::arrange_override(final_size);
+    }
     if (inline_text_block_) {
         inline_text_block_->arrange(bounds_rect());
     } else if (content_element_) {
         content_element_->arrange(bounds_rect());
     }
-    return Control::arrange_override(final_size);
+    return final_size;
 }
-
-// ============================================================================
-// 钩子
-// ============================================================================
 
 void ContentControl::on_content_changed(const core::Variant&, const core::Variant&) noexcept {}
 
