@@ -48,6 +48,13 @@
 
 ### Changed
 
+- **控件架构重构阶段 2：新增 Primitive 基元控件层**：
+
+  创建 Primitive 类（继承 Control），明确基元控件的职责边界（纯视觉叶子，不参与交互/无 VSM）。
+  - Border → Primitive；TextBlock → Primitive
+  - 测试：controls 50/50 通过
+
+
 - **控件架构重构阶段 1：提取 InteractableControl 可交互控件基类**：
 
   将 Button 与 CheckBox 间约 200 行重复交互逻辑提取到新基类：
@@ -149,6 +156,13 @@
   - 已集成到 `sample.01-mvvm-binding`，勾选切换深色/浅色主题
 
 ### Changed
+
+- **控件架构重构阶段 2：新增 Primitive 基元控件层**：
+
+  创建 Primitive 类（继承 Control），明确基元控件的职责边界（纯视觉叶子，不参与交互/无 VSM）。
+  - Border → Primitive；TextBlock → Primitive
+  - 测试：controls 50/50 通过
+
 
 - **控件架构重构阶段 1：提取 InteractableControl 可交互控件基类**：
 
@@ -613,6 +627,13 @@
 
 ### Changed
 
+- **控件架构重构阶段 2：新增 Primitive 基元控件层**：
+
+  创建 Primitive 类（继承 Control），明确基元控件的职责边界（纯视觉叶子，不参与交互/无 VSM）。
+  - Border → Primitive；TextBlock → Primitive
+  - 测试：controls 50/50 通过
+
+
 - **控件架构重构阶段 1：提取 InteractableControl 可交互控件基类**：
 
   将 Button 与 CheckBox 间约 200 行重复交互逻辑提取到新基类：
@@ -655,6 +676,13 @@
   同时移除 `samples/02-controls-demo` 中不必要的 `set_border_color()` 调用。
 
 ### Changed
+
+- **控件架构重构阶段 2：新增 Primitive 基元控件层**：
+
+  创建 Primitive 类（继承 Control），明确基元控件的职责边界（纯视觉叶子，不参与交互/无 VSM）。
+  - Border → Primitive；TextBlock → Primitive
+  - 测试：controls 50/50 通过
+
 
 - **控件架构重构阶段 1：提取 InteractableControl 可交互控件基类**：
 
@@ -806,6 +834,13 @@
     `find_template_child("content")` 绑定同名 Part，计数功能透明延续，展示 WPF 换模板不换功能的设计。
 
 ### Changed
+
+- **控件架构重构阶段 2：新增 Primitive 基元控件层**：
+
+  创建 Primitive 类（继承 Control），明确基元控件的职责边界（纯视觉叶子，不参与交互/无 VSM）。
+  - Border → Primitive；TextBlock → Primitive
+  - 测试：controls 50/50 通过
+
 
 - **控件架构重构阶段 1：提取 InteractableControl 可交互控件基类**：
 
@@ -1241,6 +1276,13 @@
   - 新增至 `AnimationAll.h` 伞形头文件
 
 ### Changed
+
+- **控件架构重构阶段 2：新增 Primitive 基元控件层**：
+
+  创建 Primitive 类（继承 Control），明确基元控件的职责边界（纯视觉叶子，不参与交互/无 VSM）。
+  - Border → Primitive；TextBlock → Primitive
+  - 测试：controls 50/50 通过
+
 
 - **控件架构重构阶段 1：提取 InteractableControl 可交互控件基类**：
 

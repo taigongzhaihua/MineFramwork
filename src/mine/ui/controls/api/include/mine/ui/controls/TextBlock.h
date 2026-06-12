@@ -9,7 +9,7 @@
 #pragma once
 
 #include <mine/ui/controls/Api.h>
-#include <mine/ui/visual/Control.h>
+#include <mine/ui/controls/Primitive.h>
 #include <mine/ui/property/DependencyProperty.h>
 #include <mine/containers/InlineString.h>
 #include <mine/containers/SmallVector.h>
@@ -64,7 +64,7 @@ enum class TextTrimming : uint8_t {
  *  - CharacterSpacingProperty：字符间额外间距（px）
  *  - MaxLinesProperty：最大显示行数（0 = 不限制）
  */
-class MINE_UI_CONTROLS_API TextBlock : public Control {
+class MINE_UI_CONTROLS_API TextBlock : public Primitive {
 public:
     // ── 依赖属性 ───────────────────────────────────────────────────────────
 

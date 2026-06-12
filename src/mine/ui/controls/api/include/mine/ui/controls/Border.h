@@ -12,7 +12,7 @@
 #pragma once
 
 #include <mine/ui/controls/Api.h>
-#include <mine/ui/visual/Control.h>
+#include <mine/ui/controls/Primitive.h>
 #include <mine/core/Memory.h>
 #include <mine/math/Thickness.h>
 #include <mine/math/CornerRadii.h>
@@ -32,7 +32,7 @@ namespace mine::ui {
  * 所有视觉属性均为 DependencyProperty（单一真相源），可被样式、动画、
  * bind_property 绑定统一驱动。
  */
-class MINE_UI_CONTROLS_API Border : public Control {
+class MINE_UI_CONTROLS_API Border : public Primitive {
 public:
     // ── 依赖属性（外观真相源）────────────────────────────────────────────
 
