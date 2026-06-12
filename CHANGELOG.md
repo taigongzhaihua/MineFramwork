@@ -5,6 +5,17 @@
 ## [Unreleased]
 
 ### Added
+- **mine.io：实现 L0 文件/IO 模块**：
+
+  完整实现 `mine.io` 模块，提供跨平台文件系统操作能力（Win32 优先）：
+  - **Path**：跨平台路径操作（正斜杠规范化、".."和"."解析、拼接、组件查询、扩展名处理）
+  - **File**：文件读写（打开/关闭、读/写、定位/大小、刷新、追加），`Result<T>` 错误处理
+  - **FileSystem**：文件系统操作（exists/stat/目录遍历/创建删除目录/文件重命名复制/环境路径）
+  - **MemMap**：内存映射文件（只读/读写/写时复制映射、span 视图、flush 同步）
+  - **PipeStream**：缓冲流式读写（行读取/行写入、缓冲自动刷新、append 模式）
+
+  测试覆盖：50 个单元测试（Path 23/File 7/FileSystem 12/MemMap 3/PipeStream 5），全部通过。
+
 - **mine.async：实现 L0 异步任务调度模块**：
 
   完整实现 `mine.async` 模块，提供异步基础设施：
