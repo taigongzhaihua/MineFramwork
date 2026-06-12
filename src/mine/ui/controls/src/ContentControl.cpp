@@ -47,7 +47,7 @@ void ContentControl::s_on_content_changed(DependencyObject* s, const DependencyP
                                           const core::Variant& o, const core::Variant& n) noexcept
 {
     auto* self = static_cast<ContentControl*>(s);
-    if (n.has<containers::InlineString>()) {
+    if (n.has<containers::InlineString>() && !self->inner_element()) {
         if (!self->inline_text_block_) {
             self->inline_text_block_ = MINE_NEW(TextBlock);
             self->inline_text_block_->set_font_face(self->font_face_);
