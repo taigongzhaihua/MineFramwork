@@ -1,6 +1,6 @@
 #pragma once
 #include <mine/ui/controls/Api.h>
-#include <mine/ui/visual/Control.h>
+#include <mine/ui/controls/InteractableControl.h>
 #include <mine/ui/event/RoutedEvent.h>
 #include <mine/ui/property/DependencyProperty.h>
 #include <mine/paint/Brush.h>
@@ -45,7 +45,7 @@ class TextBlock;
  *     - Checked: Primary 底 + Primary 边框 + 白色勾号（120ms 缓动）
  *     - 切换时先停止交互组 Storyboard，再启动自身动画
  */
-class MINE_UI_CONTROLS_API CheckBox : public Control {
+class MINE_UI_CONTROLS_API CheckBox : public InteractableControl {
 public:
     // ── 路由事件 ───────────────────────────────────────────────────────────
 

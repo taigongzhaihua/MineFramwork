@@ -22,7 +22,7 @@
 #pragma once
 
 #include <mine/ui/controls/Api.h>
-#include <mine/ui/visual/Control.h>
+#include <mine/ui/controls/InteractableControl.h>
 #include <mine/ui/property/DependencyProperty.h>
 #include <mine/containers/InlineString.h>
 #include <mine/core/StringView.h>
@@ -43,7 +43,7 @@ namespace mine::ui {
  * 注意：ContentControl 自身不含渲染逻辑；具体控件通过 ControlTemplate
  * 中的 ContentPresenter 展示内容。
  */
-class MINE_UI_CONTROLS_API ContentControl : public Control {
+class MINE_UI_CONTROLS_API ContentControl : public InteractableControl {
 public:
     // ── 依赖属性 ──────────────────────────────────────────────────────────
 

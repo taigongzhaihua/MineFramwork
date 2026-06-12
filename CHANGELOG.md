@@ -47,6 +47,15 @@
   测试覆盖：48 个单元测试（含协程、大捕获、Dispatcher 集成），101 个断言全部通过。
 
 ### Changed
+
+- **控件架构重构阶段 1：提取 InteractableControl 可交互控件基类**：
+
+  将 Button 与 CheckBox 间约 200 行重复交互逻辑提取到新基类：
+  - 新增 InteractableControl（继承 Control），提供 is_hovered/is_pressed/is_disabled 状态管理
+  - 鼠标事件路由桩 + StateLayerBrushProperty + 默认交互 VSM 自动配置
+  - ContentControl → InteractableControl（影响 Button）；CheckBox → InteractableControl
+  - 测试：controls 50/50 通过，sample.02 构建通过
+
 - **mine.core::Function：SBO 升级为堆分配回退**：
 
   `Function<R(Args...)>` 此前 32 字节 SBO 上限为硬编译期限制（`static_assert`），
@@ -140,6 +149,15 @@
   - 已集成到 `sample.01-mvvm-binding`，勾选切换深色/浅色主题
 
 ### Changed
+
+- **控件架构重构阶段 1：提取 InteractableControl 可交互控件基类**：
+
+  将 Button 与 CheckBox 间约 200 行重复交互逻辑提取到新基类：
+  - 新增 InteractableControl（继承 Control），提供 is_hovered/is_pressed/is_disabled 状态管理
+  - 鼠标事件路由桩 + StateLayerBrushProperty + 默认交互 VSM 自动配置
+  - ContentControl → InteractableControl（影响 Button）；CheckBox → InteractableControl
+  - 测试：controls 50/50 通过，sample.02 构建通过
+
 - **mine.ui.controls：TextBox 外观组合式重构下沉到 Border 基元**：
 
   TextBox 此前全在 on_render（约 180 行）手画背景填充、hover 蒙版、四边描边、文本、
@@ -594,6 +612,15 @@
   `set_value` / `clear_value` 均同步更新。
 
 ### Changed
+
+- **控件架构重构阶段 1：提取 InteractableControl 可交互控件基类**：
+
+  将 Button 与 CheckBox 间约 200 行重复交互逻辑提取到新基类：
+  - 新增 InteractableControl（继承 Control），提供 is_hovered/is_pressed/is_disabled 状态管理
+  - 鼠标事件路由桩 + StateLayerBrushProperty + 默认交互 VSM 自动配置
+  - ContentControl → InteractableControl（影响 Button）；CheckBox → InteractableControl
+  - 测试：controls 50/50 通过，sample.02 构建通过
+
 - **mine.ui.visual / mine.ui.controls：Qt Widget 风格渲染/命中/裁剪架构重设计**：
 
   废除 ControlTemplate 后，控件的绘制、命中、裁剪边界架构参照 Qt Widget 原则重新统一：
@@ -628,6 +655,15 @@
   同时移除 `samples/02-controls-demo` 中不必要的 `set_border_color()` 调用。
 
 ### Changed
+
+- **控件架构重构阶段 1：提取 InteractableControl 可交互控件基类**：
+
+  将 Button 与 CheckBox 间约 200 行重复交互逻辑提取到新基类：
+  - 新增 InteractableControl（继承 Control），提供 is_hovered/is_pressed/is_disabled 状态管理
+  - 鼠标事件路由桩 + StateLayerBrushProperty + 默认交互 VSM 自动配置
+  - ContentControl → InteractableControl（影响 Button）；CheckBox → InteractableControl
+  - 测试：controls 50/50 通过，sample.02 构建通过
+
 - **mine.ui.visual / mine.ui.style / mine.ui.controls：废除 ControlTemplate 设计，改为 QWidget 继承风格**：
   移除 `ControlTemplate` / `TemplateRegistry` / `bind_template` / `on_apply_template` /
   `find_template_child` / `set_template_slot` / `set_control_template` / `Control::TemplateProperty`
@@ -770,6 +806,15 @@
     `find_template_child("content")` 绑定同名 Part，计数功能透明延续，展示 WPF 换模板不换功能的设计。
 
 ### Changed
+
+- **控件架构重构阶段 1：提取 InteractableControl 可交互控件基类**：
+
+  将 Button 与 CheckBox 间约 200 行重复交互逻辑提取到新基类：
+  - 新增 InteractableControl（继承 Control），提供 is_hovered/is_pressed/is_disabled 状态管理
+  - 鼠标事件路由桩 + StateLayerBrushProperty + 默认交互 VSM 自动配置
+  - ContentControl → InteractableControl（影响 Button）；CheckBox → InteractableControl
+  - 测试：controls 50/50 通过，sample.02 构建通过
+
 - **mine.ui.visual：`Control::TemplateProperty` DP（WPF 风格模板属性）**：
   新增 `Control::TemplateProperty`（存储 `const style::ControlTemplate*`），
   用户通过 `set_control_template(tmpl)` 写入 Local(P2) 槽以替换整个控件模板；
@@ -1196,6 +1241,15 @@
   - 新增至 `AnimationAll.h` 伞形头文件
 
 ### Changed
+
+- **控件架构重构阶段 1：提取 InteractableControl 可交互控件基类**：
+
+  将 Button 与 CheckBox 间约 200 行重复交互逻辑提取到新基类：
+  - 新增 InteractableControl（继承 Control），提供 is_hovered/is_pressed/is_disabled 状态管理
+  - 鼠标事件路由桩 + StateLayerBrushProperty + 默认交互 VSM 自动配置
+  - ContentControl → InteractableControl（影响 Button）；CheckBox → InteractableControl
+  - 测试：controls 50/50 通过，sample.02 构建通过
+
 - **samples/02-controls-demo（改造为继承模式+code-behind五文件分工）**：
   将示例从组合模式（持有 `win_` 成员的包装类）重构为继承模式，完整体现 `docs/04-precompiler.md §4.4.2` 的设计契约：
   - `mine::ui::Window::~Window()` 改为 `virtual`，支持 `DemoWindowBase` 继承
