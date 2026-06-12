@@ -37,6 +37,7 @@
 | 22 | [22-appearance-architecture.md](22-appearance-architecture.md) | 控件外观架构（基元绘制 + 组合装配 + DP↔DP 绑定） |
 | 23 | [23-io-module.md](23-io-module.md) | mine.io 模块：文件与 I/O API |
 | 24 | [api/reflect/](api/reflect/06-Reflect.md) | mine.reflect 模块：静态反射 API |
+| 25 | [24-controls-architecture-redesign.md](24-controls-architecture-redesign.md) | 控件架构重新设计方案 |
 
 ## 一句话定位
 
